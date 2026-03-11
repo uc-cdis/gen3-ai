@@ -1,0 +1,42 @@
+[project]
+name = "common"
+version = "0.1.0"
+description = "Gen3 AI Common/Shared Dependencies"
+requires-python = "~=3.13.0"
+dependencies = [
+  "asyncpg>=0.31.0",
+  "authutils>=7.2.5",
+  "cdislogging>=1.2.0",
+  "click>=8.3.1",
+  "fastapi>=0.128.0",
+  "gen3authz>=3.0.1",
+  "gunicorn>=25.1.0",
+  "opentelemetry-api>=1.39.1",
+  "opentelemetry-exporter-otlp>=1.39.1",
+  "opentelemetry-instrumentation-fastapi>=0.60b1",
+  "opentelemetry-sdk>=1.39.1",
+  "prometheus-client>=0.24.1",
+  "starlette>=0.52.1",
+  "uvicorn>=0.41.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "pytest-xdist",
+    "pyright",
+    "pylint>=4.0.5",
+    "deptry>=0.24.0",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["common"]

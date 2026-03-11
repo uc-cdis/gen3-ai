@@ -1,0 +1,52 @@
+[project]
+name = "gen3_inference"
+version = "0.1.0"
+description = "Gen3 Inference"
+dependencies = ["common"]
+requires-python = "~=3.13.0"
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+package = true
+
+[tool.uv.workspace]
+members = [
+    "../../libraries/*",
+]
+
+[tool.uv.sources]
+common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gen3_inference"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["common"]
+
+# anything in libraries/common we need to add here
+# b/c deptry will see it as a transitive dependency but
+# we actually WANT it to NOT be in both the service and
+# libraries/common. So this is intentional / by design
+# for shared libraries.
+DEP003 = [
+    "authutils",
+    "asyncpg",
+    "cdislogging",
+    "click",
+    "fastapi",
+    "gen3authz",
+    "gunicorn",
+    "opentelemetry-api",
+    "opentelemetry-exporter-otlp",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-sdk",
+    "prometheus-client",
+    "starlette",
+    "uvicorn",
+]

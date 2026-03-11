@@ -1,0 +1,56 @@
+# push will run on every pushed commit to any branch (so this will rerun the tests
+# once a branch gets merged to main in addition to any new commits on any branch)
+on: push
+
+name: Automation
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  RequiredLint:
+    name: Run Required Linters
+    uses: uc-cdis/.github/.github/workflows/required_lint_check.yaml@fix/linting
+    with:
+      python-version: '3.13'
+      use-cache: true
+
+  Security:
+    name: Security Pipeline
+    needs: [ RequiredLint ]
+    uses: uc-cdis/.github/.github/workflows/securitypipeline.yaml@master
+    with:
+       python-poetry: 'true'
+    secrets: inherit
+
+  JustLint:
+    name: just lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TODO: Python setup, uv install, just install
+      - run: just lint
+
+  # TODO: replace with just test
+  # UnitTest:
+  #   name: Python Unit Test
+  #   needs: [ RequiredLint ]
+  #   uses: uc-cdis/.github/.github/workflows/python_unit_test.yaml@master
+  #   with:
+  #      test-script: 'tests/ci_commands_script.sh'
+  #      python-version: '3.13'
+  #      use-cache: true
+
+  # TODO: replace with just build somehow...
+  # ImageBuildAndPush:
+  #   name: Build Image and Push
+  #   uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
+  #   needs: [RequiredLint, Security, UnitTest]
+  #   with:
+  #     BUILD_PLATFORMS: "linux/amd64"
+  #   secrets:
+  #     ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+  #     ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+  #     QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+  #     QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
