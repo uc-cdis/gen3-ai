@@ -36,12 +36,11 @@ jobs:
     steps:
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/$UV_VERSION/install.sh | sh
+          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
 
-      - uses: extractions/setup-just@v3
-        name: Install just
+      - uses: taiki-e/install-action@v2
         with:
-          just-version: $JUST_VERSION
+          tool: cargo-hack@${{ env.JUST_VERSION }}
 
       - name: just setup
         run: |
