@@ -12,6 +12,10 @@ jobs:
   post-commit:
     name: Post-Commit Validation of Pre-Commit Checks
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/linting
+    with:
+      UV_VERSION: '0.10.9'
+      JUST_VERSION: '1.46.0'
+    secrets: inherit
 
   security:
     name: Security Pipeline
@@ -25,16 +29,19 @@ jobs:
     # TODO: enable when security and post-commit work reliably
     # needs: [ security, post-commit ]
     runs-on: ubuntu-latest
+    env:
+      UV_VERSION: '0.10.9'
+      JUST_VERSION: '1.46.0'
 
     steps:
       - name: Install uv
         run: |
-          pip install --upgrade pip
-          pip list
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          curl -LsSf https://astral.sh/uv/$UV_VERSION/install.sh | sh
 
       - uses: extractions/setup-just@v3
         name: Install just
+        with:
+          just-version: $JUST_VERSION
 
       - name: just setup
         run: |
