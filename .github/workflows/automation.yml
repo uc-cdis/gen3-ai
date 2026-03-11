@@ -9,51 +9,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  RequiredLint:
-    name: Run Required Linters
-    uses: uc-cdis/.github/.github/workflows/required_lint_check.yaml@fix/linting
-    with:
-      python-version: '3.13'
-      use-cache: true
+  post-commit:
+    name: Post-Commit Validation of Pre-Commit Checks
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/linting
 
-  Security:
+  security:
     name: Security Pipeline
-    # needs: [ RequiredLint ]
     uses: uc-cdis/.github/.github/workflows/securitypipeline.yaml@master
     with:
        python-poetry: 'true'
     secrets: inherit
 
-  JustLint:
-    name: just lint
+  unit-test:
+    name: Python Unit Test
+    # TODO: enable when security and post-commit work reliably
+    # needs: [ security, post-commit ]
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Install uv
+        run: |
+          pip install --upgrade pip
+          pip list
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
       - uses: extractions/setup-just@v3
-        with:
-          just-version: 1.46.0
-      - run: curl -LsSf https://astral.sh/uv/install.sh | sh
-      - run: just lint
+        name: Install just
 
-  # TODO: replace with just test
-  # UnitTest:
-  #   name: Python Unit Test
-  #   needs: [ RequiredLint ]
-  #   uses: uc-cdis/.github/.github/workflows/python_unit_test.yaml@master
-  #   with:
-  #      test-script: 'tests/ci_commands_script.sh'
-  #      python-version: '3.13'
-  #      use-cache: true
+      - name: just setup
+        run: |
+          just setup
 
-  # TODO: replace with just build somehow...
-  # ImageBuildAndPush:
-  #   name: Build Image and Push
-  #   uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-  #   needs: [RequiredLint, Security, UnitTest]
-  #   with:
-  #     BUILD_PLATFORMS: "linux/amd64"
-  #   secrets:
-  #     ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
-  #     ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
-  #     QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
-  #     QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+      - name: just install
+        run: |
+          just install
+
+      - name: just test
+        run: |
+          just test
+
+  image-build-push-1:
+    name: Build Image and Push - Gen3 Embeddings
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
+    needs: [post-commit, security, unit-test]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_embeddings" .'
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+  image-build-push-2:
+    name: Build Image and Push - Gen3 Inference
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
+    needs: [post-commit, security, unit-test, image-build-push-1]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_inference" .'
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+  image-build-push-3:
+    name: Build Image and Push - Gen3 AI Model Repo
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
+    needs: [post-commit, security, unit-test, image-build-push-2]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_ai_model_repo" .'
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
