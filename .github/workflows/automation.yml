@@ -40,7 +40,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-hack@${{ env.JUST_VERSION }}
+          tool: just@${{ env.JUST_VERSION }}
 
       - name: just setup
         run: |
