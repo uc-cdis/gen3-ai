@@ -32,8 +32,22 @@ jobs:
     env:
       UV_VERSION: '0.10.9'
       JUST_VERSION: '1.46.0'
+      PYTHON_VERSION: '3.13'
 
     steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: python info
+        run: python --version
+
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
