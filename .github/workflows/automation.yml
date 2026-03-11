@@ -18,7 +18,7 @@ jobs:
 
   Security:
     name: Security Pipeline
-    needs: [ RequiredLint ]
+    # needs: [ RequiredLint ]
     uses: uc-cdis/.github/.github/workflows/securitypipeline.yaml@master
     with:
        python-poetry: 'true'
@@ -29,7 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # TODO: Python setup, uv install, just install
+      - uses: extractions/setup-just@v3
+        with:
+          just-version: 1.46.0
+      - run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - run: just lint
 
   # TODO: replace with just test
