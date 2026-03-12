@@ -35,6 +35,7 @@ jobs:
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
+      PGUSER: 'postgres'
 
     steps:
       - name: Check out code
