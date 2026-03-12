@@ -103,7 +103,7 @@ jobs:
     needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
-      DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_ai_model_repo" .'
+      DOCKERFILE_BUILD_CONTEXT: --build-arg "SERVICE_NAME=gen3_ai_model_repo" .
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
