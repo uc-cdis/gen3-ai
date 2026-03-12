@@ -27,7 +27,7 @@ jobs:
   unit-test:
     name: Python Unit Test
     # TODO: enable when security and post-commit work reliably
-    # needs: [ security, post-commit ]
+    # needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.10.9'
@@ -73,7 +73,7 @@ jobs:
   image-build-push-1:
     name: Build Image and Push - Gen3 Embeddings
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [post-commit, security, unit-test]
+    needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_embeddings" .'
@@ -86,7 +86,7 @@ jobs:
   image-build-push-2:
     name: Build Image and Push - Gen3 Inference
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [post-commit, security, unit-test, image-build-push-1]
+    needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_inference" .'
@@ -99,7 +99,7 @@ jobs:
   image-build-push-3:
     name: Build Image and Push - Gen3 AI Model Repo
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [post-commit, security, unit-test, image-build-push-2]
+    needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '--build-arg SERVICE_NAME="gen3_ai_model_repo" .'
