@@ -26,24 +26,27 @@ setup:
       exit 1
   fi
 
-  # TODO check if postgres username and password are available, error if not and tell to set in
-  # .env file
-
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
       print_header "just setup:" "setting up postgres db for" "${dir#services/}" "service..."
 
-      if [ ! -f .env ]; then
-        echo "${RED}** ERROR: .env file not found in "${dir}". Please create one. **${RESET}"
+      if [ ! -f "${dir}/.env" ]; then
+        echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
+      else
+        echo "Found .env file. Using it to set up database."
+        set -a
+          source "${dir}/.env"
+        set +a
       fi
 
-      set -a
-        source "${dir}/.env"
-      set +a
+      if [[ -z ${PGDATABASE:-} ]]; then
+        echo "PGDATABASE not set, using ${dir#services/}..."
+        export PGDATABASE="${dir#services/}"
+      fi
 
       psql \
-        -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" \
-        -c "CREATE DATABASE \"${DB_NAME}\" WITH OWNER \"${DB_USER}\";" \
+        -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+        -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
         2>/dev/null || echo "Database already exists."
 
       # TODO: db migration / initial setup
@@ -78,6 +81,8 @@ lock $SERVICE="all":
     print_header "just lock:" "locking" "$SERVICE" "service..."
 
     uv lock --directory "./services/$SERVICE" --upgrade
+
+    just install "$SERVICE"
   fi
 
 test $SERVICE="all":

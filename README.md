@@ -65,11 +65,11 @@ To get started, we need database info:
 `.env` example contents per `/service/{service}` directory:
 
 ```text
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_NAME={service}
+PGHOST=localhost
+PGPORT=5432
+PGUSER=postgres
+PGPASSWORD=postgres
+PGDATABASE={service}
 ```
 
 Once you have the above, you can:

@@ -9,8 +9,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  post-commit:
-    name: Post-Commit Validation of Pre-Commit Checks
+  post-commit-check:
+    name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/linting
     with:
       UV_VERSION: '0.10.9'
@@ -33,6 +33,8 @@ jobs:
       UV_VERSION: '0.10.9'
       JUST_VERSION: '1.46.0'
       PYTHON_VERSION: '3.13'
+      PGHOST: 'localhost'
+      PGPORT: 5432
 
     steps:
       - name: Check out code
