@@ -1,20 +1,104 @@
+# Modified from default ruff config from Astral
+#
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
 line-length = 120
+indent-width = 4
+
+# Assume Python 3.13
+target-version = "py313"
 
 [lint]
 select = [
-    # pycodestyle
-    "E",
-    # Pyflakes
+    ## pycodestyle: PEP8 style checker
+    # kept ruff defaults here instead of adding everything
+    "E4", "E7", "E9",
+
+    ## Pyflakes: statis analysis, looks for errors
     "F",
-    # pyupgrade
+
+    ## pyupgrade: using modern Python syntax
     "UP",
-    # flake8-bugbear
-    "B",
-    # flake8-simplify
-    "SIM",
-    # isort
+
+    ## flake8-bugbear: bugs / code smells
+    # Do not use this for now, too noisy. Need time to refin
+    # which codes are useful
+
+    ## flake8-simplify
+    # very selective here, a lot of these are too opinionated imo
+    "SIM101", "SIM107", "SIM208", "SIM210", "SIM211", "SIM212",
+    "SIM220", "SIM221", "SIM222", "SIM223", "SIM300", "SIM401",
+
+    ## isort
     "I",
+
+    ## Missing docstring
+    "D103",
+
+    ## Naming conventions
+    "N",
 ]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[lint.per-file-ignores]
+# Ignore `E402` (import violations) in all `__init__.py` files
+"__init__.py" = ["E402"]
+# "path/to/file.py" = ["E402"]
+# Ignore `D` rules everywhere except for the `src/` directory.
+"!src/**.py" = ["D"]
 
 [format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
 docstring-code-format = true
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+docstring-code-line-length = "dynamic"

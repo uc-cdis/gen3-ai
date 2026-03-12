@@ -175,7 +175,12 @@ lint $SERVICE="all":
     just format $SERVICE
 
     print_header "just lint:" "ruff check" "$SERVICE" "..."
+    start=$(date +%s.%N)
     uv run --directory "./services/$SERVICE" ruff check ./src --fix
+    end=$(date +%s.%N)
+
+    elapsed_ms=$(awk "BEGIN {printf \"%.0f\", ($end-$start)*1000}")
+    echo "ruff check finished in $elapsed_ms ms."
 
     exit_code=$?
     report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "service!"
@@ -189,21 +194,6 @@ lint $SERVICE="all":
     report_error_if_failed $exit_code "just lint:" "deptry" "$SERVICE" "service!"
     overall_exit=$((overall_exit | $exit_code))
     echo
-
-    print_header "just lint:" "pylint setup and run" "$SERVICE" "..."
-    if [ ! -d ~/.gen3/.github ]; then
-        git clone git@github.com:uc-cdis/.github.git ~/.gen3/.github
-    fi
-
-    cd ./services/$SERVICE && \
-    bash ~/.gen3/.github/.github/linters/update_pylint_config.sh && \
-    cd -
-
-    uv run --directory "./services/$SERVICE" pylint ./src --rcfile ~/.gen3/.github/.github/linters/.python-lint
-
-    exit_code=$?
-    report_error_if_failed $exit_code "just lint:" "pylint setup and run" "$SERVICE" "service!"
-    overall_exit=$((overall_exit | $exit_code))
 
     report_error_or_success $overall_exit "just lint:" "linting" "$SERVICE" "service!"
 

@@ -59,7 +59,11 @@ IS_UPSTREAM_CALLER_TRUSTED_REVERSE_PROXY = config("IS_UPSTREAM_CALLER_TRUSTED_RE
 #          Additional authorization is applied on a per-AI_MODEL_REPO Resource level within
 #          this proxy service, these are a first gate for API-level access. See the
 #          rest of the docs/service for more info on AI_MODEL_REPO authz.
-AUTHZ_SERVICE_NAME = config("GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME", default="gen3-ai-model-repo", cast=str)
+AUTHZ_SERVICE_NAME = config(
+    "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME",
+    default="gen3-ai-model-repo",
+    cast=str,
+)
 AUTHZ_SERVICE_RESOURCE = config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME",
     default="/services/gen3-ai-model-repo",
