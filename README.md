@@ -11,35 +11,35 @@ See [docs/ai_api.yaml](docs/ai_api.yaml) for the OpenAPI specification. You can 
 ## Services Powering the API
 
 - **Gen3 Embeddings**
-    - Embeddings and vector indicies as first-class objects
-    - Row-level authorization
-    - Authorization and access control using Gen3 tokens
-    - Bulk support
-    - Vector search
+  - Embeddings and vector indicies as first-class objects
+  - Row-level authorization
+  - Authorization and access control using Gen3 tokens
+  - Bulk support
+  - Vector search
 - **Gen3 Inference**
-    - Expose endpoints for model inference and RAG-like interfaces
-    - Supports mesh-like connections to other Gen3 instances to share models
-    - Highly configurable, can also connect to public cloud services
-    - Authorization and access control using Gen3 tokens
+  - Expose endpoints for model inference and RAG-like interfaces
+  - Supports mesh-like connections to other Gen3 instances to share models
+  - Highly configurable, can also connect to public cloud services
+  - Authorization and access control using Gen3 tokens
 - **Gen3 AI Model Repository**
-    - AI model management in your own infrastructure (no relying on Huggingface)
-    - API exposed is compatible with tools that interact with Huggingface
-        - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
-    - Authorization and access control using Gen3 tokens
+  - AI model management in your own infrastructure (no relying on Huggingface)
+  - API exposed is compatible with tools that interact with Huggingface
+  - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
+  - Authorization and access control using Gen3 tokens
 
 ## Layout
 
 * `docs`
-    * Additional documentation, including OpenAPI spec
+  * Additional documentation, including OpenAPI spec
 * `libraries/common`
-    * The common library and dependencies shared across all services
+  * The common library and dependencies shared across all services
 * `services/{{name}}`
-    * The individual services (all import common)
+  * The individual services (all import common)
 * `Dockerfile`
-    * Single Dockerfile with arg `SERVICE` for building different services
+  * Single Dockerfile with arg `SERVICE` for building different services
 * `justfile`
-    * Simplified setup, building, running
-    * `just install`, `just run gen3_embeddings`, `just build`
+  * Simplified setup, building, running
+  * `just install`, `just run gen3_embeddings`, `just build`
 
 > Alternative: use a base service instead of library. Justification for library: explicitly labeling the common code as a library (e.g. not meant to be run by itself) provides more clarity on intended use.
 
