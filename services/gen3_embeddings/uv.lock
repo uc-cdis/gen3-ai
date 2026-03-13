@@ -240,6 +240,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
+    { name = "pytest" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -269,6 +270,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.60b1" },
     { name = "opentelemetry-sdk", specifier = ">=1.39.1" },
     { name = "prometheus-client", specifier = ">=0.24.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "uvicorn", specifier = ">=0.41.0" },
 ]
