@@ -59,7 +59,7 @@ jobs:
         run: |
           just install
 
-      - name: Generate uv Software Bill of Materials (SBOM) and snyk scan for all services
+      - name: snyk test all services (customization required b/c of uv usage)
         # see justfile for details
         run: |
           just snyk
