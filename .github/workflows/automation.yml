@@ -24,6 +24,44 @@ jobs:
        python-poetry: 'true'
     secrets: inherit
 
+  security-snyk:
+    name: Manual Synk Scan for uv
+    runs-on: ubuntu-latest
+    env:
+      UV_VERSION: '0.10.9'
+      JUST_VERSION: '1.46.0'
+      PYTHON_VERSION: '3.13'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: python info
+        run: python --version
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ env.JUST_VERSION }}
+
+      - name: just install
+        run: |
+          just install
+
+      - name: Generate uv Software Bill of Materials (SBOM) and snyk scan for all services
+        # see justfile for details
+        run: |
+          just snyk
+
   unit-test:
     name: Python Unit Test
     # TODO: enable when security and post-commit work reliably
