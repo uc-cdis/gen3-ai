@@ -167,6 +167,50 @@ format $SERVICE="all":
     fi
   fi
 
+snyk $SERVICE="all":
+  #!/usr/bin/env bash
+  source .justfile_helpers.bash
+
+  if [ $SERVICE == "all" ]; then
+    just snyk_all
+  else
+    print_header "just snyk:" "snyk scanning" "$SERVICE" "service..."
+    if [ $SERVICE == "all" ]; then
+      for dir in services/*; do
+        print_header "just snyk:" "snyk scanning" "${dir#services/}" "..."
+        uv --directory "./services/${dir#services/}" export --format cyclonedx1.5 > sbom_${dir#services/}.json
+        snyk sbom test --file sbom_${dir#services/}.json --source-dir="./services/${dir#services/}" --experimental
+      done
+    else
+      # export a requirements file without local imports
+      # since the local imports are reflected in the overeall requirements and confuse snyk
+      uv --directory "./services/${SERVICE}" export --no-emit-local --format requirements.txt > ${SERVICE}_requirements.txt
+
+      # synk, at the moment, requires pip in an env to actually test things. uv envs don't depend on pip
+      # so we need to create a new virtual env.
+      # keep an eye on: https://github.com/snyk/snyk-python-plugin/issues/259
+      # this is a workaround
+      pip install virtualenv
+      virtualenv .venv_${SERVICE}
+      source .venv_${SERVICE}/bin/activate
+      pip install -r ${SERVICE}_requirements.txt
+
+      # snyk test
+      snyk test --file=${SERVICE}_requirements.txt --package-manager=pip
+
+      exit_code=$?
+      report_error_if_failed $exit_code "just snyk:" "scanning" "$SERVICE" "service!"
+      overall_exit=$((overall_exit | $exit_code))
+
+      # cleanup
+      deactivate
+      rm ${SERVICE}_requirements.txt
+      rm -r .venv_${SERVICE}
+
+      exit $overall_exit
+    fi
+  fi
+
 # `just lint $SERVICE`
 lint $SERVICE="all":
   #!/usr/bin/env bash
@@ -290,5 +334,21 @@ test_all:
   done
 
   report_error_or_success $overall_exit "just test:" "testing" "all" "services!"
+
+  exit $overall_exit
+
+# you can use this instead: `just snyk`
+snyk_all:
+  #!/usr/bin/env bash
+  source .justfile_helpers.bash
+
+  for dir in services/*; do
+    if [[ -n "${dir#services/}" ]]; then
+      just snyk ${dir#services/}
+      overall_exit=$((overall_exit | $?))
+    fi
+  done
+
+  report_error_or_success $overall_exit "just snyk:" "snyk scanning" "all" "services!"
 
   exit $overall_exit
