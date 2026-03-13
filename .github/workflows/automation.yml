@@ -78,7 +78,7 @@ jobs:
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
-      BUILD_ARGS: SERVICE_NAME="gen3_embeddings"
+      BUILD_ARGS: SERVICE_NAME=gen3_embeddings
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
@@ -92,7 +92,7 @@ jobs:
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
-      BUILD_ARGS: SERVICE_NAME="gen3_inference"
+      BUILD_ARGS: SERVICE_NAME=gen3_inference
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
@@ -106,7 +106,7 @@ jobs:
     with:
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
-      BUILD_ARGS: SERVICE_NAME="gen3_ai_model_repo"
+      BUILD_ARGS: SERVICE_NAME=gen3_ai_model_repo
     secrets:
       ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
       ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
