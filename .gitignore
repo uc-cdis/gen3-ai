@@ -213,3 +213,16 @@ sbom_*.json
 *_requirements.txt
 pylock.*
 snyk
+
+# We do not want library lock files b/c they're not
+# actually used by any applications (and they will)
+# trigger synk scans and dependabot PRs.
+# The library deps gets used in each service's
+# lock file, and those are the ones we want checked
+# in and scanned b/c it's what the Docker build
+# uses in the final services.
+#
+# This gets created as an artifact of someone adding a new
+# common dep, but the actual installed version for the service
+# is reflected in the service's own uv.lock, which IS checked in.
+libraries/*/uv.lock
