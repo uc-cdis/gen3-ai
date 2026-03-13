@@ -45,6 +45,8 @@ jobs:
       - name: python info
         run: python --version
 
+      - uses: snyk/actions/setup@master
+
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
