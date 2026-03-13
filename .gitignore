@@ -210,3 +210,6 @@ __marimo__/
 # Other
 .DS_Store
 sbom_*.json
+*_requirements.txt
+pylock.*
+snyk
