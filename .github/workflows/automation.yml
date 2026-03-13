@@ -1,0 +1,117 @@
+# push will run on every pushed commit to any branch (so this will rerun the tests
+# once a branch gets merged to main in addition to any new commits on any branch)
+on: push
+
+name: Automation
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  post-commit-check:
+    name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/linting
+    with:
+      UV_VERSION: '0.10.9'
+      JUST_VERSION: '1.46.0'
+    secrets: inherit
+
+  security:
+    name: Security Pipeline
+    uses: uc-cdis/.github/.github/workflows/securitypipeline.yaml@master
+    with:
+       python-poetry: 'true'
+    secrets: inherit
+
+  unit-test:
+    name: Python Unit Test
+    # TODO: enable when security and post-commit work reliably
+    # needs: [ security, post-commit-check ]
+    runs-on: ubuntu-latest
+    env:
+      UV_VERSION: '0.10.9'
+      JUST_VERSION: '1.46.0'
+      PYTHON_VERSION: '3.13'
+      PGHOST: 'localhost'
+      PGPORT: 5432
+      PGUSER: 'postgres'
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: python info
+        run: python --version
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ env.JUST_VERSION }}
+
+      - name: just setup
+        run: |
+          just setup
+
+      - name: just install
+        run: |
+          just install
+
+      - name: just test
+        run: |
+          just test
+
+  image-build-push-1:
+    name: Build Image and Push - Gen3 Embeddings
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    needs: [post-commit-check, security, unit-test]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '.'
+      BUILD_ARGS: SERVICE_NAME=gen3_embeddings
+      OVERRIDE_REPO_NAME: gen3_embeddings
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+  image-build-push-2:
+    name: Build Image and Push - Gen3 Inference
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    needs: [post-commit-check, security, unit-test]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '.'
+      BUILD_ARGS: SERVICE_NAME=gen3_inference
+      OVERRIDE_REPO_NAME: gen3_inference
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+
+  image-build-push-3:
+    name: Build Image and Push - Gen3 AI Model Repo
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    needs: [post-commit-check, security, unit-test]
+    with:
+      BUILD_PLATFORMS: "linux/amd64"
+      DOCKERFILE_BUILD_CONTEXT: '.'
+      BUILD_ARGS: SERVICE_NAME=gen3_ai_model_repo
+      OVERRIDE_REPO_NAME: gen3_ai_model_repo
+    secrets:
+      ECR_AWS_ACCESS_KEY_ID: ${{ secrets.ECR_AWS_ACCESS_KEY_ID }}
+      ECR_AWS_SECRET_ACCESS_KEY: ${{ secrets.ECR_AWS_SECRET_ACCESS_KEY }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}

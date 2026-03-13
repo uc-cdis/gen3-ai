@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: poetry.lock
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: no-commit-to-branch
+        args: [--branch, develop, --branch, master, --branch, main, --pattern, release/.*]
+  - repo: local
+    hooks:
+    -   id: lint
+        name: lint
+        entry: uv run just lint
+        language: python
+        types: [python]
+        pass_filenames: false
