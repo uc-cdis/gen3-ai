@@ -3,9 +3,9 @@ import logging
 import cdislogging
 import gunicorn.glogging
 from gen3_embeddings.config import (
-    DEBUG,
     ENABLE_OPENTELEMETRY_TRACES,
     OTEL_EXPORTER_OTLP_ENDPOINT,
+    DEBUG,
     VERBOSE_INTERNAL_LOGS,
 )
 from opentelemetry import trace
