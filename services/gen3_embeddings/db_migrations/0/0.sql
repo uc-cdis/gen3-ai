@@ -1,5 +1,3 @@
--- TODO: Not tested
-
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- vector index metadata
@@ -42,12 +40,12 @@ CREATE INDEX CONCURRENTLY ON embeddings USING hnsw ((embedding::vector(512)) vec
 -- JSONB column metadata inverted index, so value searching on tags or something
 -- is optimized
 CREATE INDEX idx_embeddings_metadata_gin
-    ON embeddings_2
+    ON embeddings
     USING GIN (metadata);
 
 -- on authz tags for faster filtering, similar to above
 CREATE INDEX idx_embeddings_authz_gin
-    ON embeddings_in_index_2
+    ON embeddings
     USING GIN (authz);
 
 -- row level security will enforce authz
@@ -57,7 +55,7 @@ ALTER TABLE embeddings
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL
 -- allowed_authz to the user's allowed authz resources from arborist
-CREATE POLICY authz_policy ON embedding
+CREATE POLICY authz_policy ON embeddings
   FOR SELECT USING (
     -- reminder: authz is a TEXT[], so the GIN above makes this fast
     authz && current_setting('app.allowed_authz', true)::text[]

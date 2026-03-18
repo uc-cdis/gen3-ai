@@ -2,6 +2,7 @@ import os
 
 import cdislogging
 from starlette.config import Config
+from starlette.datastructures import Secret
 
 CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 
@@ -28,6 +29,19 @@ if DEBUG_SKIP_AUTH:
         f"DEBUG_SKIP_AUTH is {DEBUG_SKIP_AUTH}. Authorization will be SKIPPED if no token is provided. "
         "FOR NON-PRODUCTION USE ONLY!! USE WITH CAUTION!!"
     )
+
+DB_DRIVER = config("DB_DRIVER", default="postgresql")
+DB_USER = config("DB_USER", default="postgres")
+DB_PASSWORD = config("DB_PASSWORD", cast=Secret, default=None)
+DB_HOST = config("DB_HOST", default="localhost")
+DB_PORT = config("DB_PORT", cast=int, default="5432")
+DB_DATABASE = config("DB_DATABASE", default="testgen3embeddings")
+
+DB_CONNECTION_STRING = config(
+    "DB_CONNECTION_STRING",
+    cast=Secret,
+    default=f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}",
+)
 
 URL_PREFIX = config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", cast=str)
 
