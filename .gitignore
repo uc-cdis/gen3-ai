@@ -213,6 +213,7 @@ sbom_*.json
 *_requirements.txt
 pylock.*
 snyk
+.vscode
 
 # We do not want library lock files b/c they're not
 # actually used by any applications (and they will)
@@ -226,3 +227,14 @@ snyk
 # common dep, but the actual installed version for the service
 # is reflected in the service's own uv.lock, which IS checked in.
 libraries/*/uv.lock
+
+# gen3_inference
+knowledge/
+*.sqlite3
+chroma/
+cache/
+tests/prof/
+prof/
+bin/library
+tmp/
+*.bak

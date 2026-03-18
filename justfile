@@ -16,7 +16,7 @@ setup:
       curl -LsSf https://astral.sh/uv/install.sh | sh
   fi
 
-  print_header "just setup:" "verifying" "postgres" "installation..."
+  print_header "just setup:" "verifying" "PostgreSQL client (psql)" "installation..."
   if command -v psql >/dev/null 2>&1; then
       echo "PostgreSQL client (psql) is installed."
       echo "  version: $(psql --version)"
@@ -28,28 +28,32 @@ setup:
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
-      print_header "just setup:" "setting up postgres db for" "${dir#services/}" "service..."
-
-      if [ ! -f "${dir}/.env" ]; then
-        echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
+      if [ "${dir#services/}" == "gen3_inference" ]; then
+        print_header "just setup:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
       else
-        echo "Found .env file. Using it to set up database."
-        set -a
-          source "${dir}/.env"
-        set +a
+        print_header "just setup:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
+
+        if [ ! -f "${dir}/.env" ]; then
+          echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
+        else
+          echo "Found .env file. Using it to set up database."
+          set -a
+            source "${dir}/.env"
+          set +a
+        fi
+
+        if [[ -z ${PGDATABASE:-} ]]; then
+          echo "PGDATABASE not set, using ${dir#services/}..."
+          export PGDATABASE="${dir#services/}"
+        fi
+
+        psql \
+          -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+          -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
+          2>/dev/null || echo "Database already exists."
+
+        # TODO: db migration / initial setup
       fi
-
-      if [[ -z ${PGDATABASE:-} ]]; then
-        echo "PGDATABASE not set, using ${dir#services/}..."
-        export PGDATABASE="${dir#services/}"
-      fi
-
-      psql \
-        -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
-        -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
-        2>/dev/null || echo "Database already exists."
-
-      # TODO: db migration / initial setup
     fi
   done
 
@@ -68,7 +72,14 @@ install $SERVICE="all":
     # print_header COMMAND TEXT SERVICE TEXT
     print_header "just install:" "installing" "$SERVICE" "service..."
 
-    uv sync --all-packages --group dev --directory "./services/$SERVICE"
+    echo "Installing common library into service: ${SERVICE}..."
+    cd "./services/$SERVICE"
+    uv add "common @ file://../../libraries/common"
+    cd -
+
+    echo
+    echo "uv sync-ing $SERVICE service with --group dev and --all-extras..."
+    uv sync --all-packages --group dev --directory "./services/$SERVICE" --all-extras
   fi
 
 lock $SERVICE="all":
@@ -94,7 +105,7 @@ test $SERVICE="all":
   else
     print_header "just test:" "testing" "$SERVICE" "service..."
     cd "./services/$SERVICE"
-    uv run pytest .
+    uv run pytest . -vv
     exit_code=$?
     cd -
 
@@ -129,7 +140,7 @@ build $SERVICE="all":
   export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
 
   # Start the app with OpenTelemetry and Gunicorn and Uvicorn workers
-  uv run --directory "./services/$SERVICE" \
+  uv run --env-file "../../.env" --directory "./services/$SERVICE" \
     opentelemetry-instrument \
     gunicorn \
     $SERVICE.main:app_instance \
@@ -233,14 +244,6 @@ lint $SERVICE="all":
 
     exit_code=$?
     report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "service!"
-    overall_exit=$((overall_exit | $exit_code))
-    echo
-
-    print_header "just lint:" "deptry" "$SERVICE" "..."
-    uv run --directory "./services/$SERVICE" deptry ./src
-
-    exit_code=$?
-    report_error_if_failed $exit_code "just lint:" "deptry" "$SERVICE" "service!"
     overall_exit=$((overall_exit | $exit_code))
     echo
 

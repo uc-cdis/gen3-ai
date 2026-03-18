@@ -2,8 +2,29 @@
 name = "gen3_inference"
 version = "0.1.0"
 description = "Gen3 Inference"
-dependencies = ["common"]
+dependencies = [
+    "chromadb>=1.5.5",
+    "common",
+    "langchain>=1.2.12",
+    "langchain-chroma>=1.1.0",
+    "langchain-classic>=1.0.3",
+    "langchain-community>=0.4.1",
+    "langchain-google-genai>=4.2.1",
+    "pyasn1>=0.6.3",
+]
 requires-python = "~=3.13.0"
+
+[project.optional-dependencies]
+openai = [
+    "langchain-openai>=1.1.11",
+    "openai>=2.28.0",
+]
+google = [
+    "langchain-google-vertexai>=3.2.2",
+]
+ollama = [
+    "langchain-ollama>=1.0.1",
+]
 
 [dependency-groups]
 dev = []
@@ -11,42 +32,12 @@ dev = []
 [tool.uv]
 package = true
 
-[tool.uv.workspace]
-members = [
-    "../../libraries/*",
-]
-
-[tool.uv.sources]
-common = { workspace = true }
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv.sources]
+common = { path = "../../libraries/common" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen3_inference"]
-
-[tool.deptry.per_rule_ignores]
-DEP002 = ["common"]
-
-# anything in libraries/common we need to add here
-# b/c deptry will see it as a transitive dependency but
-# we actually WANT it to NOT be in both the service and
-# libraries/common. So this is intentional / by design
-# for shared libraries.
-DEP003 = [
-    "authutils",
-    "asyncpg",
-    "cdislogging",
-    "click",
-    "fastapi",
-    "gen3authz",
-    "gunicorn",
-    "opentelemetry-api",
-    "opentelemetry-exporter-otlp",
-    "opentelemetry-instrumentation-fastapi",
-    "opentelemetry-sdk",
-    "prometheus-client",
-    "starlette",
-    "uvicorn",
-]
