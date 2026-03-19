@@ -41,20 +41,23 @@ See [docs/ai_api.yaml](docs/ai_api.yaml) for the OpenAPI specification. You can 
   * Simplified setup, building, running
   * `just install`, `just run gen3_embeddings`, `just build`
 
-> Alternative: use a base service instead of library. Justification for library: explicitly labeling the common code as a library (e.g. not meant to be run by itself) provides more clarity on intended use.
-
-Services can import common code from libraries:
+Services can import common code:
 
 ```python
-from libraries.common import TEST
+from common.config import DEBUG
 ```
 
-Services have folder structure:
+Services (and libraries) have folder structure:
 
 * `src/{{name}}`
 * `pyproject.toml` which builds {{name}} from src/{{name}}
 
-> Alternative: all services could share a common `gen3` (or similar) package. Justification to not sharing a common package: the `src` setup is a more explicit separation of concerns and discourages cross-service importing without using the common library.
+### Why this setup?
+
+- General benefits of a monorepo (common patterns for maintaining code in a single repo)
+- Per-service uv environments ensure minimal required dependencies for each
+- Common library project allows cross-service code and dependencies to be
+  maintained in one place
 
 ## Quickstart
 
