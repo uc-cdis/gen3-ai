@@ -116,6 +116,10 @@ just lint
 # specific directory
 just lint libraries/common
 just lint services/gen3_inference
+
+# verbose output
+just lint all -v
+just lint services/gen3_inference -v
 ```
 
 

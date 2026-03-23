@@ -216,12 +216,12 @@ snyk $SERVICE="all":
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all":
+lint $SERVICE="all" $EXTRA_ARGS="":
   #!/usr/bin/env bash
   source .justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lint_all
+    just lint_all $EXTRA_ARGS
   else
     # install services to get ruff and other things required for formatting and linting
     if [[ $SERVICE == *services* ]]; then
@@ -232,7 +232,7 @@ lint $SERVICE="all":
 
     print_header "just lint:" "ruff check" "$SERVICE" "..."
     start=$(date +%s.%N)
-    uv run --directory "$SERVICE" ruff check ./src --fix
+    uv run --directory "$SERVICE" ruff check ./src --fix $EXTRA_ARGS
     end=$(date +%s.%N)
 
     elapsed_ms=$(awk "BEGIN {printf \"%.0f\", ($end-$start)*1000}")
@@ -263,20 +263,20 @@ install_all:
   exit $overall_exit
 
 # you can use this instead: `just lint`
-lint_all:
+lint_all $EXTRA_ARGS="":
   #!/usr/bin/env bash
   source .justfile_helpers.bash
 
   for dir in libraries/*; do
     if [[ -n "${dir}" ]]; then
-      just lint ${dir}
+      just lint ${dir} $EXTRA_ARGS
       overall_exit=$((overall_exit | $?))
     fi
   done
 
   for dir in services/*; do
     if [[ -n "${dir}" ]]; then
-      just lint ${dir}
+      just lint ${dir} $EXTRA_ARGS
       overall_exit=$((overall_exit | $?))
     fi
   done
