@@ -1,11 +1,12 @@
 import time
 from importlib.metadata import version
 
+from fastapi import FastAPI, HTTPException, Request
+
 from common.auth import get_user_id
 from common.config import logging
 from common.fastapi.routes.common import common_router
 from common.metrics import get_metrics_client
-from fastapi import FastAPI, HTTPException, Request
 from gen3_inference import config
 from gen3_inference.metrics import InferenceServiceMetrics
 from gen3_inference.routes.basic import basic_router
