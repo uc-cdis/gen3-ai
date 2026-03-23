@@ -3,10 +3,14 @@ name = "common"
 version = "0.1.0"
 description = "Gen3 AI Common/Shared Dependencies"
 requires-python = "~=3.13.0"
+#  "{package} @ git+https://github.com/{org}/{repo}.git@branch"
+#  "cdispyutils @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/metrics-improvements",
 dependencies = [
   "asyncpg>=0.31.0",
   "authutils>=7.2.5",
   "cdislogging>=1.2.0",
+  # "cdispyutils>=2.5.0",
+  "cdispyutils @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/metrics-improvements",
   "click>=8.3.1",
   "fastapi>=0.128.0",
   "gen3authz>=3.0.1",
@@ -43,3 +47,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/common"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

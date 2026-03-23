@@ -3,28 +3,10 @@ name = "gen3_inference"
 version = "0.1.0"
 description = "Gen3 Inference"
 dependencies = [
-    "chromadb>=1.5.5",
     "common",
-    "langchain>=1.2.12",
-    "langchain-chroma>=1.1.0",
-    "langchain-classic>=1.0.3",
-    "langchain-community>=0.4.1",
-    "langchain-google-genai>=4.2.1",
-    "pyasn1>=0.6.3",
+    "openresponses-types>=2.3.0.post1",
 ]
 requires-python = "~=3.13.0"
-
-[project.optional-dependencies]
-openai = [
-    "langchain-openai>=1.1.11",
-    "openai>=2.28.0",
-]
-google = [
-    "langchain-google-vertexai>=3.2.2",
-]
-ollama = [
-    "langchain-ollama>=1.0.1",
-]
 
 [dependency-groups]
 dev = []

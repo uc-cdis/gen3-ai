@@ -5,16 +5,18 @@ from pathlib import Path
 import cdislogging
 from starlette.config import Config
 
+
 def get_venv_root() -> Path | None:
     """
     Return the absolute Path to the root of the current virtual environment,
     or None if the interpreter is running from the system Python.
     """
-    if hasattr(sys, 'base_prefix'):
+    if hasattr(sys, "base_prefix"):
         if sys.prefix != sys.base_prefix:
             return Path(sys.prefix).parent
 
     return None
+
 
 # NOTE: Default config only works when:
 #       The .env is in its standard location:
@@ -62,12 +64,33 @@ if ALLOW_ANONYMOUS_ACCESS:
 # Defaults to the default service name in k8s magic DNS setup
 ARBORIST_URL = starlette_config("ARBORIST_URL", default="http://arborist-service", cast=str)
 
-PUBLIC_ROUTES = {"/", "/_status", "/_status/", "/_version", "/_version/"}
+PUBLIC_ROUTES = {
+    "/",
+    "/docs",
+    "/docs/",
+    "/openapi.json",
+    "/openapi.json/",
+    "/_status",
+    "/_status/",
+    "/_version",
+    "/_version/",
+    "/favicon.ico",
+    "/favicon.ico/",
+}
 ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | PUBLIC_ROUTES
 
 # This app exports traces using OpenTelemetry. By default in Gen3, we use Alloy for collection.
 ENABLE_OPENTELEMETRY_TRACES = starlette_config("ENABLE_OPENTELEMETRY_TRACES", cast=bool, default=True)
 # For local development, set this to an EMPTY STRING and it will output to console. See gunicorn.conf.py
-OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config("OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring.4318", cast=str)
+OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring.4318", cast=str
+)
 
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
+
+# Metrics provider, at the moment we only support "prometheus". If you want to use a different one,
+# you will need to implement the common interface in common/metrics/base.py.
+# Note: default is no metrics.
+ENABLE_METRICS = starlette_config("ENABLE_METRICS", default=True, cast=bool)
+METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default=None, cast=str)
+PROMETHEUS_MULTIPROC_DIR = starlette_config("PROMETHEUS_MULTIPROC_DIR", default="/var/tmp/prometheus_metrics", cast=str)

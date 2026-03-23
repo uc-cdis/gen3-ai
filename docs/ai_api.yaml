@@ -426,8 +426,8 @@ components:
     SingleSearchResultNoIndex:
       type: object
       required:
-        - id
-        - score
+        - embedding
+        - metadata
       properties:
         embedding:
           $ref: '#/components/schemas/SingleEmbeddingResultNoIndex'
@@ -447,8 +447,8 @@ components:
     SingleSearchResult:
       type: object
       required:
-        - id
-        - score
+        - embedding
+        - metadata
       properties:
         embedding:
           $ref: '#/components/schemas/SingleEmbeddingResult'
