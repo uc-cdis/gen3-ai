@@ -205,7 +205,6 @@ components:
       type: object
       required:
         - vector
-        - input_index
         - embedding_id
       properties:
         vector:
@@ -213,8 +212,6 @@ components:
           items:
             type: number
             format: float
-        input_index:
-          type: integer
         embedding_id:
           type: string
           format: uuid
@@ -233,7 +230,72 @@ components:
               format: url
               example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
 
-    SingleEmbeddingResult:
+    SingleEmbeddingResultNoIndexFromInput:
+      type: object
+      required:
+        - vector
+        - input_index
+        - embedding_id
+      properties:
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+        input_index:
+          type: integer
+          example: 0
+        embedding_id:
+          type: string
+          format: uuid
+        info:
+          type: object
+          properties:
+            authz:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}"
+            authz_version:
+              type: integer
+              example: 0
+            self:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+
+    SingleEmbedding:
+      type: object
+      required:
+        - index_name
+        - embedding_id
+        - vector
+      properties:
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+        embedding_id:
+          type: string
+          format: uuid
+        info:
+          type: object
+          properties:
+            index_name:
+              type: string
+            authz:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}"
+            authz_version:
+              type: integer
+              example: 0
+            self:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+
+    SingleEmbeddingFromInput:
       type: object
       required:
         - index_name
@@ -248,6 +310,7 @@ components:
             format: float
         input_index:
           type: integer
+          example: 0
         embedding_id:
           type: string
           format: uuid
@@ -276,7 +339,21 @@ components:
         embeddings:
           type: array
           items:
-            $ref: "#/components/schemas/SingleEmbeddingResult"
+            $ref: "#/components/schemas/SingleEmbedding"
+        vector_indices:
+          type: array
+          items:
+            $ref: "#/components/schemas/VectorIndex"
+
+    EmbeddingResponseFromInput:
+      type: object
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleEmbeddingFromInput"
         vector_indices:
           type: array
           items:
@@ -291,6 +368,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleEmbeddingResultNoIndex"
+
+    EmbeddingResponseNoIndexFromInput:
+      type: object
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleEmbeddingResultNoIndexFromInput"
 
     AllTopicsResponse:
       type: object
@@ -451,7 +538,7 @@ components:
         - metadata
       properties:
         embedding:
-          $ref: '#/components/schemas/SingleEmbeddingResult'
+          $ref: '#/components/schemas/SingleEmbedding'
         metadata:
           # TODO: perhaps we need to handle other data returning
           # depending on the type of search performed. similarity_score
@@ -548,25 +635,29 @@ components:
 
 paths:
   # ----------- Embeddings -------------
-  /embeddings/{embedding_uuid}:
-    get:
-      tags:
-        - Embeddings
-      summary: Read embedding from unknown index
-      description: |
-        This will require a lookup to know what index this is in, so will be
-        less efficient than `/vector/indices/{index_name}/embeddings/{embedding_uuid}`.
-      parameters:
-        - $ref: "#/components/parameters/EmbeddingId"
-      responses:
-        "200":
-          description: Embedding detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
+  # Let's not support this at all for now, but we can add it later if needed.
+  # This muddies the intended usage with a global search that will be inefficient.
+  # The intended setup will always include the vector index information anyway.
+  #
+  # /embeddings/{embedding_uuid}:
+  #   get:
+  #     tags:
+  #       - Embeddings
+  #     summary: Read embedding from unknown index
+  #     description: |
+  #       This will require a lookup to know what index this is in, so will be
+  #       less efficient than `/vector/indices/{index_name}/embeddings/{embedding_uuid}`.
+  #     parameters:
+  #       - $ref: "#/components/parameters/EmbeddingId"
+  #     responses:
+  #       "200":
+  #         description: Embedding detail
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/SingleEmbeddingFromInput"
+  #       "404":
+  #         $ref: "#/components/responses/NotFound"
 
   /vector/indices/{index_name}/embeddings/{embedding_uuid}:
     get:
@@ -582,7 +673,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
+                $ref: "#/components/schemas/SingleEmbedding"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -610,7 +701,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
+                $ref: "#/components/schemas/SingleEmbedding"
         "400":
           description: Dimensions don't match or other invalid input
     delete:
@@ -669,7 +760,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -687,7 +778,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
 
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -726,7 +817,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
