@@ -6,6 +6,10 @@ This comes bundled with a `launch.json` which uses uvicorn to launch the apps.
 
 This allows you to easily debug in VSCode.
 
+Ensure you have installed the deps with `just install`.
+
+Ensure you have the Python interpreter in VS Code set to the service `.venv/bin/python` for the service you want to debug.
+
 Go to the "Run and Debug" pane and you should see each of the services available to run:
 
 - `gen3_inference`

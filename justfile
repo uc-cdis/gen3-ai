@@ -171,6 +171,20 @@ format $SERVICE="all":
     uv run --directory $SERVICE ruff format
   fi
 
+venv_reset:
+  #!/usr/bin/env bash
+  source .justfile_helpers.bash
+  for dir in services/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
+  for dir in libraries/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
+
 snyk $SERVICE="all":
   #!/usr/bin/env bash
   source .justfile_helpers.bash
