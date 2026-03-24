@@ -129,14 +129,20 @@ just lint services/gen3_inference -v
 * PostgreSQL for services that need a database
 * No ORM. `asyncpg` with shared code in `libraries/common`
 
-## Metrics
+## Development Details
+
+### Using VSCode?
+
+See [these docs](./docs/vscode.md) for more info on how to best set up for development of this repo.
+
+### Metrics
 
 By default, we support Prometheus metrics. They can be exposed at a `/metrics` endpoint compatible with Prometheus scraping and visualize in Prometheus or
 Graphana, etc.
 
 You can [run Prometheus locally](https://github.com/prometheus/prometheus) if you want to test or visualize these.
 
-### tl;dr
+#### Setup Locally
 
 Run the service locally using `just run {{service}}`.
 

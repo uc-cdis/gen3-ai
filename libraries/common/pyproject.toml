@@ -36,6 +36,7 @@ dev = [
     "pytest-xdist",
     "pyright",
     "pylint>=4.0.5",
+    "dotenv>=0.9.9",
 ]
 
 [tool.uv]
