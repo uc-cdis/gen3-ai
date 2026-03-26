@@ -140,7 +140,7 @@ build $SERVICE="all":
   export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
 
   # Start the app with OpenTelemetry and Gunicorn and Uvicorn workers
-  uv run --env-file "../../.env" --directory "./services/$SERVICE" \
+  uv run --directory "./services/$SERVICE" \
     opentelemetry-instrument \
     gunicorn \
     $SERVICE.main:app_instance \
