@@ -7,6 +7,21 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
+from starlette.datastructures import Secret
+
+DB_DRIVER = starlette_config("DB_DRIVER", default="postgresql")
+DB_USER = starlette_config("DB_USER", default="postgres")
+DB_PASSWORD = starlette_config("DB_PASSWORD", cast=Secret, default=None)
+DB_HOST = starlette_config("DB_HOST", default="localhost")
+DB_PORT = starlette_config("DB_PORT", cast=int, default="5432")
+DB_DATABASE = starlette_config("DB_DATABASE", default="testgen3embeddings")
+
+DB_CONNECTION_STRING = starlette_config(
+    "DB_CONNECTION_STRING",
+    cast=Secret,
+    default=f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}",
+)
+
 URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", cast=str)
 
 # WARNING: Careful changing these, they require close sync with the authorization source

@@ -38,3 +38,7 @@ https://github.com/pgvector/pgvector?tab=readme-ov-file#indexing-progress
 ```sql
 SELECT phase, round(100.0 * blocks_done / nullif(blocks_total, 0), 1) AS "%" FROM pg_stat_progress_create_index;
 ```
+
+
+## TODO
+db op error handling

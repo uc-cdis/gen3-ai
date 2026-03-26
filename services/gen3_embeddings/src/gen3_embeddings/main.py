@@ -7,9 +7,13 @@ from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.db import get_pool
 from gen3_embeddings.routes.embeddings import embeddings_router
+from gen3_embeddings.routes.vector_indexing import vector_indexing_router
+from gen3_embeddings.routes.vector_search import vector_search_router
 
 route_aggregator = APIRouter()
-route_aggregator.include_router(embeddings_router, tags=["Embeddings"])
+route_aggregator.include_router(embeddings_router)
+route_aggregator.include_router(vector_indexing_router)
+route_aggregator.include_router(vector_search_router)
 
 
 @asynccontextmanager

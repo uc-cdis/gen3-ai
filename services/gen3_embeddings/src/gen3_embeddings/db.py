@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import ast
+import json
+from dataclasses import dataclass, fields
 from datetime import datetime
 from uuid import UUID
 
@@ -36,7 +38,8 @@ class VectorIndex:
 
     @classmethod
     def from_record(cls, row: asyncpg.Record) -> VectorIndex:
-        return cls(**dict(row))
+        data = dict(row)
+        return cls(**data)
 
 
 @dataclass
@@ -53,6 +56,14 @@ class Embedding:
     @classmethod
     def from_record(cls, row: asyncpg.Record) -> Embedding:
         data = dict(row)
+
+        # Keep only keys that match Embedding fields
+        valid_field_names = {f.name for f in fields(cls)}
+        data = {k: v for k, v in data.items() if k in valid_field_names}
+
+        if isinstance(data.get("embedding"), str):
+            # vec_str is like "[0.1, 0.2, 0.3]", convert it to vector
+            data["embedding"] = [float(x) for x in ast.literal_eval(data["embedding"])]
         return cls(**data)
 
 
@@ -74,10 +85,16 @@ class DataAccessLayer:
                 raise HTTPException(status_code=400, detail="Failed to create vector index")
             return VectorIndex.from_record(row)
 
-    async def get_vector_index(self, index_name: str) -> VectorIndex | None:
+    async def get_vector_index_by_name(self, index_name: str) -> VectorIndex | None:
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("SELECT * FROM vector_indices WHERE vector_index_name = $1")
             row = await stmt.fetchrow(index_name)
+            return VectorIndex.from_record(row) if row else None
+
+    async def get_vector_index_by_id(self, index_id: int) -> VectorIndex | None:
+        async with self.pool.acquire() as conn:
+            stmt = await conn.prepare("SELECT * FROM vector_indices WHERE id = $1")
+            row = await stmt.fetchrow(index_id)
             return VectorIndex.from_record(row) if row else None
 
     async def update_vector_index(self, index_name: str, update_fields: dict) -> VectorIndex | None:
@@ -92,8 +109,10 @@ class DataAccessLayer:
 
     async def delete_vector_index(self, index_name: str) -> bool:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("DELETE FROM vector_indices WHERE vector_index_name = $1")
-            result = await stmt.execute(index_name)
+            result = await conn.execute(
+                "DELETE FROM vector_indices WHERE vector_index_name = $1",
+                index_name,
+            )
             return result.startswith("DELETE")
 
     async def list_vector_indices(self) -> list[VectorIndex]:
@@ -122,6 +141,68 @@ class DataAccessLayer:
                 raise HTTPException(status_code=400, detail="Failed to create embedding")
             return Embedding.from_record(row)
 
+    async def create_embeddings_bulk(
+        self,
+        vector_index_id: int,
+        embeddings: list[list[float]],
+        authz_version: int,
+        authz: list[str],
+        metadata_list: list[dict] | None = None,
+    ) -> list[Embedding]:
+        """
+        TODO: embeddings need to have same dim?
+        TODO: why emb_vec and meta have to be string? and the vector return from
+        the database is string instead of list of float? Current temp fix is convert
+        them to accepted format.
+
+        Bulk create multiple embeddings in the given index.
+
+        Args:
+            vector_index_id: ID of the vector index to insert into.
+            embeddings: List of embedding vectors.
+            authz_version: Authorization schema version.
+            authz: Authorization tags.
+            metadata_list: Optional list of metadata dicts (one per embedding).
+
+        Returns:
+            List of created Embedding instances.
+        """
+        if metadata_list is None:
+            metadata_list = [{} for _ in embeddings]
+        elif len(metadata_list) != len(embeddings):
+            raise HTTPException(
+                status_code=400,
+                detail="metadata_list length must match embeddings length",
+            )
+
+        results: list[Embedding] = []
+
+        # Use a single connection and transaction for all inserts
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for emb_vec, meta in zip(embeddings, metadata_list):
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO embeddings
+                        (vector_index_id, embedding, authz_version, authz, metadata)
+                        VALUES ($1, $2, $3, $4, $5)
+                        RETURNING *
+                        """,
+                        vector_index_id,
+                        json.dumps(emb_vec),
+                        authz_version,
+                        authz,
+                        json.dumps(meta or {}),
+                    )
+                    if not row:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Failed to create embedding in bulk insert",
+                        )
+                    results.append(Embedding.from_record(row))
+
+        return results
+
     async def get_embedding_by_id(self, embedding_id: UUID) -> Embedding | None:
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = $1")
@@ -137,19 +218,21 @@ class DataAccessLayer:
     async def update_embedding(
         self, vector_index_id: int, embedding_id: UUID, embedding: list[float]
     ) -> Embedding | None:
+        # TODO: embedding has to be string currently, look into why.
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("""
                 UPDATE embeddings SET embedding = $3, updated_at = NOW()
                 WHERE vector_index_id = $1 AND embedding_id = $2
                 RETURNING *
             """)
-            row = await stmt.fetchrow(vector_index_id, embedding_id, embedding)
+            row = await stmt.fetchrow(vector_index_id, embedding_id, json.dumps(embedding))
             return Embedding.from_record(row) if row else None
 
     async def delete_embedding(self, vector_index_id: int, embedding_id: UUID) -> bool:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("DELETE FROM embeddings WHERE vector_index_id = $1 AND embedding_id = $2")
-            result = await stmt.execute(vector_index_id, embedding_id)
+            result = await conn.execute(
+                "DELETE FROM embeddings WHERE vector_index_id = $1 AND embedding_id = $2", vector_index_id, embedding_id
+            )
             return result.startswith("DELETE")
 
     async def list_embeddings_in_index(self, vector_index_id: int) -> list[Embedding]:
@@ -163,3 +246,102 @@ class DataAccessLayer:
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = ANY($1::uuid[])")
             rows = await stmt.fetch(embedding_ids)
             return [Embedding.from_record(r) for r in rows]
+
+    async def get_vector_index_by_id_bulk(self, index_ids: list[int]) -> list[VectorIndex]:
+        async with self.pool.acquire() as conn:
+            stmt = await conn.prepare("SELECT * FROM vector_indices WHERE id = ANY($1::bigint[])")
+            rows = await stmt.fetch(index_ids)
+            return [VectorIndex.from_record(r) for r in rows]
+
+    # -------- Search --------
+
+    async def search_embeddings_in_index(
+        self,
+        vector_index_id: int,
+        query_vector: list[float],
+        top_k: int = 10,
+        score_range: float | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> list[asyncpg.Record]:
+        """
+        TODO: more search  algorithm or methods
+        TODO: embedding/query_vector has to be string currently, look into why.
+
+        Minimal search implementation using pgvector and cosine distance.
+        Returns raw rows with extra 'similarity_score' column.
+        """
+        filters = filters or {}
+        where_clauses = ["vector_index_id = $1"]
+        params = [vector_index_id, json.dumps(query_vector), top_k]
+
+        # simple metadata = equality filter for JSONB
+        param_index = 4
+        for k, v in filters.items():
+            where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
+            params.append(v)
+            param_index += 1
+
+        where_sql = " AND ".join(where_clauses)
+        # cosine distance: 1 - (embedding <=> query)
+        # assuming pgvector <=> is cosine distance; adjust if using L2.
+        sql = f"""
+            SELECT *,
+                   1 - (embedding <=> $2::vector) AS similarity_score
+            FROM embeddings
+            WHERE {where_sql}
+            ORDER BY embedding <=> $2::vector
+            LIMIT $3
+        """
+
+        async with self.pool.acquire() as conn:
+            stmt = await conn.prepare(sql)
+            rows = await stmt.fetch(*params)
+
+        if score_range is not None:
+            rows = [r for r in rows if r["similarity_score"] >= score_range]
+
+        return rows
+
+    async def search_embeddings_across_indices(
+        self,
+        vector_index_ids: list[int],
+        query_vector: list[float],
+        top_k: int = 10,
+        score_range: float | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> list[asyncpg.Record]:
+        # TODO: embedding/query_vector has to be string currently, look into why.
+        # TODO: currently this cannot handle diff dim since this is searching all indices
+        # whcih can hanve diff dim
+        if not vector_index_ids:
+            return []
+
+        filters = filters or {}
+        params = [vector_index_ids, json.dumps(query_vector), top_k]
+        where_clauses = ["vector_index_id = ANY($1::bigint[])"]
+        param_index = 4
+
+        for k, v in filters.items():
+            where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
+            params.append(v)
+            param_index += 1
+
+        where_sql = " AND ".join(where_clauses)
+
+        sql = f"""
+            SELECT *,
+                   1 - (embedding <=> $2::vector) AS similarity_score
+            FROM embeddings
+            WHERE {where_sql}
+            ORDER BY embedding <=> $2::vector
+            LIMIT $3
+        """
+
+        async with self.pool.acquire() as conn:
+            stmt = await conn.prepare(sql)
+            rows = await stmt.fetch(*params)
+
+        if score_range is not None:
+            rows = [r for r in rows if r["similarity_score"] >= score_range]
+
+        return rows
