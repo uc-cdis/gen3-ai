@@ -11,10 +11,10 @@ concurrency:
 jobs:
   post-commit-check:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
-    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/linting
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.10.9'
-      JUST_VERSION: '1.46.0'
+      UV_VERSION: '0.11.0'
+      JUST_VERSION: '1.48.0'
     secrets: inherit
 
   security:
@@ -114,7 +114,7 @@ jobs:
 
   image-build-push-1:
     name: Build Image and Push - Gen3 Embeddings
-    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
@@ -129,7 +129,7 @@ jobs:
 
   image-build-push-2:
     name: Build Image and Push - Gen3 Inference
-    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"
@@ -144,7 +144,7 @@ jobs:
 
   image-build-push-3:
     name: Build Image and Push - Gen3 AI Model Repo
-    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@fix/linting
+    uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
       BUILD_PLATFORMS: "linux/amd64"

@@ -1,6 +1,6 @@
 import pathlib
-import datetime
 import sys
+
 import click
 
 BASE_DIR = pathlib.Path(__file__).parent
@@ -36,6 +36,7 @@ async def downgrade(connection):
 def main(rev, name):
     """Generate a new migration script."""
     generate_migration_script(rev, name)
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,62 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "gen3_inference",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "gen3_inference.main:app_instance",
+                "--reload",
+                "--reload-dir",
+                "./services/gen3_inference/src/gen3_inference",
+                "--port",
+                "4143",
+                "--env-file",
+                ".env",
+                "--app-dir",
+                "./services/gen3_inference/src/gen3_inference"
+            ],
+            "jinja": true
+        },
+        {
+            "name": "gen3_embeddings",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "gen3_embeddings.main:app_instance",
+                "--reload",
+                "--reload-dir",
+                "./services/gen3_embeddings/src/gen3_embeddings",
+                "--port",
+                "4142",
+                "--env-file",
+                ".env",
+                "--app-dir",
+                "./services/gen3_embeddings/src/gen3_embeddings"
+            ],
+            "jinja": true
+        },
+        {
+            "name": "gen3_ai_model_repo",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "gen3_ai_model_repo.main:app_instance",
+                "--reload",
+                "--reload-dir",
+                "./services/gen3_ai_model_repo/src/gen3_ai_model_repo",
+                "--port",
+                "4141",
+                "--env-file",
+                ".env",
+                "--app-dir",
+                "./services/gen3_ai_model_repo/src/gen3_ai_model_repo"
+            ],
+            "jinja": true
+        }
+    ]
+}

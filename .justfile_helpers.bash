@@ -112,3 +112,6 @@ report_error_if_failed() {
     echo
   fi
 }
+
+# remove any VIRTUAL_ENV to remove uv warnings about envs that aren't this one
+unset VIRTUAL_ENV
