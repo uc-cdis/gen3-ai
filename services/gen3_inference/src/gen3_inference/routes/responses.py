@@ -1,7 +1,6 @@
-from collections.abc import AsyncGenerator
-
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse, StreamingResponse
+import httpx
+from fastapi import APIRouter, HTTPException
+from openresponses_types import Error
 from openresponses_types.types import (
     # Request body
     CreateResponseBody,
@@ -34,41 +33,17 @@ from openresponses_types.types import (
     ResponseResource,
 )
 
-responses_router = APIRouter()
+from gen3_inference import config
+from gen3_inference.config import logging
+from gen3_inference.errors import (
+    ERROR_TYPE_INVALID_REQUEST,
+    ERROR_TYPE_NOT_FOUND,
+)
+from gen3_inference.inference_protocols.base import InferenceProtocolClient
+from gen3_inference.inference_protocols.kserve_v2 import KServev2Client
+from gen3_inference.inference_protocols.openresponses import OpenResponsesClient
 
-MOCK_OUTPUT = [
-    # ItemFields
-    # Message
-    {
-        "type": "message",
-        "id": "",
-        "status": "completed",
-        "role": "assistant",
-        "content": [
-            {
-                # InputTextContent
-                "type": "input_text",
-                "text": "foobar",
-            }
-        ],
-    },
-    # Function Call
-    {
-        "type": "function_call",
-        "id": "0",
-        "call_id": "0",
-        "name": "test",
-        "arguments": "foo=bar",
-        "status": "completed",
-        "output": [
-            {
-                # InputTextContent
-                "type": "input_text",
-                "text": "foobar",
-            }
-        ],
-    },
-]
+responses_router = APIRouter()
 
 
 @responses_router.post(
@@ -120,128 +95,110 @@ async def create_response(
     Implements the /responses endpoint defined in the Open Responses OpenAPI spec,
     using the models from openresponses_types.types
     """
+    # this will search "locally" first, then try other configured hosts
+    ai_model_info = await _get_ai_model_info(body)
+    logging.debug(f"Found model, info: {ai_model_info}")
+
+    # this will prefer using Open Responses inference protocol if available
+    inference_protocol_client = await _get_inference_protocol_client(
+        ai_model_info.get("inference_protocol_clients", [])
+    )
+    logging.debug(f"Using inference protocol: `{inference_protocol_client.NAME}`")
+
     if not body.stream:
         # ResponseResource as JSON
-        return _create_non_streaming_response(body)
+        response = await inference_protocol_client.generate_non_streaming_response(body=body)
     else:
         # text/event-stream of streaming events
-        return _create_streaming_response(body)
+        response = inference_protocol_client.generate_streaming_response(body=body)
+
+    return response
 
 
-def _create_non_streaming_response(body):
-    # TODO: actually implement
+async def _get_ai_model_info(body: CreateResponseBody) -> dict:
+    ai_model = body.model
+    if not ai_model:
+        error = Error(code=ERROR_TYPE_INVALID_REQUEST, message="Must request a model.")
+        raise HTTPException(status_code=400, detail=dict(error))
 
-    # Here we build a minimal valid ResponseResource using incoming config.
-    response = ResponseResource(
-        id="resp_dummy_id",
-        object="response",
-        created_at=0,
-        completed_at=0,
-        status="completed",
-        incomplete_details=None,
-        model=body.model or "dummy-model",
-        previous_response_id=body.previous_response_id,
-        instructions=body.instructions,
-        output=MOCK_OUTPUT,
-        error=None,
-        tools=[],
-        tool_choice=body.tool_choice or "auto",
-        truncation=body.truncation or "auto",
-        parallel_tool_calls=bool(body.parallel_tool_calls),
-        text={"format": {"type": "text"}, "verbosity": "medium"},
-        top_p=body.top_p or 1.0,
-        presence_penalty=body.presence_penalty or 0.0,
-        frequency_penalty=body.frequency_penalty or 0.0,
-        top_logprobs=body.top_logprobs or 0,
-        temperature=body.temperature or 1.0,
-        reasoning=body.reasoning,
-        usage=None,
-        max_output_tokens=body.max_output_tokens,
-        max_tool_calls=body.max_tool_calls,
-        store=bool(body.store),
-        background=bool(body.background),
-        service_tier=body.service_tier or "default",
-        metadata=body.metadata or {},
-        safety_identifier=body.safety_identifier,
-        prompt_cache_key=body.prompt_cache_key,
-    )
-    return JSONResponse(content=response.model_dump())
+    # 1. is model available at this domain?
+    # hit GET {config.GEN3_AI_MODEL_REPO_URL}/ai-models/{model_name} to check if model is available at this domain
+    # hit with oauth2 client credentials
 
+    # 2. is model available at configured trusted domains?
+    # check config for other domains, for each one, hit GET {that domain}/ai-models/{model_name}
+    # with oauth2 client credentials
+    #
+    # 3. auth user
 
-def _create_streaming_response(body):
-    async def event_generator() -> AsyncGenerator[str]:
-        seq = 0
+    # Check if model is available at the primary domain
+    is_model_available = False
 
-        # build a base ResponseResource snapshot to reuse in events
-        base_response = ResponseResource(
-            id="resp_stream_dummy_id",
-            object="response",
-            created_at=0,
-            completed_at=None,
-            status="in_progress",
-            incomplete_details=None,
-            model=body.model or "dummy-model",
-            previous_response_id=body.previous_response_id,
-            instructions=body.instructions,
-            output=MOCK_OUTPUT,
-            error=None,
-            tools=[],
-            tool_choice=body.tool_choice or "auto",
-            truncation=body.truncation or "auto",
-            parallel_tool_calls=bool(body.parallel_tool_calls),
-            text={"format": {"type": "text"}, "verbosity": "medium"},
-            top_p=body.top_p or 1.0,
-            presence_penalty=body.presence_penalty or 0.0,
-            frequency_penalty=body.frequency_penalty or 0.0,
-            top_logprobs=body.top_logprobs or 0,
-            temperature=body.temperature or 1.0,
-            reasoning=body.reasoning,
-            usage=None,
-            max_output_tokens=body.max_output_tokens,
-            max_tool_calls=body.max_tool_calls,
-            store=bool(body.store),
-            background=bool(body.background),
-            service_tier=body.service_tier or "default",
-            metadata=body.metadata or {},
-            safety_identifier=body.safety_identifier,
-            prompt_cache_key=body.prompt_cache_key,
+    primary_url = f"{config.GEN3_AI_MODEL_REPO_URL}/ai-models/{ai_model}"
+    async with httpx.AsyncClient() as client:
+        # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
+
+        # TODO: don't hardcode this
+        # primary_resp = await client.get(primary_url)
+        primary_resp = httpx.Response(
+            json={
+                "primary_url": primary_url,
+                "ai_model_info": {
+                    "name": "llama3.2:latest",
+                    "version": "llama3.2:latest",
+                    "type": "llama3.2:latest",
+                    "description": "llama3.2:latest",
+                    "url": "llama3.2:latest",
+                    "tags": ["llama3.2:latest"],
+                    "inference_protocol_clients": ["kserve_v2", "openresponses", "kserve_v1"],
+                },
+            },
+            status_code=200,
         )
 
-        # 1. response.created
-        created_event = ResponseCreatedStreamingEvent(
-            type="response.created",
-            sequence_number=seq,
-            response=base_response,
+        if primary_resp.status_code == 404:
+            # not found in primary, so check if model is available at any of the configured trusted domains
+            trusted_domains = list(config.ALLOWED_GEN3_INFERENCE_HOSTS)
+            for domain in trusted_domains:
+                # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
+                url = f"{domain.rstrip('/')}/ai-models/{ai_model}"
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    is_model_available = True
+                    break
+        else:
+            is_model_available = True
+
+    if not is_model_available:
+        error = Error(
+            code=ERROR_TYPE_NOT_FOUND, message=f"The requested model '{ai_model}' was not found on any trusted domain."
         )
-        yield f"data: {created_event.model_dump_json()}\n\n"
-        seq += 1
+        raise HTTPException(status_code=404, detail=dict(error))
 
-        # 2. response.in_progress (stub)
-        in_progress_event = ResponseInProgressStreamingEvent(
-            type="response.in_progress",
-            sequence_number=seq,
-            response=base_response,
+    ai_model_info = primary_resp.json().get("ai_model_info")
+
+    if not ai_model_info:
+        error = Error(
+            code=ERROR_TYPE_NOT_FOUND,
+            message="The requested model information was not found. Choose a different model.",
         )
-        yield f"data: {in_progress_event.model_dump_json()}\n\n"
-        seq += 1
+        raise HTTPException(status_code=400, detail=dict(error))
 
-        # TODO: in real implementation, between in_progress and completed you
-        # would:
-        #   - stream ResponseOutputTextDeltaStreamingEvent / ...Done events
-        #   - stream tool call events
-        #   - update response snapshot as generation proceeds
+    return ai_model_info
 
-        # 3. response.completed (stub)
-        completed_response = base_response.copy(update={"status": "completed", "completed_at": 0})
-        completed_event = ResponseCompletedStreamingEvent(
-            type="response.completed",
-            sequence_number=seq,
-            response=completed_response,
+
+async def _get_inference_protocol_client(all_model_inference_protocol_client_names: list[str]):
+    inference_protocol_client: InferenceProtocolClient | None = None
+
+    if OpenResponsesClient.NAME in all_model_inference_protocol_client_names:
+        inference_protocol_client = OpenResponsesClient()
+    elif KServev2Client.NAME in all_model_inference_protocol_client_names:
+        inference_protocol_client = KServev2Client(base_url="", model_name="")
+    else:
+        error = Error(
+            code=ERROR_TYPE_INVALID_REQUEST,
+            message="None of the inference protocols for the AI model are supported. Choose a different model.",
         )
-        yield f"data: {completed_event.model_dump_json()}\n\n"
-        seq += 1
+        raise HTTPException(status_code=400, detail=dict(error))
 
-        # TODO: is this required?
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return inference_protocol_client

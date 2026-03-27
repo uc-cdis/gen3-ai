@@ -64,6 +64,13 @@ if ALLOW_ANONYMOUS_ACCESS:
 # Defaults to the default service name in k8s magic DNS setup
 ARBORIST_URL = starlette_config("ARBORIST_URL", default="http://arborist-service", cast=str)
 
+# Location of these AI services
+GEN3_AI_MODEL_REPO_URL = starlette_config(
+    "GEN3_AI_MODEL_REPO_URL", default="http://gen3-ai-model-repo-service", cast=str
+)
+GEN3_EMBEDDINGS_URL = starlette_config("GEN3_EMBEDDINGS_URL", default="http://gen3-embeddings-service", cast=str)
+GEN3_INFERENCE_URL = starlette_config("GEN3_INFERENCE_URL", default="http://gen3-inference-service", cast=str)
+
 PUBLIC_ROUTES = {
     "/",
     "/docs",

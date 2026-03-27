@@ -1,4 +1,6 @@
 # this is the config module
+from starlette.datastructures import CommaSeparatedStrings, Secret
+
 from common import config as common_config
 
 # this is the starlette.config.Config() class instance
@@ -7,8 +9,14 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
-VERBOSE_LLM_LOGS = starlette_config("VERBOSE_LLM_LOGS", cast=bool, default=False)
+# TODO: fix this
+OAUTH2_CLIENT_CREDENTIALS = starlette_config("OAUTH2_CLIENT_CREDENTIALS", cast=Secret, default="")
 
+# WARNING: Careful changing these, they require a trust relationship and client credentials
+ALLOWED_GEN3_INFERENCE_HOSTS = starlette_config("ALLOWED_GEN3_INFERENCE_HOSTS", cast=CommaSeparatedStrings, default="")
+logging.info(f"ALLOWED_GEN3_INFERENCE_HOSTS is {ALLOWED_GEN3_INFERENCE_HOSTS}")
+
+VERBOSE_LLM_LOGS = starlette_config("VERBOSE_LLM_LOGS", cast=bool, default=False)
 logging.info(f"VERBOSE_LLM_LOGS is {VERBOSE_LLM_LOGS}")
 
 URL_PREFIX = starlette_config("GEN3_INFERENCE_PROXY_URL_PREFIX", default="", cast=str)
@@ -38,4 +46,7 @@ ENDPOINTS_WITHOUT_METRICS = common_config.ENDPOINTS_WITHOUT_METRICS
 ENABLE_OPENTELEMETRY_TRACES = common_config.ENABLE_OPENTELEMETRY_TRACES
 OTEL_EXPORTER_OTLP_ENDPOINT = common_config.OTEL_EXPORTER_OTLP_ENDPOINT
 ASYNC_HTTP_CLIENT_TIMEOUT = common_config.ASYNC_HTTP_CLIENT_TIMEOUT
+GEN3_AI_MODEL_REPO_URL = common_config.GEN3_AI_MODEL_REPO_URL
+GEN3_EMBEDDINGS_URL = common_config.GEN3_EMBEDDINGS_URL
+GEN3_INFERENCE_URL = common_config.GEN3_INFERENCE_URL
 # DO NOT EDIT THE ABOVE
