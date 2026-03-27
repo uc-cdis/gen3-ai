@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Gen3 Inference"
 dependencies = [
     "common",
+    "openai>=2.30.0",
     "openresponses-types>=2.3.0.post1",
 ]
 requires-python = "~=3.13.0"
