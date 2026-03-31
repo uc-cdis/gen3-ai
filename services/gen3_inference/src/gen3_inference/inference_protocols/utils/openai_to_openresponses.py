@@ -26,6 +26,7 @@ from openai.types.responses.response import ToolChoice as OaiToolChoice
 from openai.types.shared import Reasoning as OaiReasoning
 from openresponses_types import (
     AllowedToolChoice,
+    Any,
     Error,
     FunctionCall,
     FunctionCallOutput,
@@ -69,10 +70,12 @@ from gen3_inference.config import logging
 
 def openai_response_to_openresponses(
     openai_response: OpenAIResponse,
+    metadata: dict[str, Any] | None = None,
 ) -> ResponseResource:
     """
     Convert an OpenAI Python-Client `Response` into an Open Responses `ResponseResource`.
     """
+    metadata = metadata or {}
     return ResponseResource(
         id=openai_response.id,
         object=Object.response,
@@ -111,7 +114,7 @@ def openai_response_to_openresponses(
         store=False,
         background=bool(openai_response.background),
         service_tier=openai_response.service_tier if openai_response.service_tier else "default",
-        metadata=openai_response.metadata,
+        metadata=(openai_response.metadata or {}).update(metadata),
         safety_identifier=openai_response.safety_identifier,
         prompt_cache_key=openai_response.prompt_cache_key,
     )

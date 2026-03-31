@@ -105,7 +105,7 @@ test $SERVICE="all":
   else
     print_header "just test:" "testing" "$SERVICE" "service..."
     cd "./services/$SERVICE"
-    uv run pytest . -vv
+    uv run pytest -n auto . -vv
     exit_code=$?
     cd -
 

@@ -1,6 +1,5 @@
 import httpx
 from fastapi import APIRouter, HTTPException
-from openresponses_types import Error
 from openresponses_types.types import (
     # Request body
     CreateResponseBody,
@@ -42,6 +41,7 @@ from gen3_inference.errors import (
 from gen3_inference.inference_protocols.base import InferenceProtocolClient
 from gen3_inference.inference_protocols.kserve_v2 import KServev2Client
 from gen3_inference.inference_protocols.openresponses import OpenResponsesClient
+from gen3_inference.types import OpenResponsesError
 
 responses_router = APIRouter()
 
@@ -96,13 +96,11 @@ async def create_response(
     using the models from openresponses_types.types
     """
     # this will search "locally" first, then try other configured hosts
-    ai_model_info = await _get_ai_model_info(body)
+    ai_model_info = await get_ai_model_info(body)
     logging.debug(f"Found model, info: {ai_model_info}")
 
     # this will prefer using Open Responses inference protocol if available
-    inference_protocol_client = await _get_inference_protocol_client(
-        ai_model_info.get("inference_protocol_clients", [])
-    )
+    inference_protocol_client = await get_inference_protocol_client(ai_model_info.get("inference_protocol_clients", []))
     logging.debug(f"Using inference protocol: `{inference_protocol_client.NAME}`")
 
     if not body.stream:
@@ -115,11 +113,19 @@ async def create_response(
     return response
 
 
-async def _get_ai_model_info(body: CreateResponseBody) -> dict:
+async def get_ai_model_info(body: CreateResponseBody) -> dict:
+    """
+    Get AI Model Info by talking with local and connected Gen3 AI Model Repos
+
+    Args:
+        body CreateResponseBody: the request body containing model info
+    """
     ai_model = body.model
     if not ai_model:
-        error = Error(code=ERROR_TYPE_INVALID_REQUEST, message="Must request a model.")
-        raise HTTPException(status_code=400, detail=dict(error))
+        error = OpenResponsesError(
+            type=ERROR_TYPE_INVALID_REQUEST, code=ERROR_TYPE_INVALID_REQUEST, message="Must request a model."
+        )
+        raise HTTPException(status_code=400, detail=error.to_json())
 
     # 1. is model available at this domain?
     # hit GET {config.GEN3_AI_MODEL_REPO_URL}/ai-models/{model_name} to check if model is available at this domain
@@ -138,23 +144,23 @@ async def _get_ai_model_info(body: CreateResponseBody) -> dict:
     async with httpx.AsyncClient() as client:
         # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
 
-        # TODO: don't hardcode this
-        # primary_resp = await client.get(primary_url)
-        primary_resp = httpx.Response(
-            json={
-                "primary_url": primary_url,
-                "ai_model_info": {
-                    "name": "llama3.2:latest",
-                    "version": "llama3.2:latest",
-                    "type": "llama3.2:latest",
-                    "description": "llama3.2:latest",
-                    "url": "llama3.2:latest",
-                    "tags": ["llama3.2:latest"],
-                    "inference_protocol_clients": ["kserve_v2", "openresponses", "kserve_v1"],
-                },
-            },
-            status_code=200,
-        )
+        # TODO: try and backoff
+        primary_resp = await client.get(primary_url)
+        # primary_resp = httpx.Response(
+        #     json={
+        #         "primary_url": primary_url,
+        #         "ai_model_info": {
+        #             "name": ai_model,
+        #             "version": "llama3.2:latest",
+        #             "type": "llama3.2:latest",
+        #             "description": "llama3.2:latest",
+        #             "url": "llama3.2:latest",
+        #             "tags": ["llama3.2:latest"],
+        #             "inference_protocol_clients": ["kserve_v2", "openresponses", "kserve_v1"],
+        #         },
+        #     },
+        #     status_code=200,
+        # )
 
         if primary_resp.status_code == 404:
             # not found in primary, so check if model is available at any of the configured trusted domains
@@ -162,32 +168,43 @@ async def _get_ai_model_info(body: CreateResponseBody) -> dict:
             for domain in trusted_domains:
                 # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
                 url = f"{domain.rstrip('/')}/ai-models/{ai_model}"
-                resp = await client.get(url)
-                if resp.status_code == 200:
+                primary_resp = await client.get(url)
+                if primary_resp.status_code == 200:
                     is_model_available = True
                     break
         else:
             is_model_available = True
 
     if not is_model_available:
-        error = Error(
-            code=ERROR_TYPE_NOT_FOUND, message=f"The requested model '{ai_model}' was not found on any trusted domain."
+        error = OpenResponsesError(
+            type=ERROR_TYPE_NOT_FOUND,
+            code=ERROR_TYPE_NOT_FOUND,
+            message=f"The requested model '{ai_model}' was not found on any trusted domain.",
         )
-        raise HTTPException(status_code=404, detail=dict(error))
+        raise HTTPException(status_code=404, detail=error.to_json())
 
     ai_model_info = primary_resp.json().get("ai_model_info")
 
     if not ai_model_info:
-        error = Error(
+        error = OpenResponsesError(
+            type=ERROR_TYPE_NOT_FOUND,
             code=ERROR_TYPE_NOT_FOUND,
             message="The requested model information was not found. Choose a different model.",
         )
-        raise HTTPException(status_code=400, detail=dict(error))
+        raise HTTPException(status_code=400, detail=error.to_json())
 
     return ai_model_info
 
 
-async def _get_inference_protocol_client(all_model_inference_protocol_client_names: list[str]):
+async def get_inference_protocol_client(all_model_inference_protocol_client_names: list[str]):
+    """
+    Get the client class given a list of all available inference protocol client names for a
+    given model. This will select the appropriate one or raise an error.
+
+    Args:
+        all_model_inference_protocol_client_names list[str]: A list of all available inference
+            protocol client names for a given model
+    """
     inference_protocol_client: InferenceProtocolClient | None = None
 
     if OpenResponsesClient.NAME in all_model_inference_protocol_client_names:
@@ -195,10 +212,11 @@ async def _get_inference_protocol_client(all_model_inference_protocol_client_nam
     elif KServev2Client.NAME in all_model_inference_protocol_client_names:
         inference_protocol_client = KServev2Client(base_url="", model_name="")
     else:
-        error = Error(
+        error = OpenResponsesError(
+            type=ERROR_TYPE_INVALID_REQUEST,
             code=ERROR_TYPE_INVALID_REQUEST,
             message="None of the inference protocols for the AI model are supported. Choose a different model.",
         )
-        raise HTTPException(status_code=400, detail=dict(error))
+        raise HTTPException(status_code=400, detail=error.to_json())
 
     return inference_protocol_client

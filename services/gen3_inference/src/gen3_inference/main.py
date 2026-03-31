@@ -4,7 +4,6 @@ from importlib.metadata import version
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from openresponses_types import Error
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from common.auth import get_user_id
@@ -16,6 +15,7 @@ from gen3_inference.errors import ERROR_TYPE_INVALID_REQUEST, ERROR_TYPE_SERVER_
 from gen3_inference.metrics import InferenceServiceMetrics
 from gen3_inference.routes.basic import basic_router
 from gen3_inference.routes.responses import responses_router
+from gen3_inference.types import OpenResponsesError
 
 
 def get_app() -> FastAPI:
@@ -25,7 +25,6 @@ def get_app() -> FastAPI:
     Returns:
         FastAPI: The FastAPI app object
     """
-
     fastapi_app = FastAPI(
         title="Gen3 Inference Service",
         version=version("gen3_inference"),
@@ -54,7 +53,9 @@ def get_app() -> FastAPI:
         try:
             response = await call_next(request)
         except Exception as exc:
-            error_output = dict(Error(code=ERROR_TYPE_SERVER_ERROR, message="Internal server error"))
+            error_output = OpenResponsesError(
+                type=ERROR_TYPE_SERVER_ERROR, code=ERROR_TYPE_SERVER_ERROR, message="Internal server error"
+            ).to_json()
             logging.error(f"{type(exc).__name__}: {exc}", exc_info=True)
             return JSONResponse(error_output, status_code=500)
 
@@ -106,7 +107,9 @@ def get_app() -> FastAPI:
             param = loc
             message += f"\nField: {param}, Error: {error['msg']}"
 
-        error_output = dict(Error(code=ERROR_TYPE_INVALID_REQUEST, message=message))
+        error_output = OpenResponsesError(
+            type=ERROR_TYPE_INVALID_REQUEST, code=ERROR_TYPE_INVALID_REQUEST, message=message
+        ).to_json()
 
         # if there's only 1 parameter with an issue, include it
         # the spec is somewhat unclear about how to enumerate multiple parameter issues
@@ -114,7 +117,7 @@ def get_app() -> FastAPI:
         if len(exc.errors()) == 1:
             loc = exc.errors()[0]["loc"]
             param = ".".join([str(item) for item in loc])
-            error_output.update({"param": param})
+            error_output["error"].update({"param": param})
 
         return JSONResponse(error_output, status_code=400)
 
