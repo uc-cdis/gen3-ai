@@ -99,5 +99,5 @@ ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=f
 # you will need to implement the common interface in common/metrics/base.py.
 # Note: default is no metrics.
 ENABLE_METRICS = starlette_config("ENABLE_METRICS", default=True, cast=bool)
-METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default=None, cast=str)
+METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default="prometheus", cast=str)
 PROMETHEUS_MULTIPROC_DIR = starlette_config("PROMETHEUS_MULTIPROC_DIR", default="/var/tmp/prometheus_metrics", cast=str)
