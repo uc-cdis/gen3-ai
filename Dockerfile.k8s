@@ -14,8 +14,11 @@ ENV OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
 COPY --chown=gen3:gen3 /libraries /libraries
 COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/src /services/${SERVICE_NAME}/src
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/dockerrun.bash /services
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/gunicorn.conf.py /services
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/pyproject.toml /services/${SERVICE_NAME}/pyproject.toml
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}/uv.lock
+
+COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
+COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/gunicorn.conf.py /services/gunicorn.conf.py
 
 WORKDIR /services/${SERVICE_NAME}
 
@@ -27,8 +30,8 @@ RUN chown -R gen3:gen3 /venv
 
 USER gen3
 
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/pyproject.toml /services/${SERVICE_NAME}
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}/uv.lock
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/pyproject.toml /services/${SERVICE_NAME}/pyproject.toml
 
 # locked and frozen ensure lock file is not modified (e.g.
 # exact deps are installed as listed)

@@ -205,7 +205,6 @@ components:
       type: object
       required:
         - vector
-        - input_index
         - embedding_id
       properties:
         vector:
@@ -213,8 +212,6 @@ components:
           items:
             type: number
             format: float
-        input_index:
-          type: integer
         embedding_id:
           type: string
           format: uuid
@@ -233,7 +230,72 @@ components:
               format: url
               example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
 
-    SingleEmbeddingResult:
+    SingleEmbeddingResultNoIndexFromInput:
+      type: object
+      required:
+        - vector
+        - input_index
+        - embedding_id
+      properties:
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+        input_index:
+          type: integer
+          example: 0
+        embedding_id:
+          type: string
+          format: uuid
+        info:
+          type: object
+          properties:
+            authz:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}"
+            authz_version:
+              type: integer
+              example: 0
+            self:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+
+    SingleEmbedding:
+      type: object
+      required:
+        - index_name
+        - embedding_id
+        - vector
+      properties:
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+        embedding_id:
+          type: string
+          format: uuid
+        info:
+          type: object
+          properties:
+            index_name:
+              type: string
+            authz:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}"
+            authz_version:
+              type: integer
+              example: 0
+            self:
+              type: string
+              format: url
+              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+
+    SingleEmbeddingFromInput:
       type: object
       required:
         - index_name
@@ -248,6 +310,7 @@ components:
             format: float
         input_index:
           type: integer
+          example: 0
         embedding_id:
           type: string
           format: uuid
@@ -276,7 +339,21 @@ components:
         embeddings:
           type: array
           items:
-            $ref: "#/components/schemas/SingleEmbeddingResult"
+            $ref: "#/components/schemas/SingleEmbedding"
+        vector_indices:
+          type: array
+          items:
+            $ref: "#/components/schemas/VectorIndex"
+
+    EmbeddingResponseFromInput:
+      type: object
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleEmbeddingFromInput"
         vector_indices:
           type: array
           items:
@@ -291,6 +368,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleEmbeddingResultNoIndex"
+
+    EmbeddingResponseNoIndexFromInput:
+      type: object
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleEmbeddingResultNoIndexFromInput"
 
     AllTopicsResponse:
       type: object
@@ -426,8 +513,8 @@ components:
     SingleSearchResultNoIndex:
       type: object
       required:
-        - id
-        - score
+        - embedding
+        - metadata
       properties:
         embedding:
           $ref: '#/components/schemas/SingleEmbeddingResultNoIndex'
@@ -447,11 +534,11 @@ components:
     SingleSearchResult:
       type: object
       required:
-        - id
-        - score
+        - embedding
+        - metadata
       properties:
         embedding:
-          $ref: '#/components/schemas/SingleEmbeddingResult'
+          $ref: '#/components/schemas/SingleEmbedding'
         metadata:
           # TODO: perhaps we need to handle other data returning
           # depending on the type of search performed. similarity_score
@@ -548,25 +635,29 @@ components:
 
 paths:
   # ----------- Embeddings -------------
-  /embeddings/{embedding_uuid}:
-    get:
-      tags:
-        - Embeddings
-      summary: Read embedding from unknown index
-      description: |
-        This will require a lookup to know what index this is in, so will be
-        less efficient than `/vector/indices/{index_name}/embeddings/{embedding_uuid}`.
-      parameters:
-        - $ref: "#/components/parameters/EmbeddingId"
-      responses:
-        "200":
-          description: Embedding detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
+  # Let's not support this at all for now, but we can add it later if needed.
+  # This muddies the intended usage with a global search that will be inefficient.
+  # The intended setup will always include the vector index information anyway.
+  #
+  # /embeddings/{embedding_uuid}:
+  #   get:
+  #     tags:
+  #       - Embeddings
+  #     summary: Read embedding from unknown index
+  #     description: |
+  #       This will require a lookup to know what index this is in, so will be
+  #       less efficient than `/vector/indices/{index_name}/embeddings/{embedding_uuid}`.
+  #     parameters:
+  #       - $ref: "#/components/parameters/EmbeddingId"
+  #     responses:
+  #       "200":
+  #         description: Embedding detail
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/SingleEmbeddingFromInput"
+  #       "404":
+  #         $ref: "#/components/responses/NotFound"
 
   /vector/indices/{index_name}/embeddings/{embedding_uuid}:
     get:
@@ -582,7 +673,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
+                $ref: "#/components/schemas/SingleEmbedding"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -610,7 +701,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SingleEmbeddingResult"
+                $ref: "#/components/schemas/SingleEmbedding"
         "400":
           description: Dimensions don't match or other invalid input
     delete:
@@ -669,7 +760,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -687,7 +778,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
 
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -726,7 +817,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndex"
+                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -871,64 +962,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
 
   # ----------- Inference -------------
-  /ai-models/{namespace}/{model_name}/inference:
+  /v1/responses:
     post:
       tags:
         - Inference
-      summary: Run inference with a model (supports Embedding models)
+      summary: Run inference with a model (supports Embedding models).
       description: |
-        Bulk Inference Request. For a single request: supply a one-item array
-      parameters:
-        - $ref: "#/components/parameters/Namespace"
-        - $ref: "#/components/parameters/AIModelName"
-        - $ref: "#/components/parameters/IncludeModelMetadata"
-        - $ref: "#/components/parameters/IncludeDocuments"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InferenceRequest"
+        See the [Open Responses Specification](https://openresponses.org)
+        for more details.
       responses:
         "200":
           description: Inference result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InferencesResponse"
-              examples:
-                No Metadata or Docs:
-                  value:
-                    outputs:
-                      - output: "foo"
-                        input_index: 0
-                        conversation_id: "12345"
-                      - output: "bar"
-                        input_index: 1
-                        conversation_id: "67890"
-                With Metadata and Docs:
-                  value:
-                    outputs:
-                      - output: "foo"
-                        input_index: 0
-                        conversation_id: "12345"
-                        metadata:
-                          model_temperature: '0.33'
-                          num_similar_docs_to_find: '4'
-                          similarity_score_threshold: '0.5'
-                        documents:
-                        - page_content: |
-                            ", symptomatic SARS-CoV-2 infection admitted to 57 US hospitals from March 1 to April 1, 2020 were studied.It was found that in a geographically diverse early-pandemic COVID-19 cohort with complete hospital folllow-up, hospital mortality was associated with older age, comorbidity burden, and male sex. Intensive care unit admissions occurred early and were associated with protracted hospital stays. Survivors often required new health care services or respiratory support at discharge.The PETAL Network central institutional review board at Vanderbilt University and the institutional review boards at each participating hospital approved the study or determined that the study was exempt from review.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact. Study Weblinks: PETAL Network RED CORAL StudyNHLBI BioLINCC (RED CORAL) Study Design:     Control Set Study Type:Case-CohortClinical CohortCohortMulticenter NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2022-03-29 and may not include exact formatting or images.\nstudy_id: phs002363.v1.p1.c1\n_tag_0: Program: COVID 19\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
-                          metadata:
-                            row: 148
-                            source: "phs002363.v1.p1.c1"
-                        - page_content: |
-                            " and gene editing.Data available for request include allogeneic hematopoietic cell transplants for sickle cell disease (Hb SS and Hb Sβ thalassemia) in the United States from 1991 to 2019. Follow-up data through December 2020 are available.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact.   Study Weblinks:      ClinicalTrials.gov (HCT for SCD) BioLINCC (HCT for SCD)    Study Design:       Prospective Longitudinal Cohort    Study Type:  Clinical Cohort Cohort Control Set Longitudinal Longitudinal Cohort Multicenter Observational   Number of study subjects that have individual-level data available through Authorized Access:  NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2021-07-07 and may not include exact formatting or images.\nstudy_id: phs002385.v1.p1.c1\n_tag_0: Program: BioLINCC\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
-                          metadata:
-                            row: 150
-                            source: "phs002385.v1.p1.c1"
-        "400":
-          $ref: "#/components/responses/BadRequest"
 
   # ----------- AI Model Repository -------------
   /ai-models/{namespace}/{model_name}:
@@ -966,137 +1010,141 @@ paths:
                 $ref: "#/components/schemas/ModelResponse"
 
   # ----------- AI Topics -------------
-  /topics:
-    get:
-      tags:
-        - AI Topics
-      summary: Get all topics info
-      parameters:
-        - $ref: "#/components/parameters/TopicName"
-      responses:
-        "200":
-          description: Topic detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AllTopicsResponse"
+  # Note: This was a recommendation on how to better standardize
+  #       the existing Gen3 Discovery AI. Excluding this for now
+  #       while we evalute if we want to refactor that at all.
+  #
+  # /topics:
+  #   get:
+  #     tags:
+  #       - AI Topics
+  #     summary: Get all topics info
+  #     parameters:
+  #       - $ref: "#/components/parameters/TopicName"
+  #     responses:
+  #       "200":
+  #         description: Topic detail
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/AllTopicsResponse"
 
-  /topics/{topic_name}:
-    get:
-      tags:
-        - AI Topics
-      summary: Get topic info
-      parameters:
-        - $ref: "#/components/parameters/TopicName"
-      responses:
-        "200":
-          description: Topic detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SingleTopicResult"
-              examples:
-                HEAL Dataset RAG:
-                  value:
-                    topic_name: heal
-                    description: Ask about available datasets, powered by public dataset metadata like study descriptions
-                    topic_chain: TopicChainOpenAiQuestionAnswerRAG
-                    system_prompt: You answer questions about datasets that are available in NIH's
-                      Helping to End Addiction Long-term Initiative, or HEAL Initiative data platform.
-                      You'll be given relevant dataset descriptions for every dataset that's been
-                      ingested into HEAL. You are acting as a search assistant for a biomedical researcher
-                      (who will be asking you questions). The researcher is likely trying to find
-                      datasets of interest for a particular research question. You should recommend
-                      datasets that may be of interest to that researcher.
-                    metadata:
-                      model_name: gpt-5-mini
-                      model_temperature: '0.33'
-                      num_similar_docs_to_find: '4'
-                      similarity_score_threshold: '0.5'
-                Gen3 Docs RAG:
-                  value:
-                    topic_name: gen3-docs
-                    description: Ask about Gen3 software, powered by public documentation from various sources
-                    topic_chain: TopicChainOpenAiQuestionAnswerRAG
-                    system_prompt: |
-                      You answer questions about the Gen3 codebase.
-                      You'll be given relevant markdown files from the codebase.
-                    metadata:
-                      model_name: gpt-5-mini
-                      model_temperature: '0.33'
-                      num_similar_docs_to_find: '4'
-                      similarity_score_threshold: '0.5'
-                BDC Dataset RAG:
-                  value:
-                    topic_name: bdc
-                    description: Ask about available BDC datasets, powered by public dataset metadata like study descriptions
-                    topic_chain: TopicChainOpenAiQuestionAnswerRAG
-                    system_prompt: You answer questions about datasets that are available in BioData
-                      Catalyst. You'll be given relevant dataset descriptions for every dataset that's
-                      been ingested into BioData Catalyst. You are acting as a search assistant for
-                      a biomedical researcher (who will be asking you questions). The researcher is
-                      likely trying to find datasets of interest for a particular research question.
-                      You should recommend datasets that may be of interest to that researcher.
-                    metadata:
-                      model_name: gpt-5-mini
-                      model_temperature: '0.33'
-                      num_similar_docs_to_find: '4'
-                      similarity_score_threshold: '0.5'
+  # /topics/{topic_name}:
+  #   get:
+  #     tags:
+  #       - AI Topics
+  #     summary: Get topic info
+  #     parameters:
+  #       - $ref: "#/components/parameters/TopicName"
+  #     responses:
+  #       "200":
+  #         description: Topic detail
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/SingleTopicResult"
+  #             examples:
+  #               HEAL Dataset RAG:
+  #                 value:
+  #                   topic_name: heal
+  #                   description: Ask about available datasets, powered by public dataset metadata like study descriptions
+  #                   topic_chain: TopicChainOpenAiQuestionAnswerRAG
+  #                   system_prompt: You answer questions about datasets that are available in NIH's
+  #                     Helping to End Addiction Long-term Initiative, or HEAL Initiative data platform.
+  #                     You'll be given relevant dataset descriptions for every dataset that's been
+  #                     ingested into HEAL. You are acting as a search assistant for a biomedical researcher
+  #                     (who will be asking you questions). The researcher is likely trying to find
+  #                     datasets of interest for a particular research question. You should recommend
+  #                     datasets that may be of interest to that researcher.
+  #                   metadata:
+  #                     model_name: gpt-5-mini
+  #                     model_temperature: '0.33'
+  #                     num_similar_docs_to_find: '4'
+  #                     similarity_score_threshold: '0.5'
+  #               Gen3 Docs RAG:
+  #                 value:
+  #                   topic_name: gen3-docs
+  #                   description: Ask about Gen3 software, powered by public documentation from various sources
+  #                   topic_chain: TopicChainOpenAiQuestionAnswerRAG
+  #                   system_prompt: |
+  #                     You answer questions about the Gen3 codebase.
+  #                     You'll be given relevant markdown files from the codebase.
+  #                   metadata:
+  #                     model_name: gpt-5-mini
+  #                     model_temperature: '0.33'
+  #                     num_similar_docs_to_find: '4'
+  #                     similarity_score_threshold: '0.5'
+  #               BDC Dataset RAG:
+  #                 value:
+  #                   topic_name: bdc
+  #                   description: Ask about available BDC datasets, powered by public dataset metadata like study descriptions
+  #                   topic_chain: TopicChainOpenAiQuestionAnswerRAG
+  #                   system_prompt: You answer questions about datasets that are available in BioData
+  #                     Catalyst. You'll be given relevant dataset descriptions for every dataset that's
+  #                     been ingested into BioData Catalyst. You are acting as a search assistant for
+  #                     a biomedical researcher (who will be asking you questions). The researcher is
+  #                     likely trying to find datasets of interest for a particular research question.
+  #                     You should recommend datasets that may be of interest to that researcher.
+  #                   metadata:
+  #                     model_name: gpt-5-mini
+  #                     model_temperature: '0.33'
+  #                     num_similar_docs_to_find: '4'
+  #                     similarity_score_threshold: '0.5'
 
-  /topics/{topic_name}/inference:
-    post:
-      tags:
-        - AI Topics
-      summary: Run inference with a topic
-      description: |
-        Bulk Inference Request. For a single request: supply a one-item array
-      parameters:
-        - $ref: "#/components/parameters/TopicName"
-        - $ref: "#/components/parameters/IncludeModelMetadata"
-        - $ref: "#/components/parameters/IncludeDocuments"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InferenceRequest"
-      responses:
-        "200":
-          description: Inference result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InferencesResponse"
-              examples:
-                No Metadata or Docs:
-                  value:
-                    outputs:
-                      - output: "foo"
-                        input_index: 0
-                        conversation_id: "12345"
-                      - output: "bar"
-                        input_index: 1
-                        conversation_id: "67890"
-                With Metadata and Docs:
-                  value:
-                    outputs:
-                      - output: "foo"
-                        input_index: 0
-                        conversation_id: "12345"
-                        metadata:
-                          model_temperature: '0.33'
-                          num_similar_docs_to_find: '4'
-                          similarity_score_threshold: '0.5'
-                        documents:
-                        - page_content: |
-                            ", symptomatic SARS-CoV-2 infection admitted to 57 US hospitals from March 1 to April 1, 2020 were studied.It was found that in a geographically diverse early-pandemic COVID-19 cohort with complete hospital folllow-up, hospital mortality was associated with older age, comorbidity burden, and male sex. Intensive care unit admissions occurred early and were associated with protracted hospital stays. Survivors often required new health care services or respiratory support at discharge.The PETAL Network central institutional review board at Vanderbilt University and the institutional review boards at each participating hospital approved the study or determined that the study was exempt from review.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact. Study Weblinks: PETAL Network RED CORAL StudyNHLBI BioLINCC (RED CORAL) Study Design:     Control Set Study Type:Case-CohortClinical CohortCohortMulticenter NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2022-03-29 and may not include exact formatting or images.\nstudy_id: phs002363.v1.p1.c1\n_tag_0: Program: COVID 19\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
-                          metadata:
-                            row: 148
-                            source: "phs002363.v1.p1.c1"
-                        - page_content: |
-                            " and gene editing.Data available for request include allogeneic hematopoietic cell transplants for sickle cell disease (Hb SS and Hb Sβ thalassemia) in the United States from 1991 to 2019. Follow-up data through December 2020 are available.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact.   Study Weblinks:      ClinicalTrials.gov (HCT for SCD) BioLINCC (HCT for SCD)    Study Design:       Prospective Longitudinal Cohort    Study Type:  Clinical Cohort Cohort Control Set Longitudinal Longitudinal Cohort Multicenter Observational   Number of study subjects that have individual-level data available through Authorized Access:  NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2021-07-07 and may not include exact formatting or images.\nstudy_id: phs002385.v1.p1.c1\n_tag_0: Program: BioLINCC\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
-                          metadata:
-                            row: 150
-                            source: "phs002385.v1.p1.c1"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+  # /topics/{topic_name}/inference:
+  #   post:
+  #     tags:
+  #       - AI Topics
+  #     summary: Run inference with a topic
+  #     description: |
+  #       Bulk Inference Request. For a single request: supply a one-item array
+  #     parameters:
+  #       - $ref: "#/components/parameters/TopicName"
+  #       - $ref: "#/components/parameters/IncludeModelMetadata"
+  #       - $ref: "#/components/parameters/IncludeDocuments"
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/InferenceRequest"
+  #     responses:
+  #       "200":
+  #         description: Inference result
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/InferencesResponse"
+  #             examples:
+  #               No Metadata or Docs:
+  #                 value:
+  #                   outputs:
+  #                     - output: "foo"
+  #                       input_index: 0
+  #                       conversation_id: "12345"
+  #                     - output: "bar"
+  #                       input_index: 1
+  #                       conversation_id: "67890"
+  #               With Metadata and Docs:
+  #                 value:
+  #                   outputs:
+  #                     - output: "foo"
+  #                       input_index: 0
+  #                       conversation_id: "12345"
+  #                       metadata:
+  #                         model_temperature: '0.33'
+  #                         num_similar_docs_to_find: '4'
+  #                         similarity_score_threshold: '0.5'
+  #                       documents:
+  #                       - page_content: |
+  #                           ", symptomatic SARS-CoV-2 infection admitted to 57 US hospitals from March 1 to April 1, 2020 were studied.It was found that in a geographically diverse early-pandemic COVID-19 cohort with complete hospital folllow-up, hospital mortality was associated with older age, comorbidity burden, and male sex. Intensive care unit admissions occurred early and were associated with protracted hospital stays. Survivors often required new health care services or respiratory support at discharge.The PETAL Network central institutional review board at Vanderbilt University and the institutional review boards at each participating hospital approved the study or determined that the study was exempt from review.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact. Study Weblinks: PETAL Network RED CORAL StudyNHLBI BioLINCC (RED CORAL) Study Design:     Control Set Study Type:Case-CohortClinical CohortCohortMulticenter NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2022-03-29 and may not include exact formatting or images.\nstudy_id: phs002363.v1.p1.c1\n_tag_0: Program: COVID 19\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
+  #                         metadata:
+  #                           row: 148
+  #                           source: "phs002363.v1.p1.c1"
+  #                       - page_content: |
+  #                           " and gene editing.Data available for request include allogeneic hematopoietic cell transplants for sickle cell disease (Hb SS and Hb Sβ thalassemia) in the United States from 1991 to 2019. Follow-up data through December 2020 are available.Instructions for requesting individual-level data are available on BioData Catalyst at https://biodatacatalyst.nhlbi.nih.gov/resources/data/. Apply for data access in dbGaP. Upon approval, users may begin accessing requested data in BioData Catalyst. For questions about availability, you may contact the BioData Catalyst team at https://biodatacatalyst.nhlbi.nih.gov/contact.   Study Weblinks:      ClinicalTrials.gov (HCT for SCD) BioLINCC (HCT for SCD)    Study Design:       Prospective Longitudinal Cohort    Study Type:  Clinical Cohort Cohort Control Set Longitudinal Longitudinal Cohort Multicenter Observational   Number of study subjects that have individual-level data available through Authorized Access:  NOTE: This text was scraped from https://www.ncbi.nlm.nih.gov/ on 2021-07-07 and may not include exact formatting or images.\nstudy_id: phs002385.v1.p1.c1\n_tag_0: Program: BioLINCC\n_tag_1: Study Registration: dbGaP\n_tag_2: Data Type: Clinical Phenotype\n_tag_3: \n_tag_4: ",
+  #                         metadata:
+  #                           row: 150
+  #                           source: "phs002385.v1.p1.c1"
+  #       "400":
+  #         $ref: "#/components/responses/BadRequest"

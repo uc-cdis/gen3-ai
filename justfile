@@ -105,7 +105,7 @@ test $SERVICE="all":
   else
     print_header "just test:" "testing" "$SERVICE" "service..."
     cd "./services/$SERVICE"
-    uv run pytest . -vv
+    uv run pytest -n auto . -vv
     exit_code=$?
     cd -
 
@@ -124,7 +124,7 @@ build $SERVICE="all":
     just build_all
   else
     print_header "just build:" "building" "$SERVICE" "service..."
-    docker build -t $SERVICE --build-arg SERVICE_NAME="$SERVICE" .
+    docker build -t $SERVICE --build-arg SERVICE_NAME="$SERVICE" -f Dockerfile.k8s .
 
     report_error_or_success $? "just build:" "building" "$SERVICE" "service!"
   fi
@@ -145,7 +145,7 @@ build $SERVICE="all":
     gunicorn \
     $SERVICE.main:app_instance \
     -k uvicorn.workers.UvicornWorker \
-    -c gunicorn.conf.py \
+    -c ../../deployments/k8s/services/${SERVICE}/gunicorn.conf.py \
     --access-logfile - \
     --error-logfile -
 
@@ -167,16 +167,23 @@ format $SERVICE="all":
   if [ $SERVICE == "all" ]; then
     just format_all
   else
-    print_header "just format:" "formatting" "$SERVICE" "service..."
-    if [ $SERVICE == "all" ]; then
-      for dir in services/*; do
-        print_header "just format:" "formatting" "${dir#services/}" "..."
-        uv run --directory "./services/${dir#services/}" ruff format
-      done
-    else
-      uv run --directory ./services/$SERVICE ruff format
-    fi
+    print_header "just format:" "formatting" "$SERVICE" "..."
+    uv run --directory $SERVICE ruff format
   fi
+
+venv_reset:
+  #!/usr/bin/env bash
+  source .justfile_helpers.bash
+  for dir in services/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
+  for dir in libraries/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
 
 snyk $SERVICE="all":
   #!/usr/bin/env bash
@@ -223,31 +230,34 @@ snyk $SERVICE="all":
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all":
+lint $SERVICE="all" $EXTRA_ARG="":
   #!/usr/bin/env bash
   source .justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lint_all
+    just lint_all "$EXTRA_ARG"
   else
-    # install to get ruff and other things required for formatting and linting
-    just install $SERVICE
+    # install services to get ruff and other things required for formatting and linting
+    if [[ $SERVICE == *services* ]]; then
+      just install ${SERVICE#services/}
+    fi
+
     just format $SERVICE
 
     print_header "just lint:" "ruff check" "$SERVICE" "..."
     start=$(date +%s.%N)
-    uv run --directory "./services/$SERVICE" ruff check ./src --fix
+    uv run --directory "$SERVICE" ruff check ./src --fix $EXTRA_ARG
     end=$(date +%s.%N)
 
     elapsed_ms=$(awk "BEGIN {printf \"%.0f\", ($end-$start)*1000}")
     echo "ruff check finished in $elapsed_ms ms."
 
     exit_code=$?
-    report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "service!"
+    report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "!"
     overall_exit=$((overall_exit | $exit_code))
     echo
 
-    report_error_or_success $overall_exit "just lint:" "linting" "$SERVICE" "service!"
+    report_error_or_success $overall_exit "just lint:" "linting" "$SERVICE" "!"
 
     exit $overall_exit
   fi
@@ -267,16 +277,24 @@ install_all:
   exit $overall_exit
 
 # you can use this instead: `just lint`
-lint_all:
+lint_all $EXTRA_ARG="":
   #!/usr/bin/env bash
   source .justfile_helpers.bash
 
-  for dir in services/*; do
-    if [[ -n "${dir#services/}" ]]; then
-      just lint ${dir#services/}
+  for dir in libraries/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir} "$EXTRA_ARG"
       overall_exit=$((overall_exit | $?))
     fi
   done
+
+  for dir in services/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir} "$EXTRA_ARG"
+      overall_exit=$((overall_exit | $?))
+    fi
+  done
+
 
   report_error_or_success $overall_exit "just lint:" "linting" "all" "services!"
 
@@ -287,9 +305,16 @@ format_all:
   #!/usr/bin/env bash
   source .justfile_helpers.bash
 
+  for dir in libraries/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir}
+      overall_exit=$((overall_exit | $?))
+    fi
+  done
+
   for dir in services/*; do
-    if [[ -n "${dir#services/}" ]]; then
-      just format ${dir#services/}
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir}
       overall_exit=$((overall_exit | $?))
     fi
   done

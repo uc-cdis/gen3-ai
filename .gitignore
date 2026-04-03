@@ -238,3 +238,5 @@ prof/
 bin/library
 tmp/
 *.bak
+.benchmarks
+*.zip
