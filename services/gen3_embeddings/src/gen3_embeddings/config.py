@@ -17,7 +17,7 @@ URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", ca
 #          rest of the docs/service for more info on EMBEDDINGS authz.
 AUTHZ_SERVICE_NAME = starlette_config("GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_NAME", default="gen3-embeddings", cast=str)
 AUTHZ_SERVICE_RESOURCE = starlette_config(
-    "GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_NAME",
+    "GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_RESOURCE",
     default="/services/gen3-embeddings",
     cast=str,
 )

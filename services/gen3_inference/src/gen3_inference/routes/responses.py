@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 import httpx
 from fastapi import APIRouter, HTTPException
 from openresponses_types.types import (
@@ -40,6 +42,7 @@ from gen3_inference.errors import (
 )
 from gen3_inference.inference_protocols.base import InferenceProtocolClient
 from gen3_inference.inference_protocols.kserve_v2 import KServev2Client
+from gen3_inference.inference_protocols.openai_chat import OpenaiChat
 from gen3_inference.inference_protocols.openresponses import OpenResponsesClient
 from gen3_inference.types import OpenResponsesError
 
@@ -97,18 +100,21 @@ async def create_response(
     """
     # this will search "locally" first, then try other configured hosts
     ai_model_info = await get_ai_model_info(body)
-    logging.debug(f"Found model, info: {ai_model_info}")
+    ai_model_url = ai_model_info.get("url")
+    logging.debug(f"Found model at {ai_model_url}, info: {ai_model_info}")
 
     # this will prefer using Open Responses inference protocol if available
-    inference_protocol_client = await get_inference_protocol_client(ai_model_info.get("inference_protocol_clients", []))
+    inference_protocol_client = await get_inference_protocol_client(
+        ai_model_info.get("metadata", {}).get("inference_protocol_clients", []), ai_model_url
+    )
     logging.debug(f"Using inference protocol: `{inference_protocol_client.NAME}`")
 
     if not body.stream:
         # ResponseResource as JSON
-        response = await inference_protocol_client.generate_non_streaming_response(body=body)
+        response = await inference_protocol_client.generate_non_streaming_response(body=body, model_info=ai_model_info)
     else:
         # text/event-stream of streaming events
-        response = inference_protocol_client.generate_streaming_response(body=body)
+        response = inference_protocol_client.generate_streaming_response(body=body, model_info=ai_model_info)
 
     return response
 
@@ -139,41 +145,43 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
 
     # Check if model is available at the primary domain
     is_model_available = False
+    ai_model_url = None
 
     primary_url = f"{config.GEN3_AI_MODEL_REPO_URL}/ai-models/{ai_model}"
     async with httpx.AsyncClient() as client:
-        # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
+        # TODO: use auth: HOST_TO_CREDS
 
         # TODO: try and backoff
-        primary_resp = await client.get(primary_url)
-        # primary_resp = httpx.Response(
-        #     json={
-        #         "primary_url": primary_url,
-        #         "ai_model_info": {
-        #             "name": ai_model,
-        #             "version": "llama3.2:latest",
-        #             "type": "llama3.2:latest",
-        #             "description": "llama3.2:latest",
-        #             "url": "llama3.2:latest",
-        #             "tags": ["llama3.2:latest"],
-        #             "inference_protocol_clients": ["kserve_v2", "openresponses", "kserve_v1"],
-        #         },
-        #     },
-        #     status_code=200,
-        # )
+        # response = await client.get(primary_url)
 
-        if primary_resp.status_code == 404:
+        # TODO: FOR TESTING, REMOVE THIS
+        response = httpx.Response(
+            json={
+                "name": ai_model,
+                "url": "http://localhost:11434/v1/",
+                "version": "llama3.2:latest",
+                "type": "llama3.2:latest",
+                "description": "llama3.2:latest",
+                "tags": ["llama3.2:latest"],
+                "inference_protocol_clients": ["kserve_v2", "openresponses", "openai_chat"],
+            },
+            status_code=200,
+        )
+
+        if response.status_code == 404:
             # not found in primary, so check if model is available at any of the configured trusted domains
             trusted_domains = list(config.ALLOWED_GEN3_INFERENCE_HOSTS)
             for domain in trusted_domains:
-                # TODO: use auth: OAUTH2_CLIENT_CREDENTIALS
+                # TODO: use auth: HOST_TO_CREDS
                 url = f"{domain.rstrip('/')}/ai-models/{ai_model}"
-                primary_resp = await client.get(url)
-                if primary_resp.status_code == 200:
+                response = await client.get(url)
+                if response.status_code == 200:
                     is_model_available = True
+                    ai_model_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
                     break
         else:
             is_model_available = True
+            ai_model_url = f"{urlparse(primary_url).scheme}://{urlparse(primary_url).netloc}"
 
     if not is_model_available:
         error = OpenResponsesError(
@@ -183,9 +191,7 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
         )
         raise HTTPException(status_code=404, detail=error.to_json())
 
-    ai_model_info = primary_resp.json().get("ai_model_info")
-
-    if not ai_model_info:
+    if not response.json():
         error = OpenResponsesError(
             type=ERROR_TYPE_NOT_FOUND,
             code=ERROR_TYPE_NOT_FOUND,
@@ -193,13 +199,32 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
         )
         raise HTTPException(status_code=400, detail=error.to_json())
 
+    if "url" in response.json() and response.json().get("url"):
+        new_url = response.json().get("url")
+        new_domain = f"{urlparse(new_url).scheme}://{urlparse(new_url).netloc}"
+        trusted_domains = {
+            f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in config.ALLOWED_GEN3_INFERENCE_HOSTS
+        }
+        if new_domain not in trusted_domains:
+            raise Exception(
+                f"AI Model provided a `url` {new_url} whose domain {new_domain} is NOT in the `ALLOWED_GEN3_INFERENCE_HOSTS`: {config.ALLOWED_GEN3_INFERENCE_HOSTS}"
+            )
+
+        logging.info(f"using AI model provided url: {new_url}")
+        ai_model_url = new_url
+
+    ai_model_info = {"url": ai_model_url, "metadata": response.json()}
+
     return ai_model_info
 
 
-async def get_inference_protocol_client(all_model_inference_protocol_client_names: list[str]):
+async def get_inference_protocol_client(all_model_inference_protocol_client_names: list[str], ai_model_url: str | None):
     """
     Get the client class given a list of all available inference protocol client names for a
     given model. This will select the appropriate one or raise an error.
+
+    WARNING: Validate ai_model_url is allowed before passing it in here, this function
+             blindly adds that to the client.
 
     Args:
         all_model_inference_protocol_client_names list[str]: A list of all available inference
@@ -207,10 +232,13 @@ async def get_inference_protocol_client(all_model_inference_protocol_client_name
     """
     inference_protocol_client: InferenceProtocolClient | None = None
 
+    # TODO: is it worth caching instances of these for different model URLs?
     if OpenResponsesClient.NAME in all_model_inference_protocol_client_names:
-        inference_protocol_client = OpenResponsesClient()
+        inference_protocol_client = OpenResponsesClient(base_url=ai_model_url)
     elif KServev2Client.NAME in all_model_inference_protocol_client_names:
-        inference_protocol_client = KServev2Client(base_url="", model_name="")
+        inference_protocol_client = KServev2Client(base_url=ai_model_url)
+    elif OpenaiChat.NAME in all_model_inference_protocol_client_names:
+        inference_protocol_client = OpenaiChat(base_url=ai_model_url)
     else:
         error = OpenResponsesError(
             type=ERROR_TYPE_INVALID_REQUEST,

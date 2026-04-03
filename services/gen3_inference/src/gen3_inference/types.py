@@ -5,6 +5,16 @@ from openresponses_types import Error
 from pydantic import Field
 
 
+# TODO: use this in get_model_info
+class AIModelInfo:
+    """
+    AI Model information including what url it is from
+    """
+
+    url: Annotated[str, Field(description="The URL for the AI model")]
+    metadata: Annotated[dict, Field(description="AI Model metadata")]
+
+
 class OpenResponsesError(Error):
     """
     The written Open Responses spec as of now says type is required and code is

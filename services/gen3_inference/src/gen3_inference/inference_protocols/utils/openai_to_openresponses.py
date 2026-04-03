@@ -2,12 +2,18 @@
 TODO: FIXME: Clean this up, break out some more helpers
 """
 
+import json
+from collections.abc import AsyncGenerator
+
+from fastapi.responses import StreamingResponse
+from openai import Stream
 from openai.types.responses import (
     FunctionTool as OaiFunctionTool,
 )
 from openai.types.responses import Response as OpenAIResponse
 from openai.types.responses import (
     ResponseFormatTextJSONSchemaConfig,
+    ResponseStreamEvent,
     ResponseTextConfig,
 )
 from openai.types.responses import (
@@ -66,6 +72,33 @@ from openresponses_types import (
 )
 
 from gen3_inference.config import logging
+
+
+def openai_streaming_response_to_openresponses(
+    openai_response_stream: Stream[ResponseStreamEvent],
+    metadata: dict[str, Any] | None = None,
+):
+    async def _generator() -> AsyncGenerator[bytes]:
+        """
+        Yield each event as an Open Responses Event
+        """
+        for event in openai_response_stream:
+            payload = event.model_dump()
+
+            # emit the event header and data
+            event_type = payload["type"]
+            yield f"event: {event_type}\n".encode()
+            json_text = json.dumps(payload)
+
+            # For now, just use whatever is provided.
+            # we may need more explicit conversion to
+            # only Open Responses types... TODO
+            yield f"data: {json_text}\n\n".encode()
+
+        yield b"data: [DONE]\n\n"
+
+    # return the generator wrapped in a StreamingResponse
+    return StreamingResponse(_generator(), media_type="text/event-stream")
 
 
 def openai_response_to_openresponses(

@@ -1,5 +1,5 @@
 # this is the config module
-from starlette.datastructures import CommaSeparatedStrings, Secret
+from starlette.datastructures import CommaSeparatedStrings
 
 from common import config as common_config
 
@@ -9,9 +9,6 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
-# TODO: fix this
-OAUTH2_CLIENT_CREDENTIALS = starlette_config("OAUTH2_CLIENT_CREDENTIALS", cast=Secret, default="")
-
 # WARNING: Careful changing these, they require a trust relationship and client credentials
 ALLOWED_GEN3_INFERENCE_HOSTS = starlette_config("ALLOWED_GEN3_INFERENCE_HOSTS", cast=CommaSeparatedStrings, default="")
 logging.info(f"ALLOWED_GEN3_INFERENCE_HOSTS is {ALLOWED_GEN3_INFERENCE_HOSTS}")
@@ -20,6 +17,9 @@ VERBOSE_LLM_LOGS = starlette_config("VERBOSE_LLM_LOGS", cast=bool, default=False
 logging.info(f"VERBOSE_LLM_LOGS is {VERBOSE_LLM_LOGS}")
 
 URL_PREFIX = starlette_config("GEN3_INFERENCE_PROXY_URL_PREFIX", default="", cast=str)
+
+HOST_TO_CREDS_CSV = starlette_config("HOST_TO_CREDS_CSV", cast=CommaSeparatedStrings, default="")
+HOST_TO_CREDS = {item.split(":", 1)[0]: item.split(":", 1)[1] for item in list(HOST_TO_CREDS_CSV)}
 
 ##### Common Config - DO NOT EDIT #####
 # DON'T EDIT THESE *VALUES* IN THIS FILE.

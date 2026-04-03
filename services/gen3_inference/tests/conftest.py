@@ -89,7 +89,10 @@ def _single_created_sse_event() -> str:
 
 VALID_STREAMED_RESPONSE = _single_created_sse_event() + "data: [DONE]\n\n"
 
-VALID_AI_MODEL_INFO = {"name": TEST_AI_MODEL, "inference_protocol_clients": ["openresponses"]}
+VALID_AI_MODEL_INFO = {
+    "url": "https://example.com",
+    "metadata": {"name": TEST_AI_MODEL, "inference_protocol_clients": ["openresponses"]},
+}
 
 
 @pytest.fixture

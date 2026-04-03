@@ -128,7 +128,7 @@ async def test_get_ai_model_info_not_found(
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: DummyClient())
 
     # Mock config to give one trusted host
-    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {"https://trusted.com"})
+    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
 
     resp = client.post("/responses", json=json.loads(body.model_dump_json()))
 
@@ -168,7 +168,7 @@ async def test_get_ai_model_info_trusted_domain_success(
             pass
 
         async def get(self, url):
-            if url.startswith("https://trusted.com"):
+            if url.startswith(VALID_AI_MODEL_INFO["url"]):
                 return Response(
                     status_code=200,
                     json={
@@ -181,7 +181,7 @@ async def test_get_ai_model_info_trusted_domain_success(
             return Response(status_code=404)
 
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: DummyClient())
-    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {"https://trusted.com"})
+    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
     monkeypatch.setattr("gen3_inference.config.GEN3_AI_MODEL_REPO_URL", "https://primary.com")
 
     resp = client.post("/responses", json=json.loads(body.model_dump_json()))
@@ -334,7 +334,7 @@ async def test_create_response_with_openresponses_client(
     fake_client.generate_non_streaming_response = AsyncMock(return_value=VALID_NON_STREAMED_RESPONSE)
     fake_client.NAME = "openresponses"
 
-    async def fake_get_client(_names):
+    async def fake_get_client(names, url):
         return fake_client
 
     monkeypatch.setattr("gen3_inference.routes.responses.get_inference_protocol_client", fake_get_client)
