@@ -29,7 +29,9 @@ class OpenResponsesClient(InferenceProtocolClient):
     def _create_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
         host = str(urlparse(self.base_url).hostname) or ""
         if host not in HOST_TO_CREDS:
-            logging.warning(f"{host} is not in HOST_TO_CREDS, unable to retrieve creds. Continuing anyway...")
+            logging.warning(
+                f"{host} is not in HOST_TO_CREDS, unable to retrieve creds. Valid hosts: {[host for host in HOST_TO_CREDS]}. Continuing anyway..."
+            )
 
         client = OpenAI(
             # TODO: FIXME: actually add thes from the model info
@@ -46,8 +48,9 @@ class OpenResponsesClient(InferenceProtocolClient):
 
         response = client.responses.create(
             # TODO: probably need to pass in a ton more stuff from the request
-            model=body.model,
+            model=str(body.model),
             instructions=body.instructions,
+            # TODO: convert body to Openai format
             input=body.input,
             stream=False,
         )
@@ -64,12 +67,12 @@ class OpenResponsesClient(InferenceProtocolClient):
     def _create_streaming_response(self, body: CreateResponseBody, model_info: dict) -> StreamingResponse:
         host = str(urlparse(self.base_url).hostname) or ""
         if host not in HOST_TO_CREDS:
-            logging.warning(f"{host} is not in HOST_TO_CREDS, unable to retrieve creds. Continuing anyway...")
+            logging.warning(
+                f"{host} is not in HOST_TO_CREDS, unable to retrieve creds. Valid hosts: {[host for host in HOST_TO_CREDS]}. Continuing anyway..."
+            )
 
         client = OpenAI(
             # TODO: FIXME: actually add thes from the model info
-            # For local testing: ollama supports Responses
-            # https://docs.ollama.com/api/openai-compatibility#simple-/v1/responses-example
             api_key=HOST_TO_CREDS.get(host),
             base_url=self.base_url,
             organization="Gen3",
@@ -79,8 +82,9 @@ class OpenResponsesClient(InferenceProtocolClient):
 
         response = client.responses.create(
             # TODO: probably need to pass in a ton more stuff from the request
-            model=body.model,
+            model=str(body.model),
             instructions=body.instructions,
+            # TODO: convert body to Openai format
             input=body.input,
             stream=True,
         )

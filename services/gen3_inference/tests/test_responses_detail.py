@@ -128,7 +128,7 @@ async def test_get_ai_model_info_not_found(
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: DummyClient())
 
     # Mock config to give one trusted host
-    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
+    monkeypatch.setattr("gen3_inference.routes.responses.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
 
     resp = client.post("/responses", json=json.loads(body.model_dump_json()))
 
@@ -174,14 +174,16 @@ async def test_get_ai_model_info_trusted_domain_success(
                     json={
                         "ai_model_info": {
                             "name": TEST_AI_MODEL,
-                            "inference_protocol_clients": [test_inference_protocol_client],
+                            "metadata": {
+                                "inference_protocol_clients": [test_inference_protocol_client],
+                            },
                         },
                     },
                 )
             return Response(status_code=404)
 
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: DummyClient())
-    monkeypatch.setattr("gen3_inference.config.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
+    monkeypatch.setattr("gen3_inference.routes.responses.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
     monkeypatch.setattr("gen3_inference.config.GEN3_AI_MODEL_REPO_URL", "https://primary.com")
 
     resp = client.post("/responses", json=json.loads(body.model_dump_json()))
@@ -204,7 +206,7 @@ async def test_get_inference_protocol_client_unknown(
     Model found but advertises an unsupported protocol - 400.
     """
     mocked_return = VALID_AI_MODEL_INFO
-    mocked_return.update({"inference_protocol_clients": ["unsupported"]})
+    mocked_return["metadata"].update({"inference_protocol_clients": ["unsupported"]})
     mock_get_model.return_value = mocked_return
 
     body = valid_user_msg_body_non_streaming.model_copy()
@@ -225,7 +227,7 @@ async def test_get_inference_protocol_client_empty(
     """Empty list of protocol names - 400."""
     mocked_return = VALID_AI_MODEL_INFO
     # empty
-    mocked_return.update({"inference_protocol_clients": []})
+    mocked_return["metadata"].update({"inference_protocol_clients": []})
     mock_get_model.return_value = mocked_return
 
     body = valid_user_msg_body_non_streaming.model_copy()
@@ -259,7 +261,7 @@ async def test_create_response_unknown_protocol(
 
     # Fake the get_ai_model_info to return a model with a bogus protocol
     async def fake_ai_info(_body):
-        return {"inference_protocol_clients": ["unknown"]}
+        return {"metadata": {"inference_protocol_clients": ["unknown"]}}
 
     monkeypatch.setattr("gen3_inference.routes.responses.get_ai_model_info", fake_ai_info)
 
@@ -304,7 +306,7 @@ async def test_create_response_bogus_protocol(
     """
     # Fake get_ai_model_info to return a model that advertises only
     # an unsupported protocol
-    VALID_AI_MODEL_INFO.update({"inference_protocol_clients": ["unknown"]})
+    VALID_AI_MODEL_INFO["metadata"].update({"inference_protocol_clients": ["unknown"]})
     mock_get_model.return_value = VALID_AI_MODEL_INFO
 
     resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))

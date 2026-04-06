@@ -34,8 +34,11 @@ from openresponses_types.types import (
     ResponseResource,
 )
 
-from gen3_inference import config
-from gen3_inference.config import logging
+from gen3_inference.config import (
+    ALLOWED_GEN3_INFERENCE_HOSTS,
+    GEN3_AI_MODEL_REPO_URL,
+    logging,
+)
 from gen3_inference.errors import (
     ERROR_TYPE_INVALID_REQUEST,
     ERROR_TYPE_NOT_FOUND,
@@ -101,7 +104,7 @@ async def create_response(
     # this will search "locally" first, then try other configured hosts
     ai_model_info = await get_ai_model_info(body)
     ai_model_url = ai_model_info.get("url")
-    logging.debug(f"Found model at {ai_model_url}, info: {ai_model_info}")
+    logging.debug(f"Found model at `{ai_model_url}`, info: `{ai_model_info}`")
 
     # this will prefer using Open Responses inference protocol if available
     inference_protocol_client = await get_inference_protocol_client(
@@ -134,7 +137,7 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
         raise HTTPException(status_code=400, detail=error.to_json())
 
     # 1. is model available at this domain?
-    # hit GET {config.GEN3_AI_MODEL_REPO_URL}/ai-models/{model_name} to check if model is available at this domain
+    # hit GET {GEN3_AI_MODEL_REPO_URL}/ai-models/{model_name} to check if model is available at this domain
     # hit with oauth2 client credentials
 
     # 2. is model available at configured trusted domains?
@@ -147,30 +150,30 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
     is_model_available = False
     ai_model_url = None
 
-    primary_url = f"{config.GEN3_AI_MODEL_REPO_URL}/ai-models/{ai_model}"
+    primary_url = f"{GEN3_AI_MODEL_REPO_URL}/ai-models/{ai_model}"
     async with httpx.AsyncClient() as client:
         # TODO: use auth: HOST_TO_CREDS
 
         # TODO: try and backoff
-        # response = await client.get(primary_url)
+        response = await client.get(primary_url)
 
         # TODO: FOR TESTING, REMOVE THIS
-        response = httpx.Response(
-            json={
-                "name": ai_model,
-                "url": "http://localhost:11434/v1/",
-                "version": "llama3.2:latest",
-                "type": "llama3.2:latest",
-                "description": "llama3.2:latest",
-                "tags": ["llama3.2:latest"],
-                "inference_protocol_clients": ["kserve_v2", "openresponses", "openai_chat"],
-            },
-            status_code=200,
-        )
+        # response = httpx.Response(
+        #     json={
+        #         "name": ai_model,
+        #         "url": "http://localhost:11434/v1/",
+        #         "version": "llama3.2:latest",
+        #         "type": "llama3.2:latest",
+        #         "description": "llama3.2:latest",
+        #         "tags": ["llama3.2:latest"],
+        #         "inference_protocol_clients": ["kserve_v2", "openresponses", "openai_chat"],
+        #     },
+        #     status_code=200,
+        # )
 
         if response.status_code == 404:
             # not found in primary, so check if model is available at any of the configured trusted domains
-            trusted_domains = list(config.ALLOWED_GEN3_INFERENCE_HOSTS)
+            trusted_domains = list(ALLOWED_GEN3_INFERENCE_HOSTS)
             for domain in trusted_domains:
                 # TODO: use auth: HOST_TO_CREDS
                 url = f"{domain.rstrip('/')}/ai-models/{ai_model}"
@@ -202,12 +205,10 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
     if "url" in response.json() and response.json().get("url"):
         new_url = response.json().get("url")
         new_domain = f"{urlparse(new_url).scheme}://{urlparse(new_url).netloc}"
-        trusted_domains = {
-            f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in config.ALLOWED_GEN3_INFERENCE_HOSTS
-        }
+        trusted_domains = {f"{urlparse(url).scheme}://{urlparse(url).netloc}" for url in ALLOWED_GEN3_INFERENCE_HOSTS}
         if new_domain not in trusted_domains:
             raise Exception(
-                f"AI Model provided a `url` {new_url} whose domain {new_domain} is NOT in the `ALLOWED_GEN3_INFERENCE_HOSTS`: {config.ALLOWED_GEN3_INFERENCE_HOSTS}"
+                f"AI Model provided a url `{new_url}` whose domain `{new_domain}` is NOT in the ALLOWED_GEN3_INFERENCE_HOSTS: `{ALLOWED_GEN3_INFERENCE_HOSTS}`"
             )
 
         logging.info(f"using AI model provided url: {new_url}")
