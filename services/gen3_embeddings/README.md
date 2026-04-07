@@ -40,9 +40,9 @@ SELECT phase, round(100.0 * blocks_done / nullif(blocks_total, 0), 1) AS "%" FRO
 ```
 
 
-### Running and testing locally
+## Running and testing locally
 
-## Create a pgvector database, create app db user, load test datasets
+### Create a pgvector database, create app db user, load test datasets
 
 ```bash
 docker run --name pgvector \
@@ -89,7 +89,7 @@ VALUES
   (5, '[3,4,5]'::vector, 0, ARRAY['/vector/indices/team7'],                  '{"name": "team_7_only"}');
 ```
 
-## Authz and prepare Arborist server
+### Authz and prepare Arborist server
 Launch Arborist server using gen3-helm, you can use the following example values.yaml file, update it accordingly. After launch run `kubectl port-forward svc/arborist-service -n default 4280:80`
 
 ```yaml
@@ -388,7 +388,7 @@ portal:
     tag: dev
 ```
 
-## Start gen3_embeddings server
+### Start gen3_embeddings server
 Create `.env` file under gen3_embeddings folder
 ```bash
 DB_HOST=localhost
@@ -402,7 +402,7 @@ ARBORIST_URL="http://localhost:4280"
 
 run `just run gen3_embeddings` under gen3-ai folder
 
-## Sample tests
+### Sample tests
 ```bash
 export TOKEN=...
 curl -X GET "http://localhost:4142/vector/indices/team7/embeddings" -H "Authorization: Bearer $TOKEN"
@@ -512,9 +512,9 @@ curl -X POST "http://localhost:4142/vector/search?vector_indices=team7" \
   }'
 ```
 
-### TODO
-db op error handling: duplication when creating, search with diff dim
-ai model
-diff dim between indices in searching
-table init need this?: ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
-don't print out detailed errors at client side
+## TODO
+- db op error handling: duplication when creating, search with diff dim
+- ai model
+- diff dim between indices in searching
+- table init need this?: ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+- don't print out detailed errors at client side
