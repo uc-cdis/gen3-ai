@@ -12,8 +12,8 @@ servers:
 tags:
   - name: Embeddings
   - name: Embeddings (Bulk)
-  - name: Vector Indexing
-  - name: Vector Search
+  - name: Vectorstore Collections
+  - name: Vectorstore Search
   - name: Inference
   - name: AI Model Repository
     description: Hugging Face - Compatible API
@@ -49,8 +49,8 @@ components:
       required: true
       schema:
         type: string
-    IndexName:
-      name: index_name
+    CollectionName:
+      name: collection_name
       in: path
       required: true
       schema:
@@ -69,29 +69,29 @@ components:
         type: string
       required: false
       description: |
-        AI Model requested to be used for embedding provided content. If content provided is already embedded, this is ignored. If this model differs from what the vector index allows, the request fails (either by the index specifying an AI model and it not matching the provided one OR by the index having different dimensionality).
+        AI Model requested to be used for embedding provided content. If content provided is already embedded, this is ignored. If this model differs from what the collection allows, the request fails (either by the collection specifying an AI model and it not matching the provided one OR by the collection having different dimensionality).
 
         Note that models require permissions to use.
 
-        If this is not provided and your content is not embedded and the relevant vector index has an AI model specified (and you have appropriate permissions to use it), the service will use the AI Model specified from the vector index to embed your content.
+        If this is not provided and your content is not embedded and the relevant collection has an AI model specified (and you have appropriate permissions to use it), the service will use the AI Model specified from the collection to embed your content.
 
-    VectorIndiceNames:
-      name: vector_indices
+    CollectionNames:
+      name: collections
       in: query
       schema:
         type: string
       required: false
       description: |
-        Comma-separated list of Vector Index `index_name`'s to search over. If not provided,
+        Comma-separated list of collection `collection_name`'s to search over. If not provided,
         will search over all that user has access to which are valid for the
         data.
 
         If any invalid vector names are provided, this will error.
 
-        If you provide this and `ai_model` is provided, ALL indices must have
+        If you provide this and `ai_model` is provided, ALL collections must have
         the same AI model specified or this will fail.
 
-        If you provide this and NO `ai_model`, ALL indices must have the
+        If you provide this and NO `ai_model`, ALL collections must have the
         same AI model and then your content will be embedded with that model.
         If your content is already embedded and the dimensions don't match,
         this will error.
@@ -115,7 +115,7 @@ components:
       description: |
         Whether or not to exclude embedding extra info in response.
         Can bloat response, so you can request not to include it. Extra info
-        includes things like the index_name for the embedding and
+        includes things like the collection_name for the embedding and
         authz information.
 
     IncludeDocuments:
@@ -129,20 +129,20 @@ components:
         response information). This can bloat response if using bulk, and unless you're actioning on these, you may not need them. Thus, this is FALSE by default.
 
   schemas:
-    VectorIndiceNames:
+    CollectionNames:
       type: object
       required:
-        - vector_indices
+        - collections
       properties:
-        vector_indices:
+        collections:
           type: array
           items:
-            $ref: "#/components/schemas/VectorIndex"
+            $ref: "#/components/schemas/Collection"
 
-    VectorIndex:
+    Collection:
       type: object
       properties:
-        index_name:
+        collection_name:
           type: string
         description:
           type: string
@@ -158,7 +158,7 @@ components:
         self:
           type: string
           format: url
-          example: "/vector/indices/{index_name}"
+          example: "/vectorstore/collections/{collection_name}"
 
     StringArrayInput:
       type: array
@@ -221,14 +221,14 @@ components:
             authz:
               type: string
               format: url
-              example: "/vector/indices/{index_name}"
+              example: "/vectorstore/collections/{collection_name}"
             authz_version:
               type: integer
               example: 0
             self:
               type: string
               format: url
-              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
 
     SingleEmbeddingResultNoIndexFromInput:
       type: object
@@ -254,19 +254,19 @@ components:
             authz:
               type: string
               format: url
-              example: "/vector/indices/{index_name}"
+              example: "/vectorstore/collections/{collection_name}"
             authz_version:
               type: integer
               example: 0
             self:
               type: string
               format: url
-              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
 
     SingleEmbedding:
       type: object
       required:
-        - index_name
+        - collection_name
         - embedding_id
         - vector
       properties:
@@ -281,24 +281,24 @@ components:
         info:
           type: object
           properties:
-            index_name:
+            collection_name:
               type: string
             authz:
               type: string
               format: url
-              example: "/vector/indices/{index_name}"
+              example: "/vectorstore/collections/{collection_name}"
             authz_version:
               type: integer
               example: 0
             self:
               type: string
               format: url
-              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
 
     SingleEmbeddingFromInput:
       type: object
       required:
-        - index_name
+        - collection_name
         - embedding_id
         - vector
         - input_index
@@ -317,19 +317,19 @@ components:
         info:
           type: object
           properties:
-            index_name:
+            collection_name:
               type: string
             authz:
               type: string
               format: url
-              example: "/vector/indices/{index_name}"
+              example: "/vectorstore/collections/{collection_name}"
             authz_version:
               type: integer
               example: 0
             self:
               type: string
               format: url
-              example: "/vector/indices/{index_name}/embeddings/{embedding_id}"
+              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
 
     EmbeddingResponse:
       type: object
@@ -340,10 +340,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleEmbedding"
-        vector_indices:
+        collections:
           type: array
           items:
-            $ref: "#/components/schemas/VectorIndex"
+            $ref: "#/components/schemas/Collection"
 
     EmbeddingResponseFromInput:
       type: object
@@ -354,10 +354,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleEmbeddingFromInput"
-        vector_indices:
+        collections:
           type: array
           items:
-            $ref: "#/components/schemas/VectorIndex"
+            $ref: "#/components/schemas/Collection"
 
     EmbeddingResponseNoIndex:
       type: object
@@ -561,10 +561,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleSearchResultNoIndex"
-        vector_indices:
+        collections:
           type: array
           items:
-            $ref: "#/components/schemas/VectorIndex"
+            $ref: "#/components/schemas/Collection"
 
     SearchResponse:
       type: object
@@ -637,16 +637,16 @@ paths:
   # ----------- Embeddings -------------
   # Let's not support this at all for now, but we can add it later if needed.
   # This muddies the intended usage with a global search that will be inefficient.
-  # The intended setup will always include the vector index information anyway.
+  # The intended setup will always include the collection information anyway.
   #
   # /embeddings/{embedding_uuid}:
   #   get:
   #     tags:
   #       - Embeddings
-  #     summary: Read embedding from unknown index
+  #     summary: Read embedding from unknown collection
   #     description: |
-  #       This will require a lookup to know what index this is in, so will be
-  #       less efficient than `/vector/indices/{index_name}/embeddings/{embedding_uuid}`.
+  #       This will require a lookup to know what collection this is in, so will be
+  #       less efficient than `/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}`.
   #     parameters:
   #       - $ref: "#/components/parameters/EmbeddingId"
   #     responses:
@@ -659,13 +659,13 @@ paths:
   #       "404":
   #         $ref: "#/components/responses/NotFound"
 
-  /vector/indices/{index_name}/embeddings/{embedding_uuid}:
+  /vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}:
     get:
       tags:
         - Embeddings
-      summary: Read embedding from index
+      summary: Read embedding from collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/EmbeddingId"
       responses:
         "200":
@@ -679,9 +679,9 @@ paths:
     put:
       tags:
         - Embeddings
-      summary: Update embedding in index
+      summary: Update embedding in collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/EmbeddingId"
       requestBody:
         required: true
@@ -707,9 +707,9 @@ paths:
     delete:
       tags:
         - Embeddings
-      summary: Delete embedding from index
+      summary: Delete embedding from collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/EmbeddingId"
       responses:
         "204":
@@ -720,7 +720,7 @@ paths:
     post:
       tags:
         - Embeddings (Bulk)
-      summary: Read select embeddings from unknown indices
+      summary: Read select embeddings from unknown collections
       parameters:
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       requestBody:
@@ -739,13 +739,13 @@ paths:
                 $ref: "#/components/schemas/EmbeddingResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
-  /vector/indices/{index_name}/embeddings/bulk:
+  /vectorstore/collections/{collection_name}/embeddings/bulk:
     post:
       tags:
         - Embeddings (Bulk)
-      summary: Read select embeddings from index
+      summary: Read select embeddings from collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       requestBody:
         required: true
@@ -764,13 +764,13 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  /vector/indices/{index_name}/embeddings:
+  /vectorstore/collections/{collection_name}/embeddings:
     get:
       tags:
         - Embeddings
-      summary: Read all embeddings from index
+      summary: Read all embeddings from collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       responses:
         "200":
@@ -785,21 +785,21 @@ paths:
     post:
       tags:
         - Embeddings
-      summary: Create embeddings in index
+      summary: Create embeddings in collection
       description: |
-        Add embeddings to an index.
+        Add embeddings to an collection.
 
         This supports providing raw embeddings or content to be embedded.
 
-        For the later, this will interact with Gen3's AI Model Inference support to use the provided model OR infer required model from the index.
+        For the later, this will interact with Gen3's AI Model Inference support to use the provided model OR infer required model from the collection.
 
-        This will fail if the index does not support the model provided (e.g. another
-        model is already listed for the index AND/OR dimensions differ from existing
-        index).
+        This will fail if the collection does not support the model provided (e.g. another
+        model is already listed for the collection AND/OR dimensions differ from existing
+        collection).
 
-        This will also fail if the provided raw embeddings do not meet dimensionality required by the index.
+        This will also fail if the provided raw embeddings do not meet dimensionality required by the collection.
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/AIModel"
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       requestBody:
@@ -821,23 +821,23 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  # ----------- Vector Indexing -------------
-  /vector/indices:
+  # ----------- Vectorstore Collections -------------
+  /vectorstore/collections:
     get:
       tags:
-        -  Vector Indexing
-      summary: Real all indices
+        -  Vectorstore Collections
+      summary: Real all collections
       responses:
         "200":
-          description: Index detail
+          description: collection detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VectorIndiceNames'
+                $ref: '#/components/schemas/CollectionNames'
     post:
       tags:
-        -  Vector Indexing
-      summary: Create index
+        -  Vectorstore Collections
+      summary: Create collection
       requestBody:
         required: true
         content:
@@ -845,7 +845,7 @@ paths:
             schema:
               type: object
               properties:
-                index_name:
+                collection_name:
                   type: string
                 description:
                   type: string
@@ -854,69 +854,69 @@ paths:
                   example: 1024
       responses:
         "200":
-          description: Index detail
+          description: collection detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VectorIndex'
-  /vector/indices/{index_name}:
+                $ref: '#/components/schemas/Collection'
+  /vectorstore/collections/{collection_name}:
     get:
       tags:
-        -  Vector Indexing
-      summary: Read index info
+        -  Vectorstore Collections
+      summary: Read collection info
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
       responses:
         "200":
-          description: Index detail
+          description: collection detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VectorIndex'
+                $ref: '#/components/schemas/Collection'
         "404":
           $ref: "#/components/responses/NotFound"
     patch:
       tags:
-        -  Vector Indexing
-      summary: Update index info
+        -  Vectorstore Collections
+      summary: Update collection info
       description: |
-        Only for patching update-able fields about the index.
+        Only for patching update-able fields about the collection.
 
         Right now dimensions and name cannot be altered. You must create a new
-        index if you need a different dimension/name (and consider deleting this one).
+        collection if you need a different dimension/name (and consider deleting this one).
 
-        If you are looking for **how to add embeddings** to an index, look
-        for `/vector/indices/{index_name}/embedding` endpoints.
+        If you are looking for **how to add embeddings** to a collection, look
+        for `/vectorstore/collections/{collection_name}/embedding` endpoints.
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VectorIndex'
+              $ref: '#/components/schemas/Collection'
       responses:
         "200":
           description: Success
 
     delete:
       tags:
-        -  Vector Indexing
-      summary: Delete index
+        -  Vectorstore Collections
+      summary: Delete collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
       responses:
         "204":
           description: No content
 
-  # ----------- Vector Search -------------
-  /vector/search:
+  # ----------- Vectorstore Search -------------
+  /vectorstore/search:
     post:
       tags:
-        -  Vector Search
-      summary: Search embeddings across unknown indices
+        -  Vectorstore Search
+      summary: Search embeddings across unknown collections
       parameters:
-        - $ref: "#/components/parameters/VectorIndiceNames"
+        - $ref: "#/components/parameters/CollectionNames"
         - $ref: "#/components/parameters/AIModel"
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       requestBody:
@@ -936,13 +936,13 @@ paths:
           $ref: "#/components/responses/BadRequest"
 
 
-  /vector/indices/{index_name}/search:
+  /vectorstore/collections/{collection_name}/search:
     post:
       tags:
-        -  Vector Search
-      summary: Search embeddings in index
+        -  Vectorstore Search
+      summary: Search embeddings in a collection
       parameters:
-        - $ref: "#/components/parameters/IndexName"
+        - $ref: "#/components/parameters/CollectionName"
         - $ref: "#/components/parameters/AIModel"
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
       requestBody:
