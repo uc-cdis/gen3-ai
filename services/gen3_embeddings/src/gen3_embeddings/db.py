@@ -7,9 +7,11 @@ from datetime import datetime
 from uuid import UUID
 
 import asyncpg
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from gen3_embeddings import config
+from gen3_embeddings.auth import _get_crud_action_from_request, get_allowed_authz_from_mapping, get_user_authz_mapping
+from gen3_embeddings.config import logging
 
 _pool: asyncpg.Pool | None = None
 
@@ -21,7 +23,7 @@ async def get_pool():
     return _pool
 
 
-async def get_embedding_dal():
+async def get_data_access_layer():
     pool = await get_pool()
     yield DataAccessLayer(pool)
 
@@ -70,6 +72,31 @@ class Embedding:
 class DataAccessLayer:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
+
+    async def _with_rls(self, request: Request, fn, *args, **kwargs):
+        """
+        Run a DB operation with RLS (row level security) set according to user's allowed authz.
+
+        This will:
+        - get user's authz mapping
+        - compute allowed authz tags for this CRUD operation
+        - SET LOCAL app.allowed_authz
+        then run `fn(conn, *args, **kwargs)` with the same transaction scope.
+        """
+        user_authz_mapping = await get_user_authz_mapping(request=request)
+        method = _get_crud_action_from_request(request)
+        allowed_authz = get_allowed_authz_from_mapping(
+            authz_mapping=user_authz_mapping,
+            method=method,
+        )
+        logging.debug(f"allowed_authz for {method}: {allowed_authz}")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                # Make RLS safe even if user has no allowed resources
+                allowed_array = "{" + ",".join(allowed_authz) + "}"
+                await conn.execute("SELECT set_config('app.allowed_authz', $1, true)", allowed_array)
+                return await fn(conn, *args, **kwargs)
 
     async def create_vector_index(
         self, index_name: str, description: str, dimensions: int, ai_model_name: str | None = None
@@ -143,6 +170,7 @@ class DataAccessLayer:
 
     async def create_embeddings_bulk(
         self,
+        request: Request,
         vector_index_id: int,
         embeddings: list[list[float]],
         authz_version: int,
@@ -152,6 +180,7 @@ class DataAccessLayer:
         """
         TODO: embeddings need to have same dim?
         TODO: why emb_vec and meta have to be string? and the vector return from
+        TODO: asyncpg.exceptions.InsufficientPrivilegeError: new row violates row-level security policy for table "embeddings"
         the database is string instead of list of float? Current temp fix is convert
         them to accepted format.
 
@@ -175,51 +204,56 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
-        results: list[Embedding] = []
-
         # Use a single connection and transaction for all inserts
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                for emb_vec, meta in zip(embeddings, metadata_list):
-                    row = await conn.fetchrow(
-                        """
-                        INSERT INTO embeddings
-                        (vector_index_id, embedding, authz_version, authz, metadata)
-                        VALUES ($1, $2, $3, $4, $5)
-                        RETURNING *
-                        """,
-                        vector_index_id,
-                        json.dumps(emb_vec),
-                        authz_version,
-                        authz,
-                        json.dumps(meta or {}),
+        async def _query(conn):
+            results: list[Embedding] = []
+            for emb_vec, meta in zip(embeddings, metadata_list):
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO embeddings
+                    (vector_index_id, embedding, authz_version, authz, metadata)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING *
+                    """,
+                    vector_index_id,
+                    json.dumps(emb_vec),
+                    authz_version,
+                    authz,
+                    json.dumps(meta or {}),
+                )
+                if not row:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Failed to create embedding in bulk insert",
                     )
-                    if not row:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Failed to create embedding in bulk insert",
-                        )
-                    results.append(Embedding.from_record(row))
+                results.append(Embedding.from_record(row))
+            return results
 
-        return results
+        return await self._with_rls(request, _query)
 
-    async def get_embedding_by_id(self, embedding_id: UUID) -> Embedding | None:
-        async with self.pool.acquire() as conn:
+    async def get_embedding_by_id(self, request: Request, embedding_id: UUID) -> Embedding | None:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = $1")
             row = await stmt.fetchrow(embedding_id)
             return Embedding.from_record(row) if row else None
 
-    async def get_embedding_by_index_and_id(self, vector_index_id: int, embedding_id: UUID) -> Embedding | None:
-        async with self.pool.acquire() as conn:
+        return await self._with_rls(request, _query)
+
+    async def get_embedding_by_index_and_id(
+        self, request: Request, vector_index_id: int, embedding_id: UUID
+    ) -> Embedding | None:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE vector_index_id = $1 AND embedding_id = $2")
             row = await stmt.fetchrow(vector_index_id, embedding_id)
             return Embedding.from_record(row) if row else None
 
+        return await self._with_rls(request, _query)
+
     async def update_embedding(
-        self, vector_index_id: int, embedding_id: UUID, embedding: list[float]
+        self, request: Request, vector_index_id: int, embedding_id: UUID, embedding: list[float]
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare("""
                 UPDATE embeddings SET embedding = $3, updated_at = NOW()
                 WHERE vector_index_id = $1 AND embedding_id = $2
@@ -228,24 +262,32 @@ class DataAccessLayer:
             row = await stmt.fetchrow(vector_index_id, embedding_id, json.dumps(embedding))
             return Embedding.from_record(row) if row else None
 
-    async def delete_embedding(self, vector_index_id: int, embedding_id: UUID) -> bool:
-        async with self.pool.acquire() as conn:
+        return await self._with_rls(request, _query)
+
+    async def delete_embedding(self, request: Request, vector_index_id: int, embedding_id: UUID) -> bool:
+        async def _query(conn):
             result = await conn.execute(
                 "DELETE FROM embeddings WHERE vector_index_id = $1 AND embedding_id = $2", vector_index_id, embedding_id
             )
             return result.startswith("DELETE")
 
-    async def list_embeddings_in_index(self, vector_index_id: int) -> list[Embedding]:
-        async with self.pool.acquire() as conn:
+        return await self._with_rls(request, _query)
+
+    async def list_embeddings_in_index(self, request: Request, vector_index_id: int) -> list[Embedding]:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE vector_index_id = $1 ORDER BY created_at")
             rows = await stmt.fetch(vector_index_id)
             return [Embedding.from_record(r) for r in rows]
 
-    async def get_embeddings_bulk(self, embedding_ids: list[UUID]) -> list[Embedding]:
-        async with self.pool.acquire() as conn:
+        return await self._with_rls(request, _query)
+
+    async def get_embeddings_bulk(self, request: Request, embedding_ids: list[UUID]) -> list[Embedding]:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = ANY($1::uuid[])")
             rows = await stmt.fetch(embedding_ids)
             return [Embedding.from_record(r) for r in rows]
+
+        return await self._with_rls(request, _query)
 
     async def get_vector_index_by_id_bulk(self, index_ids: list[int]) -> list[VectorIndex]:
         async with self.pool.acquire() as conn:
@@ -257,6 +299,7 @@ class DataAccessLayer:
 
     async def search_embeddings_in_index(
         self,
+        request: Request,
         vector_index_id: int,
         query_vector: list[float],
         top_k: int = 10,
@@ -274,7 +317,6 @@ class DataAccessLayer:
         where_clauses = ["vector_index_id = $1"]
         params = [vector_index_id, json.dumps(query_vector), top_k]
 
-        # simple metadata = equality filter for JSONB
         param_index = 4
         for k, v in filters.items():
             where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
@@ -293,17 +335,18 @@ class DataAccessLayer:
             LIMIT $3
         """
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare(sql)
             rows = await stmt.fetch(*params)
+            if score_range is not None:
+                rows = [r for r in rows if r["similarity_score"] >= score_range]
+            return rows
 
-        if score_range is not None:
-            rows = [r for r in rows if r["similarity_score"] >= score_range]
-
-        return rows
+        return await self._with_rls(request, _query)
 
     async def search_embeddings_across_indices(
         self,
+        request: Request,
         vector_index_ids: list[int],
         query_vector: list[float],
         top_k: int = 10,
@@ -327,7 +370,6 @@ class DataAccessLayer:
             param_index += 1
 
         where_sql = " AND ".join(where_clauses)
-
         sql = f"""
             SELECT *,
                    1 - (embedding <=> $2::vector) AS similarity_score
@@ -337,11 +379,11 @@ class DataAccessLayer:
             LIMIT $3
         """
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare(sql)
             rows = await stmt.fetch(*params)
+            if score_range is not None:
+                rows = [r for r in rows if r["similarity_score"] >= score_range]
+            return rows
 
-        if score_range is not None:
-            rows = [r for r in rows if r["similarity_score"] >= score_range]
-
-        return rows
+        return await self._with_rls(request, _query)

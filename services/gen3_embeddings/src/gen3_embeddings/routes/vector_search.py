@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from gen3_embeddings.db import DataAccessLayer, Embedding, VectorIndex, get_embedding_dal
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from gen3_embeddings.auth import parse_and_auth_request
+from gen3_embeddings.db import DataAccessLayer, Embedding, VectorIndex, get_data_access_layer
 from gen3_embeddings.models.helpers import embedding_to_single_result, vector_index_to_model
 from gen3_embeddings.models.schemas import (
-    SearchRequest,
+    SearchRequestBody,
     SearchResponse,
     SearchResponseNoIndex,
     SingleEmbeddingResult,
@@ -20,13 +21,15 @@ vector_search_router = APIRouter(tags=["Vector Search"])
     "/vector/indices/{index_name}/search",
     response_model=SearchResponseNoIndex,
     summary="Search embeddings in index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def search_in_index(
+    request: Request,
+    body: SearchRequestBody,
     index_name: str,
-    request: SearchRequest,
     ai_model: str | None = Query(None, alias="ai_model"),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     TODO: support for ai_model
@@ -35,8 +38,9 @@ async def search_in_index(
     Perform a vector search within a specific index.
 
     Args:
+        request: The request object
+        body: SearchRequestBody containing the query vector and parameters.
         index_name: Name of the vector index to search.
-        request: SearchRequest containing the query vector and parameters.
         ai_model: Optional model name; not used in this minimal implementation.
         no_embeddings_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
@@ -51,19 +55,20 @@ async def search_in_index(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    if isinstance(request.input, str):
+    if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
-    query_vector = request.input
+    query_vector = body.input
     if len(query_vector) != index.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
     rows = await dal.search_embeddings_in_index(
+        request=request,
         vector_index_id=index.id,
         query_vector=query_vector,
-        top_k=request.top_k,
-        score_range=request.range,
-        filters=request.filters,
+        top_k=body.top_k,
+        score_range=body.range,
+        filters=body.filters,
     )
 
     results: list[SingleSearchResultNoIndex] = []
@@ -94,11 +99,12 @@ async def search_in_index(
     summary="Search embeddings across unknown indices",
 )
 async def search_across_indices(
-    request: SearchRequest,
+    request: Request,
+    body: SearchRequestBody,
     vector_indices: str | None = Query(None, alias="vector_indices"),
     ai_model: str | None = Query(None, alias="ai_model"),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     TODO: support for ai_model
@@ -107,7 +113,8 @@ async def search_across_indices(
     Perform a vector search across multiple indices.
 
     Args:
-        request: SearchRequest containing the query vector and parameters.
+        request: The request object
+        body: SearchRequestBody containing the query vector and parameters.
         vector_indices: Optional comma-separated list of index names to restrict the search.
         ai_model: Optional model name; not used in this minimal implementation.
         no_embeddings_info: If True, omit the 'info' block in each embedding result.
@@ -123,6 +130,7 @@ async def search_across_indices(
         names = [v.strip() for v in vector_indices.split(",") if v.strip()]
         indices: list[VectorIndex] = []
         for name in names:
+            await parse_and_auth_request(request, name)
             idx = await dal.get_vector_index_by_name(name)
             if not idx:
                 raise HTTPException(status_code=400, detail=f"Invalid vector index: {name}")
@@ -133,20 +141,21 @@ async def search_across_indices(
     if not indices:
         return SearchResponse(embeddings=[])
 
-    if isinstance(request.input, str):
+    if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
     dims = indices[0].dimensions
-    if len(request.input) != dims:
+    if len(body.input) != dims:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
     index_ids = [idx.id for idx in indices]
     rows = await dal.search_embeddings_across_indices(
+        request=request,
         vector_index_ids=index_ids,
-        query_vector=request.input,
-        top_k=request.top_k,
-        score_range=request.range,
-        filters=request.filters,
+        query_vector=body.input,
+        top_k=body.top_k,
+        score_range=body.range,
+        filters=body.filters,
     )
 
     index_by_id = {idx.id: idx for idx in indices}

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from gen3_embeddings.db import DataAccessLayer, VectorIndex, get_embedding_dal
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from gen3_embeddings.auth import index_resource_from_name, parse_and_auth_request
+from gen3_embeddings.db import DataAccessLayer, VectorIndex, get_data_access_layer
 from gen3_embeddings.models.helpers import (
     embedding_to_single_result,
     vector_index_to_model,
@@ -25,8 +26,9 @@ embeddings_router = APIRouter(tags=["Embeddings", "Embeddings (Bulk)"])
     summary="Read embedding from unknown index",
 )
 async def get_embedding(
+    request: Request,
     embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Read a single embedding when the index is not known in advance.
@@ -35,6 +37,7 @@ async def get_embedding(
     index information can be returned in the response.
 
     Args:
+        request: The request object
         embedding_uuid: UUID of the embedding to fetch.
         dal: Data access layer dependency.
 
@@ -44,13 +47,15 @@ async def get_embedding(
     Raises:
         HTTPException: 404 if the embedding or associated index is not found.
     """
-    emb = await dal.get_embedding_by_id(embedding_uuid)
+    emb = await dal.get_embedding_by_id(request, embedding_uuid)
     if not emb:
         raise HTTPException(status_code=404, detail="Embedding not found")
 
     index = await dal.get_vector_index_by_id(emb.vector_index_id)
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
+
+    await parse_and_auth_request(request, index.vector_index_name)
 
     return embedding_to_single_result(emb=emb, index=index, include_index=True)
 
@@ -59,11 +64,13 @@ async def get_embedding(
     "/vector/indices/{index_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     summary="Read embedding from index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embedding_from_index(
+    request: Request,
     index_name: str,
     embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Read a single embedding from a specific index.
@@ -83,7 +90,7 @@ async def get_embedding_from_index(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    emb = await dal.get_embedding_by_index_and_id(index.id, embedding_uuid)
+    emb = await dal.get_embedding_by_index_and_id(request, index.id, embedding_uuid)
     if not emb:
         raise HTTPException(status_code=404, detail="Embedding not found")
 
@@ -94,17 +101,20 @@ async def get_embedding_from_index(
     "/vector/indices/{index_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     summary="Update embedding in index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_embedding_in_index(
+    request: Request,
     index_name: str,
     embedding_uuid: UUID,
     body: UpdateEmbeddingBody,
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Update the embedding vector for a given index and embedding ID.
 
     Args:
+        request: The request object
         index_name: Name of the vector index.
         embedding_uuid: UUID of the embedding.
         body: Request body containing the new embedding vector.
@@ -120,7 +130,7 @@ async def update_embedding_in_index(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    emb = await dal.update_embedding(index.id, embedding_uuid, body.embedding)
+    emb = await dal.update_embedding(request, index.id, embedding_uuid, body.embedding)
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
 
@@ -131,16 +141,19 @@ async def update_embedding_in_index(
     "/vector/indices/{index_name}/embeddings/{embedding_uuid}",
     status_code=204,
     summary="Delete embedding from index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_embedding(
+    request: Request,
     index_name: str,
     embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Delete an embedding from a specific index.
 
     Args:
+        request: The request object
         index_name: Name of the vector index.
         embedding_uuid: UUID of the embedding to delete.
         dal: Data access layer dependency.
@@ -155,7 +168,7 @@ async def delete_embedding(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    success = await dal.delete_embedding(index.id, embedding_uuid)
+    success = await dal.delete_embedding(request, index.id, embedding_uuid)
     if not success:
         raise HTTPException(status_code=404, detail="Embedding not found or already deleted")
 
@@ -166,16 +179,19 @@ async def delete_embedding(
     "/vector/indices/{index_name}/embeddings",
     response_model=EmbeddingResponseNoIndex,
     summary="Read all embeddings from index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def list_embeddings_in_index(
+    request: Request,
     index_name: str,
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     List all embeddings within a specific index.
 
     Args:
+        request: The request object
         index_name: Name of the vector index.
         no_embeddings_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
@@ -190,7 +206,7 @@ async def list_embeddings_in_index(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    embs = await dal.list_embeddings_in_index(index.id)
+    embs = await dal.list_embeddings_in_index(request, index.id)
     results: list[SingleEmbeddingResultNoIndex] = []
 
     for emb in embs:
@@ -207,23 +223,27 @@ async def list_embeddings_in_index(
     "/vector/indices/{index_name}/embeddings",
     response_model=EmbeddingResponseNoIndex,
     summary="Create embeddings in index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def create_embeddings_in_index(
+    request: Request,
     index_name: str,
     embeddings: list[list[float]] = Body(..., examples=[[20.3, 230.1, 18.2], [35.3, 83.1, 13.9]]),
     ai_model: str | None = Query(None, alias="ai_model"),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     TODO: implementaion for StringArrayInput and ai_model
     TODO: auth related
+    TODO: work for authz_version
 
     Create one or more embeddings in a specific index.
 
     This minimal implementation only accepts raw numeric vectors.
 
     Args:
+        request: The request object
         index_name: Name of the vector index.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
@@ -245,10 +265,11 @@ async def create_embeddings_in_index(
             raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
     created = await dal.create_embeddings_bulk(
+        request=request,
         vector_index_id=index.id,
         embeddings=embeddings,
         authz_version=0,
-        authz=["/data"],  # placeholder authz
+        authz=[index_resource_from_name(index_name)],
         metadata_list=[{} for _ in embeddings],
     )
 
@@ -269,14 +290,16 @@ async def create_embeddings_in_index(
     summary="Read select embeddings from unknown indices",
 )
 async def get_embeddings_bulk_unknown_indices(
+    request: Request,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Read a selection of embeddings by UUID across any index.
 
     Args:
+        request: The request object
         embedding_uuids: List of embedding UUIDs to fetch.
         no_embeddings_info: If True, omit the 'info' block for each embedding.
         dal: Data access layer dependency.
@@ -284,7 +307,7 @@ async def get_embeddings_bulk_unknown_indices(
     Returns:
         EmbeddingResponse including index metadata for each embedding.
     """
-    embs = await dal.get_embeddings_bulk(embedding_uuids)
+    embs = await dal.get_embeddings_bulk(request, embedding_uuids)
     if not embs:
         return EmbeddingResponse(embeddings=[], vector_indices=[])
 
@@ -296,6 +319,7 @@ async def get_embeddings_bulk_unknown_indices(
     idx_list = await dal.get_vector_index_by_id_bulk(index_ids)
 
     for idx in idx_list:
+        await parse_and_auth_request(request, idx.vector_index_name)
         indices[idx.id] = idx
 
     results: list[SingleEmbeddingResult] = []
@@ -331,17 +355,20 @@ async def get_embeddings_bulk_unknown_indices(
     "/vector/indices/{index_name}/embeddings/bulk",
     response_model=EmbeddingResponseNoIndex,
     summary="Read select embeddings from index",
+    dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embeddings_bulk_from_index(
+    request: Request,
     index_name: str,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_embedding_dal),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
     Read a selection of embeddings by UUID from a specific index.
 
     Args:
+        request: The request object
         index_name: Name of the vector index.
         embedding_uuids: List of embedding UUIDs to fetch.
         no_embeddings_info: If True, omit the 'info' block for each embedding.
@@ -357,7 +384,7 @@ async def get_embeddings_bulk_from_index(
     if not index:
         raise HTTPException(status_code=404, detail="Index not found")
 
-    embs = await dal.get_embeddings_bulk(embedding_uuids)
+    embs = await dal.get_embeddings_bulk(request, embedding_uuids)
     embs = [e for e in embs if e.vector_index_id == index.id]
 
     emb_by_id = {e.embedding_id: e for e in embs}

@@ -22,7 +22,7 @@ DB_CONNECTION_STRING = starlette_config(
     default=f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}",
 )
 
-URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", cast=str)
+URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_URL_PREFIX", default="", cast=str)
 
 # WARNING: Careful changing these, they require close sync with the authorization source
 #          of truth. This is the "service" passed to Gen3 Authz for authorization checks
@@ -30,11 +30,9 @@ URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", ca
 #          Additional authorization is applied on a per-EMBEDDINGS Resource level within
 #          this proxy service, these are a first gate for API-level access. See the
 #          rest of the docs/service for more info on EMBEDDINGS authz.
-AUTHZ_SERVICE_NAME = starlette_config("GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_NAME", default="gen3-embeddings", cast=str)
+AUTHZ_SERVICE_NAME = starlette_config("GEN3_EMBEDDINGS_AUTHZ_SERVICE_NAME", default="gen3-embeddings", cast=str)
 AUTHZ_SERVICE_RESOURCE = starlette_config(
-    "GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_NAME",
-    default="/services/gen3-embeddings",
-    cast=str,
+    "GEN3_EMBEDDINGS_AUTHZ_SERVICE_RESOURCE", default="/vector/indices/", cast=str
 )
 
 ##### Common Config - DO NOT EDIT #####

@@ -91,7 +91,7 @@ class EmbeddingResponseNoIndex(BaseModel):
     embeddings: list[SingleEmbeddingResultNoIndex]
 
 
-class SearchRequest(BaseModel):
+class SearchRequestBody(BaseModel):
     """
     Request body for vector search operations.
     """

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from importlib.metadata import version
 
 from fastapi import APIRouter, FastAPI
+from gen3authz.client.arborist.async_client import ArboristClient
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
@@ -20,7 +21,31 @@ route_aggregator.include_router(vector_search_router)
 async def lifespan(app: FastAPI):
     # Startup logic
     await check_db_connection()
+
+    app.state.arborist_client = ArboristClient(
+        arborist_base_url=config.ARBORIST_URL,
+    )
+    if not config.DEBUG_SKIP_AUTH:
+        await check_arborist_is_healthy(app)
+
     yield
+
+
+async def check_arborist_is_healthy(app):
+    """
+    Checks that we can talk to arborist
+
+    Args:
+        app_with_setup (FastAPI): the fastapi app with arborist client
+    """
+    logging.debug("Startup policy engine (Arborist) connection test initiating...")
+    arborist_client = app.state.arborist_client
+    if not await arborist_client.healthy():
+        logging.exception(
+            "Startup policy engine (Arborist) connection test FAILED. Unable to connect to the policy engine."
+        )
+        logging.debug("Arborist is unhealthy")
+        raise Exception("Arborist unhealthy, aborting...")
 
 
 async def check_db_connection():
