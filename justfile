@@ -48,11 +48,36 @@ setup:
         fi
 
         psql \
+          -d postgres \
           -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
           -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
           2>/dev/null || echo "Database already exists."
 
-        # TODO: db migration / initial setup
+        # run migrations if they exist
+        MIGRATIONS_DIR="${dir}/db_migrations"
+        if [ -d "$MIGRATIONS_DIR" ]; then
+          print_header "just setup:" "running" "migrations for" "${dir#services/}" "..."
+
+          # Get all .sql files, sort them numerically, and iterate
+          for migration_file in $(find "$MIGRATIONS_DIR" -name "*.sql" | sort -V); do
+            echo "Applying migration: $migration_file"
+
+            # Run the migration
+            psql \
+              --set ON_ERROR_STOP=1 \
+              -d "${PGDATABASE}" \
+              -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+              -f "$migration_file"
+
+            # Check if psql failed
+            if [ $? -ne 0 ]; then
+              echo "${RED}** ERROR: Migration $migration_file failed. Perhaps it was already ran. **${RESET}"
+              exit 1
+            fi
+          done
+
+          echo "${GREEN}Migrations applied successfully.${RESET}"
+        fi
       fi
     fi
   done
