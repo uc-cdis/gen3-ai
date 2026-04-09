@@ -11,7 +11,7 @@ servers:
 
 tags:
   - name: Embeddings
-  - name: Embeddings (Bulk)
+  - name: Embeddings (Bulk Read)
   - name: Vectorstore Collections
   - name: Vectorstore Search
   - name: Inference
@@ -286,16 +286,6 @@ components:
           items:
             $ref: "#/components/schemas/Collection"
 
-    EmbeddingResponseNoCollections:
-      type: object
-      required:
-        - embeddings
-      properties:
-        embeddings:
-          type: array
-          items:
-            $ref: "#/components/schemas/SingleEmbedding"
-
     EmbeddingResponseNoCollectionsFromInput:
       type: object
       required:
@@ -467,10 +457,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleSearchResult"
-        collections:
-          type: array
-          items:
-            $ref: "#/components/schemas/Collection"
 
     SearchResponse:
       type: object
@@ -481,6 +467,45 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleSearchResult"
+        collections:
+          type: array
+          items:
+            $ref: "#/components/schemas/Collection"
+
+
+    EmbeddingToCreate:
+      type: object
+      description: Data for creating embeddings in a collection
+      required:
+        - embedding
+      properties:
+        embedding:
+          oneOf:
+            - $ref: "#/components/schemas/StringArrayInput"
+            - $ref: "#/components/schemas/NumberArrayInput"
+        metadata:
+          $ref: "#/components/schemas/EmbeddingCreationMetadata"
+      example:
+        embedding: [0.1, 0.2, 0.3]
+        metadata:
+          source: "some_file.md"
+          chunk_size: "1000"
+
+    EmbeddingCreationRequest:
+      type: object
+      description: |
+        Data for creating embeddings in a collection.
+        > NOTE: If you do not provide vectors, this will attempt
+        > to embed items for you by interacting with other Gen3 AI
+        > services.
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            type: object
+            $ref: "#/components/schemas/EmbeddingToCreate"
 
     InferenceRequest:
       type: object
@@ -520,6 +545,13 @@ components:
                 type: integer
               source:
                 type: string
+
+    EmbeddingCreationMetadata:
+      type: object
+      description: |
+        Additional metadata for the embedding.
+      example:
+        source: 'some_file.md'
 
     InferenceMetadata:
       type: object
@@ -621,11 +653,11 @@ paths:
         "204":
           description: Successfully deleted
 
-  # ----------- Embeddings (Bulk) -------------
+  # ----------- Embeddings (Bulk Read) -------------
   /embeddings/bulk:
     post:
       tags:
-        - Embeddings (Bulk)
+        - Embeddings (Bulk Read)
       summary: Read select embeddings from unknown collections
       parameters:
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
@@ -648,7 +680,7 @@ paths:
   /vectorstore/collections/{collection_name}/embeddings/bulk:
     post:
       tags:
-        - Embeddings (Bulk)
+        - Embeddings (Bulk Read)
       summary: Read select embeddings from collection
       parameters:
         - $ref: "#/components/parameters/CollectionName"
@@ -713,10 +745,7 @@ paths:
         content:
           application/json:
             schema:
-              oneOf:
-                - $ref: "#/components/schemas/StringArrayInput"
-                - $ref: "#/components/schemas/NumberArrayInput"
-              description: Content to be embedded OR raw embeddings.
+              $ref: "#/components/schemas/EmbeddingCreationRequest"
       responses:
         "200":
           description: Embeddings added
