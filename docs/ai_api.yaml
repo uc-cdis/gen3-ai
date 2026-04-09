@@ -142,6 +142,8 @@ components:
     Collection:
       type: object
       properties:
+        collection_id:
+          type: integer
         collection_name:
           type: string
         description:
@@ -178,8 +180,8 @@ components:
     EmbeddingInfo:
       type: object
       properties:
-        collection_name:
-          type: string
+        collection_id:
+          type: integer
         authz:
           type: string
           format: url
