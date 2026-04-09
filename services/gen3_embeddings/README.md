@@ -14,7 +14,9 @@ By default:
       in the embedding table
 * Modifications to queries are possible through the API (e.g. sacrificing time for more accuracy), see the API specification for more details
 
-> If you need to support >2000 dimension vectors: the service will need to be modified. This is a limitation of the pgvector `vector` column. However, if you need to create different indexes, you can do so.
+> If you need to support indexing >2000 dimension vectors: the service will need to be modified. This is a limitation of pgvector. The `vector` column allows higher dimensionality, but the indexing can't go beyond 2000.
+> https://github.com/pgvector/pgvector?tab=readme-ov-file#what-if-i-want-to-index-vectors-with-more-than-2000-dimensions
+> The best bet for up to 4000 would be to use half-precision INDEXING
 
 ## Startup
 
@@ -56,6 +58,7 @@ docker run --name pgvector \
 
 PGPASSWORD=testpass psql -h localhost -p 5432 -U testuser -d testdb
 ```
+
 For the following, make sure you update the vector_index_id according to the ids from creating indices outputs
 ```sql
 CREATE ROLE app_user
@@ -442,16 +445,16 @@ curl -X POST "http://localhost:4142/vector/indices/team42/embeddings" \
   ]'
 
 
-curl -X GET "http://localhost:4142/embeddings/22761de5-6b0f-4bb3-acc6-4cc5a5db6de9" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:4142/embeddings/dd24fa77-6e9b-4780-b0ea-b97d55a502b1" -H "Authorization: Bearer $TOKEN"
 
-curl -X PUT "http://localhost:4142/vector/indices/team42/embeddings/830e2d61-2205-4207-9b83-a0341013623e" \
+curl -X PUT "http://localhost:4142/vector/indices/team42/embeddings/dd24fa77-6e9b-4780-b0ea-b97d55a502b1" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "embedding": [0.5, 0.5, 0.5]
   }'
 
-curl -X DELETE "http://localhost:4142/vector/indices/team42/embeddings/830e2d61-2205-4207-9b83-a0341013623e" -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:4142/vector/indices/team42/embeddings/dd24fa77-6e9b-4780-b0ea-b97d55a502b1" -H "Authorization: Bearer $TOKEN"
 
 curl -X POST "http://localhost:4142/embeddings/bulk" \
   -H "Content-Type: application/json" \
