@@ -38,9 +38,8 @@ setup: _check_dependencies
       echo "pre-commit is installed."
       echo "  version: $(pre-commit --version)"
   else
-      echo "${RED}** ERROR: pre-commit not found in \$PATH. **${RESET}"
-      echo "${RED}** Cannot set up databases. Please install pre-commit and rerun. **${RESET}"
-      exit 1
+      echo "${YELLOW}** WARNING: pre-commit not found in \$PATH. Installing with pip... **${RESET}"
+      pip install pre-commit
   fi
 
   hook_path="$(git rev-parse --git-path hooks/pre-commit)"
