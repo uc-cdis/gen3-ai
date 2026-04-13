@@ -4,7 +4,7 @@ set -euo pipefail
 missing=()
 issues=()
 
-for command in docker pre-commit; do
+for command in docker; do
   if ! command -v "$command" >/dev/null 2>&1; then
     missing+=("$command")
   fi
