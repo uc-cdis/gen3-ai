@@ -1,11 +1,18 @@
 set dotenv-load
 
+# show available tasks
+default:
+    @just --list
+
+check_dependencies:
+    @./scripts/check_dependencies.bash
+
 setup:
   #!/usr/bin/env bash
   set -euo pipefail
 
   # this includes some helpers for colored line printing
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   print_header "just setup:" "verifying" "uv" "installation..."
   if command -v uv >/dev/null 2>&1; then
@@ -26,13 +33,20 @@ setup:
       exit 1
   fi
 
+setup_db: check_dependencies
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
       if [ "${dir#services/}" == "gen3_inference" ]; then
-        print_header "just setup:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
+        print_header "just setup_db:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
       else
-        print_header "just setup:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
-
+        print_header "just setup_db:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
+        # TODO: Make a utility for running this outside the justfile
         if [ ! -f "${dir}/.env" ]; then
           echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
         else
@@ -82,17 +96,17 @@ setup:
     fi
   done
 
-install $SERVICE="all":
+install $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
 
   # this includes some helpers for colored line printing
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
     # this forces looping over folders in /services
     # and reduces code duplication by re-calling this recipe
     # with a specific service
-    just install_all
+    just _install_all
   else
     # print_header COMMAND TEXT SERVICE TEXT
     print_header "just install:" "installing" "$SERVICE" "service..."
@@ -107,12 +121,12 @@ install $SERVICE="all":
     uv sync --all-packages --group dev --directory "./services/$SERVICE" --all-extras
   fi
 
-lock $SERVICE="all":
+lock $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lock_all
+    just _lock_all
   else
     print_header "just lock:" "locking" "$SERVICE" "service..."
 
@@ -121,12 +135,12 @@ lock $SERVICE="all":
     just install "$SERVICE"
   fi
 
-test $SERVICE="all":
+test $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just test_all
+    just _test_all
   else
     print_header "just test:" "testing" "$SERVICE" "service..."
     cd "./services/$SERVICE"
@@ -141,12 +155,12 @@ test $SERVICE="all":
     exit $overall_exit
   fi
 
-build $SERVICE="all":
+build $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just build_all
+    just _build_all
   else
     print_header "just build:" "building" "$SERVICE" "service..."
     docker build -t $SERVICE --build-arg SERVICE_NAME="$SERVICE" -f Dockerfile.k8s .
@@ -154,9 +168,9 @@ build $SERVICE="all":
     report_error_or_success $? "just build:" "building" "$SERVICE" "service!"
   fi
 
-@run $SERVICE:
+@run $SERVICE: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   print_header "just run:" "running" "$SERVICE" "service..."
 
@@ -174,7 +188,7 @@ build $SERVICE="all":
     --access-logfile - \
     --error-logfile -
 
-@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141":
+@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141": check_dependencies
   #!/usr/bin/env bash
   print_header "just docker_run:" "running" "$SERVICE" "service..."
   docker kill $SERVICE
@@ -185,20 +199,20 @@ build $SERVICE="all":
   -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} \
   $SERVICE:latest
 
-format $SERVICE="all":
+format $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just format_all
+    just _format_all
   else
     print_header "just format:" "formatting" "$SERVICE" "..."
     uv run --directory $SERVICE ruff format
   fi
 
-venv_reset:
+venv_reset: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
   for dir in services/*; do
     print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
     rm -r ${dir}/.venv | true
@@ -210,12 +224,12 @@ venv_reset:
     rm ${dir}/uv.lock | true
   done
 
-snyk $SERVICE="all":
+snyk $SERVICE="all": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just snyk_all
+    just _snyk_all
   else
     print_header "just snyk:" "snyk scanning" "$SERVICE" "service..."
     if [ $SERVICE == "all" ]; then
@@ -255,12 +269,12 @@ snyk $SERVICE="all":
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all" $EXTRA_ARG="":
+lint $SERVICE="all" $EXTRA_ARG="": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lint_all "$EXTRA_ARG"
+    just _lint_all "$EXTRA_ARG"
   else
     # install services to get ruff and other things required for formatting and linting
     if [[ $SERVICE == *services* ]]; then
@@ -287,10 +301,9 @@ lint $SERVICE="all" $EXTRA_ARG="":
     exit $overall_exit
   fi
 
-# you can use this instead: `just install`
-install_all:
+_install_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -301,10 +314,9 @@ install_all:
 
   exit $overall_exit
 
-# you can use this instead: `just lint`
-lint_all $EXTRA_ARG="":
+_lint_all $EXTRA_ARG="": check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in libraries/*; do
     if [[ -n "${dir}" ]]; then
@@ -325,10 +337,9 @@ lint_all $EXTRA_ARG="":
 
   exit $overall_exit
 
-# you can use this instead: `just format`
-format_all:
+_format_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in libraries/*; do
     if [[ -n "${dir}" ]]; then
@@ -346,10 +357,9 @@ format_all:
 
   exit $overall_exit
 
-# you can use this instead: `just build`
-build_all:
+_build_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -360,10 +370,9 @@ build_all:
 
   exit $overall_exit
 
-# you can use this instead: `just lock`
-lock_all:
+_lock_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -374,10 +383,9 @@ lock_all:
 
   exit $overall_exit
 
-# you can use this instead: `just test`
-test_all:
+_test_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -390,10 +398,9 @@ test_all:
 
   exit $overall_exit
 
-# you can use this instead: `just snyk`
-snyk_all:
+_snyk_all: check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
