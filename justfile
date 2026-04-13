@@ -4,10 +4,10 @@ set dotenv-load
 default:
     @just --list
 
-check_dependencies:
+_check_dependencies:
     @./scripts/check_dependencies.bash
 
-setup: check_dependencies
+setup: _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -33,7 +33,30 @@ setup: check_dependencies
       exit 1
   fi
 
-setup_db:
+  print_header "just setup:" "verifying" "pre-commit" "installation..."
+  if command -v pre-commit >/dev/null 2>&1; then
+      echo "pre-commit is installed."
+      echo "  version: $(pre-commit --version)"
+  else
+      echo "${RED}** ERROR: pre-commit not found in \$PATH. **${RESET}"
+      echo "${RED}** Cannot set up databases. Please install pre-commit and rerun. **${RESET}"
+      exit 1
+  fi
+
+  hook_path="$(git rev-parse --git-path hooks/pre-commit)"
+
+  if [[ ! -f "$hook_path" ]]; then
+    echo "${YELLOW}** WARNING: pre-commit git hook not found from: `git rev-parse --git-path hooks/pre-commit`. Installing... **${RESET}"
+    pre-commit install
+  elif ! grep -q 'pre-commit' "$hook_path"; then
+    echo "${YELLOW}** WARNING: pre-commit git hook not found from: `git rev-parse --git-path hooks/pre-commit`. Installing... **${RESET}"
+    pre-commit install --overwrite
+  fi
+
+  echo "pre-commit git hook is installed."
+
+
+setup_db: _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -96,7 +119,7 @@ setup_db:
     fi
   done
 
-install $SERVICE="all":
+install $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
 
   # this includes some helpers for colored line printing
@@ -121,7 +144,7 @@ install $SERVICE="all":
     uv sync --all-packages --group dev --directory "./services/$SERVICE" --all-extras
   fi
 
-lock $SERVICE="all":
+lock $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -135,7 +158,7 @@ lock $SERVICE="all":
     just install "$SERVICE"
   fi
 
-test $SERVICE="all":
+test $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -155,7 +178,7 @@ test $SERVICE="all":
     exit $overall_exit
   fi
 
-build $SERVICE="all":
+build $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -168,7 +191,7 @@ build $SERVICE="all":
     report_error_or_success $? "just build:" "building" "$SERVICE" "service!"
   fi
 
-@run $SERVICE:
+@run $SERVICE: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -188,7 +211,7 @@ build $SERVICE="all":
     --access-logfile - \
     --error-logfile -
 
-@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141":
+@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141": _check_dependencies
   #!/usr/bin/env bash
   print_header "just docker_run:" "running" "$SERVICE" "service..."
   docker kill $SERVICE
@@ -199,7 +222,7 @@ build $SERVICE="all":
   -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} \
   $SERVICE:latest
 
-format $SERVICE="all":
+format $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -210,7 +233,7 @@ format $SERVICE="all":
     uv run --directory $SERVICE ruff format
   fi
 
-venv_reset:
+venv_reset: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
   for dir in services/*; do
@@ -224,7 +247,7 @@ venv_reset:
     rm ${dir}/uv.lock | true
   done
 
-snyk $SERVICE="all":
+snyk $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -269,7 +292,7 @@ snyk $SERVICE="all":
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all" $EXTRA_ARG="":
+lint $SERVICE="all" $EXTRA_ARG="": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -301,7 +324,7 @@ lint $SERVICE="all" $EXTRA_ARG="":
     exit $overall_exit
   fi
 
-update_versions:
+update_versions: _check_dependencies
     #!/usr/bin/env bash
     source scripts/.justfile_helpers.bash
 
@@ -341,7 +364,7 @@ update_versions:
     echo "succesfully updated!"
 
 
-_install_all:
+_install_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -354,7 +377,7 @@ _install_all:
 
   exit $overall_exit
 
-_lint_all $EXTRA_ARG="":
+_lint_all $EXTRA_ARG="": _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -378,7 +401,7 @@ _lint_all $EXTRA_ARG="":
 
   exit $overall_exit
 
-_format_all:
+_format_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -398,7 +421,7 @@ _format_all:
 
   exit $overall_exit
 
-_build_all:
+_build_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -411,7 +434,7 @@ _build_all:
 
   exit $overall_exit
 
-_lock_all:
+_lock_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -424,7 +447,7 @@ _lock_all:
 
   exit $overall_exit
 
-_test_all:
+_test_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -439,7 +462,7 @@ _test_all:
 
   exit $overall_exit
 
-_snyk_all:
+_snyk_all: _check_dependencies
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
