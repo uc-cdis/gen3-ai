@@ -5,6 +5,7 @@
             "name": "gen3_inference",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}/services/gen3_inference/.venv/bin/python",
             "module": "uvicorn",
             "args": [
                 "gen3_inference.main:app_instance",
@@ -24,6 +25,7 @@
             "name": "gen3_embeddings",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}/services/gen3_embeddings/.venv/bin/python",
             "module": "uvicorn",
             "args": [
                 "gen3_embeddings.main:app_instance",
@@ -43,6 +45,7 @@
             "name": "gen3_ai_model_repo",
             "type": "debugpy",
             "request": "launch",
+            "python": "${workspaceFolder}/services/gen3_ai_model_repo/.venv/bin/python",
             "module": "uvicorn",
             "args": [
                 "gen3_ai_model_repo.main:app_instance",

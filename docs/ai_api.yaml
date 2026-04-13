@@ -1,9 +1,9 @@
 openapi: 3.0.2
 info:
   title: Gen3 AI API
-  version: "0.0.1"
+  version: "0.0.2"
   description: |
-    Rough draft
+    Rough draft v2
 
 servers:
   - url: https://example.com/ai
@@ -11,7 +11,7 @@ servers:
 
 tags:
   - name: Embeddings
-  - name: Embeddings (Bulk)
+  - name: Embeddings (Bulk Read)
   - name: Vectorstore Collections
   - name: Vectorstore Search
   - name: Inference
@@ -142,6 +142,8 @@ components:
     Collection:
       type: object
       properties:
+        collection_id:
+          type: integer
         collection_name:
           type: string
         description:
@@ -175,6 +177,23 @@ components:
       description: List of number array inputs to be embedded.
       example: [[20.3, 230.1, 18.2], [35.3, 83.1, 13.9]]
 
+    EmbeddingInfo:
+      type: object
+      properties:
+        collection_id:
+          type: integer
+        authz:
+          type: string
+          format: url
+          example: "/vectorstore/collections/{collection_name}"
+        authz_version:
+          type: integer
+          example: 0
+        self:
+          type: string
+          format: url
+          example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
+
     SingleInferenceResult:
       type: object
       required:
@@ -201,74 +220,12 @@ components:
           items:
             $ref: "#/components/schemas/SingleInferenceResult"
 
-    SingleEmbeddingResultNoIndex:
-      type: object
-      required:
-        - vector
-        - embedding_id
-      properties:
-        vector:
-          type: array
-          items:
-            type: number
-            format: float
-        embedding_id:
-          type: string
-          format: uuid
-        info:
-          type: object
-          properties:
-            authz:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}"
-            authz_version:
-              type: integer
-              example: 0
-            self:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
-
-    SingleEmbeddingResultNoIndexFromInput:
-      type: object
-      required:
-        - vector
-        - input_index
-        - embedding_id
-      properties:
-        vector:
-          type: array
-          items:
-            type: number
-            format: float
-        input_index:
-          type: integer
-          example: 0
-        embedding_id:
-          type: string
-          format: uuid
-        info:
-          type: object
-          properties:
-            authz:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}"
-            authz_version:
-              type: integer
-              example: 0
-            self:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
-
     SingleEmbedding:
       type: object
       required:
-        - collection_name
         - embedding_id
         - vector
+        - info
       properties:
         vector:
           type: array
@@ -279,29 +236,15 @@ components:
           type: string
           format: uuid
         info:
-          type: object
-          properties:
-            collection_name:
-              type: string
-            authz:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}"
-            authz_version:
-              type: integer
-              example: 0
-            self:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
+          $ref: "#/components/schemas/EmbeddingInfo"
 
     SingleEmbeddingFromInput:
       type: object
       required:
-        - collection_name
         - embedding_id
-        - vector
         - input_index
+        - vector
+        - info
       properties:
         vector:
           type: array
@@ -315,21 +258,7 @@ components:
           type: string
           format: uuid
         info:
-          type: object
-          properties:
-            collection_name:
-              type: string
-            authz:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}"
-            authz_version:
-              type: integer
-              example: 0
-            self:
-              type: string
-              format: url
-              example: "/vectorstore/collections/{collection_name}/embeddings/{embedding_id}"
+          $ref: "#/components/schemas/EmbeddingInfo"
 
     EmbeddingResponse:
       type: object
@@ -359,7 +288,7 @@ components:
           items:
             $ref: "#/components/schemas/Collection"
 
-    EmbeddingResponseNoIndex:
+    EmbeddingResponseNoCollectionsFromInput:
       type: object
       required:
         - embeddings
@@ -367,17 +296,7 @@ components:
         embeddings:
           type: array
           items:
-            $ref: "#/components/schemas/SingleEmbeddingResultNoIndex"
-
-    EmbeddingResponseNoIndexFromInput:
-      type: object
-      required:
-        - embeddings
-      properties:
-        embeddings:
-          type: array
-          items:
-            $ref: "#/components/schemas/SingleEmbeddingResultNoIndexFromInput"
+            $ref: "#/components/schemas/SingleEmbeddingFromInput"
 
     AllTopicsResponse:
       type: object
@@ -510,27 +429,6 @@ components:
             type: string
           description: Filter on embedding metadata.
 
-    SingleSearchResultNoIndex:
-      type: object
-      required:
-        - embedding
-        - metadata
-      properties:
-        embedding:
-          $ref: '#/components/schemas/SingleEmbeddingResultNoIndex'
-        metadata:
-          # TODO: perhaps we need to handle other data returning
-          # depending on the type of search performed. similarity_score
-          # may not be relevant in searches?
-          type: object
-          properties:
-            similarity_score:
-              type: number
-              format: float
-            # distance_from_input:
-            #   type: number
-            #   format: float
-
     SingleSearchResult:
       type: object
       required:
@@ -552,7 +450,7 @@ components:
             #   type: number
             #   format: float
 
-    SearchResponseNoIndex:
+    SearchResponseNoCollection:
       type: object
       required:
         - embeddings
@@ -560,11 +458,7 @@ components:
         embeddings:
           type: array
           items:
-            $ref: "#/components/schemas/SingleSearchResultNoIndex"
-        collections:
-          type: array
-          items:
-            $ref: "#/components/schemas/Collection"
+            $ref: "#/components/schemas/SingleSearchResult"
 
     SearchResponse:
       type: object
@@ -575,6 +469,45 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SingleSearchResult"
+        collections:
+          type: array
+          items:
+            $ref: "#/components/schemas/Collection"
+
+
+    EmbeddingToCreate:
+      type: object
+      description: Data for creating embeddings in a collection
+      required:
+        - embedding
+      properties:
+        embedding:
+          oneOf:
+            - $ref: "#/components/schemas/StringArrayInput"
+            - $ref: "#/components/schemas/NumberArrayInput"
+        metadata:
+          $ref: "#/components/schemas/EmbeddingCreationMetadata"
+      example:
+        embedding: [0.1, 0.2, 0.3]
+        metadata:
+          source: "some_file.md"
+          chunk_size: "1000"
+
+    EmbeddingCreationRequest:
+      type: object
+      description: |
+        Data for creating embeddings in a collection.
+        > NOTE: If you do not provide vectors, this will attempt
+        > to embed items for you by interacting with other Gen3 AI
+        > services.
+      required:
+        - embeddings
+      properties:
+        embeddings:
+          type: array
+          items:
+            type: object
+            $ref: "#/components/schemas/EmbeddingToCreate"
 
     InferenceRequest:
       type: object
@@ -614,6 +547,13 @@ components:
                 type: integer
               source:
                 type: string
+
+    EmbeddingCreationMetadata:
+      type: object
+      description: |
+        Additional metadata for the embedding.
+      example:
+        source: 'some_file.md'
 
     InferenceMetadata:
       type: object
@@ -715,11 +655,11 @@ paths:
         "204":
           description: Successfully deleted
 
-  # ----------- Embeddings (Bulk) -------------
+  # ----------- Embeddings (Bulk Read) -------------
   /embeddings/bulk:
     post:
       tags:
-        - Embeddings (Bulk)
+        - Embeddings (Bulk Read)
       summary: Read select embeddings from unknown collections
       parameters:
         - $ref: "#/components/parameters/DoNotIncludeEmbeddingsInfo"
@@ -742,7 +682,7 @@ paths:
   /vectorstore/collections/{collection_name}/embeddings/bulk:
     post:
       tags:
-        - Embeddings (Bulk)
+        - Embeddings (Bulk Read)
       summary: Read select embeddings from collection
       parameters:
         - $ref: "#/components/parameters/CollectionName"
@@ -760,7 +700,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
+                $ref: "#/components/schemas/EmbeddingResponseNoCollectionsFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -778,7 +718,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
+                $ref: "#/components/schemas/EmbeddingResponseNoCollectionsFromInput"
 
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -807,17 +747,14 @@ paths:
         content:
           application/json:
             schema:
-              oneOf:
-                - $ref: "#/components/schemas/StringArrayInput"
-                - $ref: "#/components/schemas/NumberArrayInput"
-              description: Content to be embedded OR raw embeddings.
+              $ref: "#/components/schemas/EmbeddingCreationRequest"
       responses:
         "200":
           description: Embeddings added
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmbeddingResponseNoIndexFromInput"
+                $ref: "#/components/schemas/EmbeddingResponseNoCollectionsFromInput"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -957,7 +894,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SearchResponseNoIndex"
+                $ref: "#/components/schemas/SearchResponseNoCollection"
         "400":
           $ref: "#/components/responses/BadRequest"
 

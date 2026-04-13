@@ -5,6 +5,8 @@ description = "Gen3 Embeddings"
 dependencies = [
     "asyncpg",
     "common",
+    "httpx",
+    "sentence-transformers",
 ]
 requires-python = "~=3.13.0"
 
