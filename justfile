@@ -431,6 +431,8 @@ _build_all: _check_dependencies
     fi
   done
 
+  report_error_or_success $overall_exit "just build:" "building" "all" "services!"
+
   exit $overall_exit
 
 _lock_all: _check_dependencies
