@@ -4,7 +4,7 @@ set -euo pipefail
 missing=()
 issues=()
 
-for command in docker pre-commit uv psql; do
+for command in docker pre-commit; do
   if ! command -v "$command" >/dev/null 2>&1; then
     missing+=("$command")
   fi

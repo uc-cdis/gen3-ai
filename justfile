@@ -7,7 +7,7 @@ default:
 check_dependencies:
     @./scripts/check_dependencies.bash
 
-setup:
+setup: check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -33,7 +33,7 @@ setup:
       exit 1
   fi
 
-setup_db: check_dependencies
+setup_db:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -96,7 +96,7 @@ setup_db: check_dependencies
     fi
   done
 
-install $SERVICE="all": check_dependencies
+install $SERVICE="all":
   #!/usr/bin/env bash
 
   # this includes some helpers for colored line printing
@@ -121,7 +121,7 @@ install $SERVICE="all": check_dependencies
     uv sync --all-packages --group dev --directory "./services/$SERVICE" --all-extras
   fi
 
-lock $SERVICE="all": check_dependencies
+lock $SERVICE="all":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -135,7 +135,7 @@ lock $SERVICE="all": check_dependencies
     just install "$SERVICE"
   fi
 
-test $SERVICE="all": check_dependencies
+test $SERVICE="all":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -155,7 +155,7 @@ test $SERVICE="all": check_dependencies
     exit $overall_exit
   fi
 
-build $SERVICE="all": check_dependencies
+build $SERVICE="all":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -168,7 +168,7 @@ build $SERVICE="all": check_dependencies
     report_error_or_success $? "just build:" "building" "$SERVICE" "service!"
   fi
 
-@run $SERVICE: check_dependencies
+@run $SERVICE:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -188,7 +188,7 @@ build $SERVICE="all": check_dependencies
     --access-logfile - \
     --error-logfile -
 
-@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141": check_dependencies
+@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141":
   #!/usr/bin/env bash
   print_header "just docker_run:" "running" "$SERVICE" "service..."
   docker kill $SERVICE
@@ -199,7 +199,7 @@ build $SERVICE="all": check_dependencies
   -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} \
   $SERVICE:latest
 
-format $SERVICE="all": check_dependencies
+format $SERVICE="all":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -210,7 +210,7 @@ format $SERVICE="all": check_dependencies
     uv run --directory $SERVICE ruff format
   fi
 
-venv_reset: check_dependencies
+venv_reset:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
   for dir in services/*; do
@@ -224,7 +224,7 @@ venv_reset: check_dependencies
     rm ${dir}/uv.lock | true
   done
 
-snyk $SERVICE="all": check_dependencies
+snyk $SERVICE="all":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -269,7 +269,7 @@ snyk $SERVICE="all": check_dependencies
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all" $EXTRA_ARG="": check_dependencies
+lint $SERVICE="all" $EXTRA_ARG="":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -301,7 +301,47 @@ lint $SERVICE="all" $EXTRA_ARG="": check_dependencies
     exit $overall_exit
   fi
 
-_install_all: check_dependencies
+update_versions:
+    #!/usr/bin/env bash
+    source scripts/.justfile_helpers.bash
+
+    print_header "just update_versions:" "attempting to update" ".github/workflows/automation.yml" "uv & just versions..."
+
+    set -euo pipefail
+    UV_LATEST=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name)
+    JUST_LATEST=$(curl -s https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
+    echo "Latest UV:   $UV_LATEST"
+    echo "Latest JUST: $JUST_LATEST"
+
+    # sanity check for semver
+    semver_regex='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+    if ! [[ $UV_LATEST =~ $semver_regex ]]; then
+        print_header
+        echo "ERROR: UV tag '$UV_LATEST' does not look like a semantic version" >&2
+        exit 1
+    fi
+    if ! [[ $JUST_LATEST =~ $semver_regex ]]; then
+        echo "ERROR: JUST tag '$JUST_LATEST' does not look like a semantic version" >&2
+        exit 1
+    fi
+
+    # update versions in the automation file
+    FILE=.github/workflows/automation.yml
+
+    tmp=$(mktemp)
+    sed -E \
+        "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+
+    tmp=$(mktemp)
+    sed -E \
+        "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+
+    echo "succesfully updated!"
+
+
+_install_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -314,7 +354,7 @@ _install_all: check_dependencies
 
   exit $overall_exit
 
-_lint_all $EXTRA_ARG="": check_dependencies
+_lint_all $EXTRA_ARG="":
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -332,12 +372,13 @@ _lint_all $EXTRA_ARG="": check_dependencies
     fi
   done
 
+  just update_versions
 
   report_error_or_success $overall_exit "just lint:" "linting" "all" "services!"
 
   exit $overall_exit
 
-_format_all: check_dependencies
+_format_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -357,7 +398,7 @@ _format_all: check_dependencies
 
   exit $overall_exit
 
-_build_all: check_dependencies
+_build_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -370,7 +411,7 @@ _build_all: check_dependencies
 
   exit $overall_exit
 
-_lock_all: check_dependencies
+_lock_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -383,7 +424,7 @@ _lock_all: check_dependencies
 
   exit $overall_exit
 
-_test_all: check_dependencies
+_test_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
@@ -398,7 +439,7 @@ _test_all: check_dependencies
 
   exit $overall_exit
 
-_snyk_all: check_dependencies
+_snyk_all:
   #!/usr/bin/env bash
   source scripts/.justfile_helpers.bash
 
