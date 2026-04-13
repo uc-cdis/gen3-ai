@@ -117,6 +117,7 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
+      DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
       BUILD_ARGS: SERVICE_NAME=gen3_embeddings
@@ -132,6 +133,7 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
+      DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
       BUILD_ARGS: SERVICE_NAME=gen3_inference
@@ -147,6 +149,7 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
     with:
+      DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
       BUILD_ARGS: SERVICE_NAME=gen3_ai_model_repo
