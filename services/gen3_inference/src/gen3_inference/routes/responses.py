@@ -37,6 +37,7 @@ from openresponses_types.types import (
 from gen3_inference.config import (
     ALLOWED_GEN3_INFERENCE_HOSTS,
     GEN3_AI_MODEL_REPO_URL,
+    MOCK_AI_MODEL_REPO_REPONSE,
     logging,
 )
 from gen3_inference.errors import (
@@ -155,27 +156,29 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
         # TODO: use auth: HOST_TO_CREDS
 
         # TODO: FOR TESTING, REMOVE THIS
-        # response = httpx.Response(
-        #     # json={
-        #     #     "name": ai_model,
-        #     #     "url": "https://api.openai.com/v1/",
-        #     #     "version": "foobar",
-        #     #     "type": "foobar",
-        #     #     "description": "foobar",
-        #     #     "tags": ["foobar"],
-        #     #     "inference_protocol_clients": ["openai_chat"],  # "kserve_v2", "openresponses",
-        #     # },
-        #     json={
-        #         "name": ai_model,
-        #         "url": "http://localhost:11434/v1/",
-        #         "version": "llama3.2:latest",
-        #         "type": "llama3.2:latest",
-        #         "description": "llama3.2:latest",
-        #         "tags": ["llama3.2:latest"],
-        #         "inference_protocol_clients": ["openai_chat"], # "kserve_v2", "openresponses",
-        #     },
-        #     status_code=200,
-        # )
+        if MOCK_AI_MODEL_REPO_REPONSE:
+            response = httpx.Response(
+                # json={
+                #     "name": ai_model,
+                #     "url": "https://api.openai.com/v1/",
+                #     "version": "foobar",
+                #     "type": "foobar",
+                #     "description": "foobar",
+                #     "tags": ["foobar"],
+                #     "inference_protocol_clients": ["openai_chat"],  # "kserve_v2", "openresponses",
+                # },
+                json={
+                    "name": ai_model,
+                    "url": "http://localhost:11434/v1/",
+                    "version": "1",
+                    "type": "model",
+                    "description": "description",
+                    "tags": ["foobar"],
+                    "inference_protocol_clients": ["openresponses"],  # "openai_chat", "kserve_v2", "openresponses",
+                },
+                status_code=200,
+            )
+
         if not response:
             # TODO: remove conditional above and add retry and backoff
             logging.debug(f"Checking if model is available at primary domain: {primary_url}")

@@ -291,9 +291,9 @@ def _convert_response_outputs(
 
 def _convert_text(openai_text: ResponseTextConfig | None) -> TextField:
 
-    # default assuming text
+    # default assuming text and medium verbosity
     format = TextResponseFormat(type=Type34(value="text"))
-    verbosity = None
+    verbosity = VerbosityEnum.medium
 
     if openai_text:
         if openai_text.format:
@@ -322,6 +322,9 @@ def _convert_text(openai_text: ResponseTextConfig | None) -> TextField:
             verbosity = VerbosityEnum.medium
         elif openai_text.verbosity == "high":
             verbosity = VerbosityEnum.high
+        else:
+            # default to medium
+            verbosity = VerbosityEnum.medium
 
     text = TextField(format=format, verbosity=verbosity)
 

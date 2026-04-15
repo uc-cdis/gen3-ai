@@ -34,6 +34,7 @@ from openresponses_types import (
     Type33,
     Type34,
     Usage,
+    VerbosityEnum,
 )
 
 from gen3_inference.config import logging
@@ -188,6 +189,7 @@ def convert_chat_completion_stream_to_sse(
         sequence_number += 1
 
         # emit content delta events for each chunk
+        overall_content = ""
         for chunk in chat_completion_stream:
             payload = chunk.model_dump()
 
@@ -218,13 +220,14 @@ def convert_chat_completion_stream_to_sse(
                 yield b"event: response.output_text.delta\n"
                 yield f"data: {json.dumps(event_payload)}\n\n".encode()
                 sequence_number += 1
+                overall_content += content
 
         # emit done events for the item
         event_payload = {
             "id": "last_event",
             "type": "response.output_text.done",
             "sequence_number": sequence_number,
-            "text": "",
+            "text": overall_content,
             "usage": usage_info,
         }
         yield b"event: response.output_text.done\n"
@@ -305,8 +308,8 @@ def _openai_chat_completion_to_openresponses(
         # more "permissive" option and because we don't have the data in the response
         # let's tell clients it was the more "permissive" thing done
         parallel_tool_calls=True,
-        # presume text response
-        text=TextField(format=TextResponseFormat(type=Type34(value="text"))),
+        # presume text response, no verbosity is provided so set to medium
+        text=TextField(format=TextResponseFormat(type=Type34(value="text")), verbosity=VerbosityEnum.medium),
         # some of these are required in Open Responses but can be None in openai python SDK,
         # so use -1 as default to indicate unknown value
         top_logprobs=-1,

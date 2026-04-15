@@ -6,6 +6,7 @@ from common.config import starlette_config
 
 # common logger, don't change this
 logging = common_config.logging
+logging.name = "gen3_ai_model_repo"
 
 URL_PREFIX = starlette_config("GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX", default="", cast=str)
 
@@ -21,7 +22,7 @@ AUTHZ_SERVICE_NAME = starlette_config(
     cast=str,
 )
 AUTHZ_SERVICE_RESOURCE = starlette_config(
-    "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME",
+    "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_RESOURCE",
     default="/services/gen3-ai-model-repo",
     cast=str,
 )

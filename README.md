@@ -11,20 +11,20 @@ See [docs/ai_api.yaml](docs/ai_api.yaml) for the OpenAPI specification. You can 
 ## Services Powering the API
 
 - **Gen3 Embeddings**
-  - Embeddings and vector indicies as first-class objects
+  - Embeddings and collections of embeddings as first-class objects
+  - Bulk support
+  - Similarity search over embeddings
   - Row-level authorization
   - Authorization and access control using Gen3 tokens
-  - Bulk support
-  - Vector search
 - **Gen3 Inference**
-  - Expose endpoints for model inference and RAG-like interfaces
-  - Supports mesh-like connections to other Gen3 instances to share models
+  - Adopts [Open Responses](https://openresponses.org) standard interface for AI Model inference (both non-streaming and streaming support)
+  - Supports mesh-like connections to other Gen3 instances to proxy requests
   - Highly configurable, can also connect to public cloud services
   - Authorization and access control using Gen3 tokens
 - **Gen3 AI Model Repository**
   - AI model management in your own infrastructure (no relying on Huggingface)
   - API exposed is compatible with tools that interact with Huggingface
-  - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
+    - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
   - Authorization and access control using Gen3 tokens
 
 ## Layout
@@ -34,23 +34,17 @@ See [docs/ai_api.yaml](docs/ai_api.yaml) for the OpenAPI specification. You can 
 * `libraries/common`
   * The common library and dependencies shared across all services
 * `services/{{name}}`
-  * The individual services (all import common)
-* `Dockerfile`
-  * Single Dockerfile with arg `SERVICE` for building different services
+  * The individual services (all import `common`)
+* `Dockerfile.k8s`
+  * Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
 * `justfile`
   * Simplified setup, building, running
-  * `just install`, `just run gen3_embeddings`, `just build`
-
-Services can import common code:
-
-```python
-from common.config import DEBUG
-```
+  * `just setup`, `just install`, `just test`, `just run gen3_embeddings`, `just build`
 
 Services (and libraries) have folder structure:
 
 * `src/{{name}}`
-* `pyproject.toml` which builds {{name}} from src/{{name}}
+* `pyproject.toml` which builds {{name}} from `src/{{name}}`
 
 ### Why this setup?
 
@@ -122,73 +116,18 @@ just lint all -v
 just lint services/gen3_inference -v
 ```
 
-
 ## Implementation Details
 
 * FastAPI
 * PostgreSQL for services that need a database
 * No ORM. `asyncpg` with shared code in `libraries/common`
 
+### Metrics
+
+See [these docs](./docs/metrics.md) for more info.
+
 ## Development Details
 
 ### Using VSCode?
 
 See [these docs](./docs/vscode.md) for more info on how to best set up for development of this repo.
-
-### Metrics
-
-By default, we support Prometheus metrics. They can be exposed at a `/metrics` endpoint compatible with Prometheus scraping and visualize in Prometheus or
-Graphana, etc.
-
-You can [run Prometheus locally](https://github.com/prometheus/prometheus) if you want to test or visualize these.
-
-#### Setup Locally
-
-Run the service locally using `just run {{service}}`.
-
-Create a [`prometheus.yml` config file](https://prometheus.io/docs/prometheus/latest/configuration/configuration), such
-as: `~/Documents/prometheus/conf/prometheus.yml`.
-
-Put this in:
-
-```yaml
-global:
-  scrape_interval: 15s # By default, scrape targets every 15 seconds.
-
-# A scrape configuration containing exactly one endpoint to scrape:
-# Here it's Prometheus itself.
-scrape_configs:
-  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
-  - job_name: 'gen3_inference'
-
-    # Override the global default and scrape targets from this job every 5 seconds.
-    scrape_interval: 10s
-
-    static_configs:
-      # NOTE: The `host.docker.internal` below is so docker on MacOS can properly find the locally running service
-      - targets: [ 'host.docker.internal:4143' ]
-
-  - job_name: 'gen3_ai_model_repo'
-    static_configs:
-      - targets: [ 'host.docker.internal:4141' ]
-  - job_name: 'gen3_embeddings'
-    static_configs:
-      - targets: [ 'host.docker.internal:4142' ]
-```
-
-> Note: Tested the above config on MacOS, with Linux you can maybe adjust these commands to actually expose the local
-> network to the running prometheus container.
-
-Then run this:
-
-```
-docker run --name prometheus -v ~/Documents/prometheus/conf/prometheus.yml:/etc/prometheus/prometheus.yml -d -p 127.0.0.1:9090:9090 prom/prometheus
-```
-
-Then go to [http://127.0.0.1:9090](http://127.0.0.1:9090).
-
-And some recommended PromQL queries:
-
-```promql
-sum by (status_code) (gen3_inference_api_requests_total)
-```

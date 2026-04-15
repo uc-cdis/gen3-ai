@@ -22,6 +22,12 @@ URL_PREFIX = starlette_config("GEN3_INFERENCE_PROXY_URL_PREFIX", default="", cas
 HOST_TO_CREDS_CSV = starlette_config("HOST_TO_CREDS_CSV", cast=CommaSeparatedStrings, default="")
 HOST_TO_CREDS = {item.split(":", 1)[0]: item.split(":", 1)[1] for item in list(HOST_TO_CREDS_CSV)}
 
+MOCK_AI_MODEL_REPO_REPONSE = starlette_config("MOCK_AI_MODEL_REPO_REPONSE", cast=bool, default=False)
+if MOCK_AI_MODEL_REPO_REPONSE:
+    logging.warning(
+        f"MOCK_AI_MODEL_REPO_REPONSE is {MOCK_AI_MODEL_REPO_REPONSE}, ONLY FOR TESTING!! WARNING!! DO NOT USE IN PRODUCTION!!"
+    )
+
 ##### Common Config - DO NOT EDIT #####
 # DON'T EDIT THESE *VALUES* IN THIS FILE.
 # You can add new common configs here, but do the logic in the common config.
