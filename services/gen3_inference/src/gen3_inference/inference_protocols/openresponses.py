@@ -1,5 +1,7 @@
 from urllib.parse import urlparse
 
+import openai
+from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from openai import OpenAI
 from openresponses_types import (
@@ -7,11 +9,13 @@ from openresponses_types import (
 )
 
 from gen3_inference.config import HOST_TO_CREDS, logging
+from gen3_inference.errors import ERROR_TYPE_NOT_FOUND
 from gen3_inference.inference_protocols.base import InferenceProtocolClient
-from gen3_inference.inference_protocols.utils.openai_to_openresponses import (
+from gen3_inference.inference_protocols.utils.openai_responses_to_openresponses import (
     openai_response_to_openresponses,
     openai_streaming_response_to_openresponses,
 )
+from gen3_inference.types import OpenResponsesError
 
 
 class OpenResponsesClient(InferenceProtocolClient):
@@ -39,21 +43,31 @@ class OpenResponsesClient(InferenceProtocolClient):
             # https://docs.ollama.com/api/openai-compatibility#simple-/v1/responses-example
             api_key=HOST_TO_CREDS.get(host),
             base_url=self.base_url,
-            organization="Gen3",
-            project="Gen3",
             webhook_secret=HOST_TO_CREDS.get(host),
         )
 
         logging.debug("successfully setup client. sending responses request...")
 
-        response = client.responses.create(
-            # TODO: probably need to pass in a ton more stuff from the request
-            model=str(body.model),
-            instructions=body.instructions,
-            # TODO: convert body to Openai format
-            input=body.input,
-            stream=False,
-        )
+        # TODO: backoff and retry
+        try:
+            response = client.responses.create(
+                # TODO: probably need to pass in a ton more stuff from the request
+                model=str(body.model),
+                instructions=body.instructions,
+                # TODO: convert body to Openai format
+                input=body.input,
+                stream=False,
+            )
+        except openai.NotFoundError:
+            error = OpenResponsesError(
+                type=ERROR_TYPE_NOT_FOUND,
+                code=ERROR_TYPE_NOT_FOUND,
+                message="The requested model was not found.",
+            )
+            raise HTTPException(status_code=404, detail=error.to_json())
+        except Exception as exc:
+            logging.error(f"{type(exc).__name__}: {exc}", exc_info=True)
+            raise HTTPException(status_code=503, detail="Unable to connect to inference server")
 
         logging.debug("successfully got response. parsing response...")
 
@@ -75,8 +89,6 @@ class OpenResponsesClient(InferenceProtocolClient):
             # TODO: FIXME: actually add thes from the model info
             api_key=HOST_TO_CREDS.get(host),
             base_url=self.base_url,
-            organization="Gen3",
-            project="Gen3",
             webhook_secret=HOST_TO_CREDS.get(host),
         )
 

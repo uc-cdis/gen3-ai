@@ -161,7 +161,7 @@ def _convert_response_outputs(
 
     for item in openai_outputs:
         if item.type == "message":
-            # weirdly, the spec says that messages are to OR from the model, so the
+            # the spec says that messages are to OR from the model, so the
             # text type is "input_text", even though this is output
             content_list = [
                 InputTextContent(type="input_text", text=content.text)
@@ -395,6 +395,7 @@ def _convert_tool_choice(
         # so OpenAI has a broader concept of tools than Open Responses, which
         # appears to only really define function tools right now.
         # So... ignore others?
+        # TODO: If openresponses supports more than FunctionTools in the future, update this
         output_tools = []
         for tool in oai_tool_choice.tools:
             if tool.get("type") == "function":

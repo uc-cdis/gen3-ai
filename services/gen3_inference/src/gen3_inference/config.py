@@ -8,6 +8,7 @@ from common.config import starlette_config
 
 # common logger, don't change this
 logging = common_config.logging
+logging.name = "gen3_inference"
 
 # WARNING: Careful changing these, they require a trust relationship and client credentials
 ALLOWED_GEN3_INFERENCE_HOSTS = starlette_config("ALLOWED_GEN3_INFERENCE_HOSTS", cast=CommaSeparatedStrings, default="")

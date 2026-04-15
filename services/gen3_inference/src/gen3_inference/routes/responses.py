@@ -44,7 +44,6 @@ from gen3_inference.errors import (
     ERROR_TYPE_NOT_FOUND,
 )
 from gen3_inference.inference_protocols.base import InferenceProtocolClient
-from gen3_inference.inference_protocols.kserve_v2 import KServev2Client
 from gen3_inference.inference_protocols.openai_chat import OpenaiChat
 from gen3_inference.inference_protocols.openresponses import OpenResponsesClient
 from gen3_inference.types import OpenResponsesError
@@ -152,13 +151,20 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
 
     primary_url = f"{GEN3_AI_MODEL_REPO_URL}/ai-models/{ai_model}"
     async with httpx.AsyncClient() as client:
+        response = None
         # TODO: use auth: HOST_TO_CREDS
-
-        # TODO: try and backoff
-        response = await client.get(primary_url)
 
         # TODO: FOR TESTING, REMOVE THIS
         # response = httpx.Response(
+        #     # json={
+        #     #     "name": ai_model,
+        #     #     "url": "https://api.openai.com/v1/",
+        #     #     "version": "foobar",
+        #     #     "type": "foobar",
+        #     #     "description": "foobar",
+        #     #     "tags": ["foobar"],
+        #     #     "inference_protocol_clients": ["openai_chat"],  # "kserve_v2", "openresponses",
+        #     # },
         #     json={
         #         "name": ai_model,
         #         "url": "http://localhost:11434/v1/",
@@ -166,10 +172,14 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
         #         "type": "llama3.2:latest",
         #         "description": "llama3.2:latest",
         #         "tags": ["llama3.2:latest"],
-        #         "inference_protocol_clients": ["kserve_v2", "openresponses", "openai_chat"],
+        #         "inference_protocol_clients": ["openai_chat"], # "kserve_v2", "openresponses",
         #     },
         #     status_code=200,
         # )
+        if not response:
+            # TODO: remove conditional above and add retry and backoff
+            logging.debug(f"Checking if model is available at primary domain: {primary_url}")
+            response = await client.get(primary_url)
 
         if response.status_code == 404:
             # not found in primary, so check if model is available at any of the configured trusted domains
@@ -236,8 +246,6 @@ async def get_inference_protocol_client(all_model_inference_protocol_client_name
     # TODO: is it worth caching instances of these for different model URLs?
     if OpenResponsesClient.NAME in all_model_inference_protocol_client_names:
         inference_protocol_client = OpenResponsesClient(base_url=ai_model_url)
-    elif KServev2Client.NAME in all_model_inference_protocol_client_names:
-        inference_protocol_client = KServev2Client(base_url=ai_model_url)
     elif OpenaiChat.NAME in all_model_inference_protocol_client_names:
         inference_protocol_client = OpenaiChat(base_url=ai_model_url)
     else:

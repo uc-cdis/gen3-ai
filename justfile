@@ -308,12 +308,12 @@ lint $SERVICE="all" $EXTRA_ARG="": _check_dependencies
     print_header "just lint:" "ruff check" "$SERVICE" "..."
     start=$(date +%s.%N)
     uv run --directory "$SERVICE" ruff check ./src --fix $EXTRA_ARG
+    exit_code=$?
     end=$(date +%s.%N)
 
     elapsed_ms=$(awk "BEGIN {printf \"%.0f\", ($end-$start)*1000}")
     echo "ruff check finished in $elapsed_ms ms."
 
-    exit_code=$?
     report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "!"
     overall_exit=$((overall_exit | $exit_code))
     echo

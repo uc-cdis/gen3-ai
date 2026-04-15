@@ -72,7 +72,7 @@ def get_app() -> FastAPI:
             user_id = await get_user_id(request=request)
         except HTTPException as exc:
             logging.debug(
-                f"Could not retrieve user_id. Error: {exc}. For logging and metrics, setting user_id to 'Unknown'"
+                f"Could not retrieve user_id. Error: '{exc}'. For logging and metrics, setting user_id to 'Unknown'"
             )
             user_id = "Unknown"
 
