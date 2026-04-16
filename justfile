@@ -1,11 +1,18 @@
 set dotenv-load
 
-setup:
+# show available tasks
+default:
+    @just --list
+
+_check_dependencies:
+    @./scripts/check_dependencies.bash
+
+setup: _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
 
   # this includes some helpers for colored line printing
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   print_header "just setup:" "verifying" "uv" "installation..."
   if command -v uv >/dev/null 2>&1; then
@@ -26,13 +33,42 @@ setup:
       exit 1
   fi
 
+  print_header "just setup:" "verifying" "pre-commit" "installation..."
+  if command -v pre-commit >/dev/null 2>&1; then
+      echo "pre-commit is installed."
+      echo "  version: $(pre-commit --version)"
+  else
+      echo "${YELLOW}** WARNING: pre-commit not found in \$PATH. Installing with pip... **${RESET}"
+      pip install pre-commit
+  fi
+
+  hook_path="$(git rev-parse --git-path hooks/pre-commit)"
+
+  if [[ ! -f "$hook_path" ]]; then
+    echo "${YELLOW}** WARNING: pre-commit git hook not found from: `git rev-parse --git-path hooks/pre-commit`. Installing... **${RESET}"
+    pre-commit install
+  elif ! grep -q 'pre-commit' "$hook_path"; then
+    echo "${YELLOW}** WARNING: pre-commit git hook not found from: `git rev-parse --git-path hooks/pre-commit`. Installing... **${RESET}"
+    pre-commit install --overwrite
+  fi
+
+  echo "pre-commit git hook is installed."
+
+
+setup_db: _check_dependencies
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
       if [ "${dir#services/}" == "gen3_inference" ]; then
-        print_header "just setup:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
+        print_header "just setup_db:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
       else
-        print_header "just setup:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
-
+        print_header "just setup_db:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
+        # TODO: Make a utility for running this outside the justfile
         if [ ! -f "${dir}/.env" ]; then
           echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
         else
@@ -48,26 +84,51 @@ setup:
         fi
 
         psql \
+          -d postgres \
           -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
           -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
           2>/dev/null || echo "Database already exists."
 
-        # TODO: db migration / initial setup
+        # run migrations if they exist
+        MIGRATIONS_DIR="${dir}/db_migrations"
+        if [ -d "$MIGRATIONS_DIR" ]; then
+          print_header "just setup:" "running" "migrations for" "${dir#services/}" "..."
+
+          # Get all .sql files, sort them numerically, and iterate
+          for migration_file in $(find "$MIGRATIONS_DIR" -name "*.sql" | sort -V); do
+            echo "Applying migration: $migration_file"
+
+            # Run the migration
+            psql \
+              --set ON_ERROR_STOP=1 \
+              -d "${PGDATABASE}" \
+              -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+              -f "$migration_file"
+
+            # Check if psql failed
+            if [ $? -ne 0 ]; then
+              echo "${RED}** ERROR: Migration $migration_file failed. Perhaps it was already ran. **${RESET}"
+              exit 1
+            fi
+          done
+
+          echo "${GREEN}Migrations applied successfully.${RESET}"
+        fi
       fi
     fi
   done
 
-install $SERVICE="all":
+install $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
 
   # this includes some helpers for colored line printing
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
     # this forces looping over folders in /services
     # and reduces code duplication by re-calling this recipe
     # with a specific service
-    just install_all
+    just _install_all
   else
     # print_header COMMAND TEXT SERVICE TEXT
     print_header "just install:" "installing" "$SERVICE" "service..."
@@ -82,12 +143,12 @@ install $SERVICE="all":
     uv sync --all-packages --group dev --directory "./services/$SERVICE" --all-extras
   fi
 
-lock $SERVICE="all":
+lock $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lock_all
+    just _lock_all
   else
     print_header "just lock:" "locking" "$SERVICE" "service..."
 
@@ -96,16 +157,16 @@ lock $SERVICE="all":
     just install "$SERVICE"
   fi
 
-test $SERVICE="all":
+test $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just test_all
+    just _test_all
   else
     print_header "just test:" "testing" "$SERVICE" "service..."
     cd "./services/$SERVICE"
-    uv run pytest . -vv
+    uv run pytest -n auto . -vv
     exit_code=$?
     cd -
 
@@ -116,22 +177,22 @@ test $SERVICE="all":
     exit $overall_exit
   fi
 
-build $SERVICE="all":
+build $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just build_all
+    just _build_all
   else
     print_header "just build:" "building" "$SERVICE" "service..."
-    docker build -t $SERVICE --build-arg SERVICE_NAME="$SERVICE" .
+    docker build -t $SERVICE --build-arg SERVICE_NAME="$SERVICE" -f Dockerfile.k8s .
 
     report_error_or_success $? "just build:" "building" "$SERVICE" "service!"
   fi
 
-@run $SERVICE:
+@run $SERVICE: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   print_header "just run:" "running" "$SERVICE" "service..."
 
@@ -140,16 +201,16 @@ build $SERVICE="all":
   export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
 
   # Start the app with OpenTelemetry and Gunicorn and Uvicorn workers
-  uv run --env-file "../../.env" --directory "./services/$SERVICE" \
+  uv run --directory "./services/$SERVICE" \
     opentelemetry-instrument \
     gunicorn \
     $SERVICE.main:app_instance \
     -k uvicorn.workers.UvicornWorker \
-    -c gunicorn.conf.py \
+    -c ../../deployments/k8s/services/${SERVICE}/gunicorn.conf.py \
     --access-logfile - \
     --error-logfile -
 
-@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141":
+@docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141": _check_dependencies
   #!/usr/bin/env bash
   print_header "just docker_run:" "running" "$SERVICE" "service..."
   docker kill $SERVICE
@@ -160,30 +221,37 @@ build $SERVICE="all":
   -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} \
   $SERVICE:latest
 
-format $SERVICE="all":
+format $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just format_all
+    just _format_all
   else
-    print_header "just format:" "formatting" "$SERVICE" "service..."
-    if [ $SERVICE == "all" ]; then
-      for dir in services/*; do
-        print_header "just format:" "formatting" "${dir#services/}" "..."
-        uv run --directory "./services/${dir#services/}" ruff format
-      done
-    else
-      uv run --directory ./services/$SERVICE ruff format
-    fi
+    print_header "just format:" "formatting" "$SERVICE" "..."
+    uv run --directory $SERVICE ruff format
   fi
 
-snyk $SERVICE="all":
+venv_reset: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
+  for dir in services/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
+  for dir in libraries/*; do
+    print_header "just venv_reset:" "removing" "${dir}" ".venv & uv.lock ..."
+    rm -r ${dir}/.venv | true
+    rm ${dir}/uv.lock | true
+  done
+
+snyk $SERVICE="all": _check_dependencies
+  #!/usr/bin/env bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just snyk_all
+    just _snyk_all
   else
     print_header "just snyk:" "snyk scanning" "$SERVICE" "service..."
     if [ $SERVICE == "all" ]; then
@@ -223,39 +291,81 @@ snyk $SERVICE="all":
   fi
 
 # `just lint $SERVICE`
-lint $SERVICE="all":
+lint $SERVICE="all" $EXTRA_ARG="": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   if [ $SERVICE == "all" ]; then
-    just lint_all
+    just _lint_all "$EXTRA_ARG"
   else
-    # install to get ruff and other things required for formatting and linting
-    just install $SERVICE
+    # install services to get ruff and other things required for formatting and linting
+    if [[ $SERVICE == *services* ]]; then
+      just install ${SERVICE#services/}
+    fi
+
     just format $SERVICE
 
     print_header "just lint:" "ruff check" "$SERVICE" "..."
     start=$(date +%s.%N)
-    uv run --directory "./services/$SERVICE" ruff check ./src --fix
+    uv run --directory "$SERVICE" ruff check ./src --fix $EXTRA_ARG
+    exit_code=$?
     end=$(date +%s.%N)
 
     elapsed_ms=$(awk "BEGIN {printf \"%.0f\", ($end-$start)*1000}")
     echo "ruff check finished in $elapsed_ms ms."
 
-    exit_code=$?
-    report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "service!"
+    report_error_if_failed $exit_code "just lint:" "ruff check" "$SERVICE" "!"
     overall_exit=$((overall_exit | $exit_code))
     echo
 
-    report_error_or_success $overall_exit "just lint:" "linting" "$SERVICE" "service!"
+    report_error_or_success $overall_exit "just lint:" "linting" "$SERVICE" "!"
 
     exit $overall_exit
   fi
 
-# you can use this instead: `just install`
-install_all:
+update_versions: _check_dependencies
+    #!/usr/bin/env bash
+    source scripts/.justfile_helpers.bash
+
+    print_header "just update_versions:" "attempting to update" ".github/workflows/automation.yml" "uv & just versions..."
+
+    set -euo pipefail
+    UV_LATEST=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name)
+    JUST_LATEST=$(curl -s https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
+    echo "Latest UV:   $UV_LATEST"
+    echo "Latest JUST: $JUST_LATEST"
+
+    # sanity check for semver
+    semver_regex='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+    if ! [[ $UV_LATEST =~ $semver_regex ]]; then
+        print_header
+        echo "ERROR: UV tag '$UV_LATEST' does not look like a semantic version" >&2
+        exit 1
+    fi
+    if ! [[ $JUST_LATEST =~ $semver_regex ]]; then
+        echo "ERROR: JUST tag '$JUST_LATEST' does not look like a semantic version" >&2
+        exit 1
+    fi
+
+    # update versions in the automation file
+    FILE=.github/workflows/automation.yml
+
+    tmp=$(mktemp)
+    sed -E \
+        "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+
+    tmp=$(mktemp)
+    sed -E \
+        "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE" > "$tmp"
+    mv "$tmp" "$FILE"
+
+    echo "succesfully updated!"
+
+
+_install_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -266,40 +376,53 @@ install_all:
 
   exit $overall_exit
 
-# you can use this instead: `just lint`
-lint_all:
+_lint_all $EXTRA_ARG="": _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
-  for dir in services/*; do
-    if [[ -n "${dir#services/}" ]]; then
-      just lint ${dir#services/}
+  for dir in libraries/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir} "$EXTRA_ARG"
       overall_exit=$((overall_exit | $?))
     fi
   done
+
+  for dir in services/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir} "$EXTRA_ARG"
+      overall_exit=$((overall_exit | $?))
+    fi
+  done
+
+  just update_versions
 
   report_error_or_success $overall_exit "just lint:" "linting" "all" "services!"
 
   exit $overall_exit
 
-# you can use this instead: `just format`
-format_all:
+_format_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
+
+  for dir in libraries/*; do
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir}
+      overall_exit=$((overall_exit | $?))
+    fi
+  done
 
   for dir in services/*; do
-    if [[ -n "${dir#services/}" ]]; then
-      just format ${dir#services/}
+    if [[ -n "${dir}" ]]; then
+      just lint ${dir}
       overall_exit=$((overall_exit | $?))
     fi
   done
 
   exit $overall_exit
 
-# you can use this instead: `just build`
-build_all:
+_build_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -308,12 +431,13 @@ build_all:
     fi
   done
 
+  report_error_or_success $overall_exit "just build:" "building" "all" "services!"
+
   exit $overall_exit
 
-# you can use this instead: `just lock`
-lock_all:
+_lock_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -324,10 +448,9 @@ lock_all:
 
   exit $overall_exit
 
-# you can use this instead: `just test`
-test_all:
+_test_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then
@@ -340,10 +463,9 @@ test_all:
 
   exit $overall_exit
 
-# you can use this instead: `just snyk`
-snyk_all:
+_snyk_all: _check_dependencies
   #!/usr/bin/env bash
-  source .justfile_helpers.bash
+  source scripts/.justfile_helpers.bash
 
   for dir in services/*; do
     if [[ -n "${dir#services/}" ]]; then

@@ -1,0 +1,5 @@
+ERROR_TYPE_SERVER_ERROR = "server_error"
+ERROR_TYPE_INVALID_REQUEST = "invalid_request"
+ERROR_TYPE_NOT_FOUND = "not_found"
+ERROR_TYPE_MODEL_ERROR = "model_error"
+ERROR_TYPE_TOO_MANY_REQUESTS = "too_many_requests"

@@ -1,12 +1,17 @@
 [project]
 name = "common"
-version = "0.1.0"
+version = "0.1.3"
 description = "Gen3 AI Common/Shared Dependencies"
 requires-python = "~=3.13.0"
+# How to add in-progress branches to test:
+#     "{package} @ git+https://github.com/{org}/{repo}.git@{branch}"
+#   example:
+#     "cdispyutils @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/metrics-improvements",
 dependencies = [
   "asyncpg>=0.31.0",
   "authutils>=7.2.5",
   "cdislogging>=1.2.0",
+  "cdispyutils>=2.5.1",
   "click>=8.3.1",
   "fastapi>=0.128.0",
   "gen3authz>=3.0.1",
@@ -17,21 +22,36 @@ dependencies = [
   "opentelemetry-sdk>=1.39.1",
   "prometheus-client>=0.24.1",
   "pytest>=9.0.2",
+  "python-dotenv>=1.2.2",
   "pyyaml>=6.0.3",
   "requests>=2.32.5",
   "ruff>=0.15.6",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
+  # dev
+  # note: putting these here is required b/c common is
+  #       installed as a library.
+  #
+  # At this point, the overhead of including these in the
+  # docker images is minimal.. but if we want to shave size
+  # at the cost of duplication, we could add all these to
+  # each service dev deps instead of the single common
+  # location.
+  "pytest",
+  "pytest-asyncio",
+  "ruff",
+  "pytest-xdist",
+  "pyright",
+  "pylint>=4.0.5",
+  "dotenv>=0.9.9",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest",
-    "pytest-asyncio",
-    "ruff",
-    "pytest-xdist",
-    "pyright",
-    "pylint>=4.0.5",
+  # DO NOT USE THIS!!
+  # uv WILL NOT INCLUDE ANYTHING IN THIS "dev" BLOCK
+  # IN SERVICE INSTALLATIONS!
+  # THERE SHOULD BE NOTHING IN HERE!
 ]
 
 [tool.uv]
@@ -43,3 +63,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/common"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

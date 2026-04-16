@@ -1,5 +1,3 @@
--- TODO: Not tested
-
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- vector index metadata
@@ -31,23 +29,63 @@ CREATE TABLE embeddings (
     CONSTRAINT uniq_index_uuid UNIQUE (vector_index_id, embedding_id)
 );
 
+-- This function will look up the expected dimension on vector_indices, then compare it to the actual dimension of NEW.embedding.
+CREATE OR REPLACE FUNCTION check_embedding_dimension()
+RETURNS trigger AS $$
+DECLARE
+    expected_dim integer;
+    actual_dim   integer;
+BEGIN
+    SELECT dimensions INTO expected_dim
+    FROM vector_indices
+    WHERE id = NEW.vector_index_id;
+
+    IF expected_dim IS NULL THEN
+        RAISE EXCEPTION 'vector_index_id % does not exist', NEW.vector_index_id;
+    END IF;
+
+    -- If using pgvector >= 0.5.0 with vector_dims()
+    actual_dim := vector_dims(NEW.embedding);
+
+    IF actual_dim <> expected_dim THEN
+        RAISE EXCEPTION
+            'Embedding dimension mismatch: expected %, got % (vector_index_id=%)',
+            expected_dim, actual_dim, NEW.vector_index_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach triggers to embeddings
+CREATE TRIGGER embeddings_check_dimension_insert
+BEFORE INSERT ON embeddings
+FOR EACH ROW
+EXECUTE FUNCTION check_embedding_dimension();
+
+CREATE TRIGGER embeddings_check_dimension_update
+BEFORE UPDATE OF embedding, vector_index_id ON embeddings
+FOR EACH ROW
+EXECUTE FUNCTION check_embedding_dimension();
+
+
 -- may need to consider partitioning eventually...
 
 -- indexing will need to be dynamic for same-dim vectors
 -- CONCURRENTLY allows it to safely run in prod during other read/write operations (at the cost of increased time and resource usage)
 -- NOTE: if we end up needing to partition, we can't use CONCURRENTLY
 -- Concurrent builds for indexes on partitioned tables are currently not supported in postgres.
-CREATE INDEX CONCURRENTLY ON embeddings USING hnsw ((embedding::vector(512)) vector_l2_ops) WHERE (vector_index_id = 2);
+-- CREATE INDEX CONCURRENTLY ON embeddings USING hnsw ((embedding::vector(512)) vector_l2_ops) WHERE (vector_index_id = 2);
 
 -- JSONB column metadata inverted index, so value searching on tags or something
 -- is optimized
 CREATE INDEX idx_embeddings_metadata_gin
-    ON embeddings_2
+    ON embeddings
     USING GIN (metadata);
 
 -- on authz tags for faster filtering, similar to above
 CREATE INDEX idx_embeddings_authz_gin
-    ON embeddings_in_index_2
+    ON embeddings
     USING GIN (authz);
 
 -- row level security will enforce authz
@@ -57,8 +95,14 @@ ALTER TABLE embeddings
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL
 -- allowed_authz to the user's allowed authz resources from arborist
-CREATE POLICY authz_policy ON embedding
-  FOR SELECT USING (
+-- applies to ALL (SELECT, INSERT, UPDATE, DELETE)
+CREATE POLICY authz_policy ON embeddings
+  USING (
+    -- reminder: authz is a TEXT[], so the GIN above makes this fast
+    authz && current_setting('app.allowed_authz', true)::text[]
+    AND authz_version = 0
+  )
+  WITH CHECK (
     -- reminder: authz is a TEXT[], so the GIN above makes this fast
     authz && current_setting('app.allowed_authz', true)::text[]
     AND authz_version = 0

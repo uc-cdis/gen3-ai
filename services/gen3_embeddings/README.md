@@ -14,7 +14,9 @@ By default:
       in the embedding table
 * Modifications to queries are possible through the API (e.g. sacrificing time for more accuracy), see the API specification for more details
 
-> If you need to support >2000 dimension vectors: the service will need to be modified. This is a limitation of the pgvector `vector` column. However, if you need to create different indexes, you can do so.
+> If you need to support indexing >2000 dimension vectors: the service will need to be modified. This is a limitation of pgvector. The `vector` column allows higher dimensionality, but the indexing can't go beyond 2000.
+> https://github.com/pgvector/pgvector?tab=readme-ov-file#what-if-i-want-to-index-vectors-with-more-than-2000-dimensions
+> The best bet for up to 4000 would be to use half-precision INDEXING
 
 ## Startup
 

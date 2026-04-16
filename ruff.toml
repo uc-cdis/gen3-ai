@@ -102,3 +102,6 @@ docstring-code-format = true
 # Set the line length limit used when formatting code snippets in
 # docstrings.
 docstring-code-line-length = "dynamic"
+
+[lint.isort]
+known-first-party = ["common", "gen3_inference", "gen3_embeddings", "gen3_ai_model_repo"]
