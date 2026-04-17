@@ -1,0 +1,143 @@
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class CollectionModel(BaseModel):
+    """
+    API schema representing a collection.
+    """
+
+    collection_id: int = Field(..., alias="id")
+    collection_name: str
+    description: str | None = None
+    dimensions: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    self: str | None = None
+
+
+class CollectionsListModel(BaseModel):
+    collections: list[CollectionModel]
+
+
+class EmbeddingInfo(BaseModel):
+    collection_id: int
+    authz: list[str]
+    authz_version: int
+    metadata: dict | None = None
+    self: str
+
+
+class SingleEmbeddingResult(BaseModel):
+    vector: list[float]
+    input_index: int | None = None
+    embedding_id: UUID
+    info: EmbeddingInfo | None = None
+
+
+class EmbeddingResponse(BaseModel):
+    """
+    Response schema for embedding.
+    """
+
+    embeddings: list[SingleEmbeddingResult]
+    collections: list[CollectionModel] | None = None
+
+
+class EmbeddingResponseNoCollections(BaseModel):
+    """
+    Response schema for embedding operations that do not Collections.
+    """
+
+    embeddings: list[SingleEmbeddingResult]
+
+
+class SearchRequestBody(BaseModel):
+    """
+    Request body for vector search operations.
+    """
+
+    input: str | list[float]
+    top_k: int = 10
+    range: float | None = Field(None, alias="range")
+    filters: dict[str, str] | None = None
+
+
+class SingleSearchResult(BaseModel):
+    """
+    Search result for a single hit.
+    """
+
+    id: UUID
+    similarity_score: float
+    embedding: SingleEmbeddingResult
+
+
+class SearchResponse(BaseModel):
+    embeddings: list[SingleSearchResult]
+    collections: list[CollectionModel] | None = None
+
+
+class CreateCollectionBody(BaseModel):
+    """
+    Request body for creating a new Collection.
+    """
+
+    collection_name: str
+    description: str | None = None
+    dimensions: int
+
+
+class UpdateCollectionBody(BaseModel):
+    """
+    Request body for updating mutable properties of a Collection.
+    """
+
+    description: str | None = None
+
+
+class UpdateEmbeddingBody(BaseModel):
+    """
+    Request body for updating an embedding.
+    """
+
+    embedding: list[float] | None = None
+    metadata: dict | None = None
+
+
+class EmbeddingToCreate(BaseModel):
+    """
+    Data for creating a single embedding in a collection.
+
+    'embedding' can be:
+      - list[float] (already-embedded vector)
+      - list[str]   (text chunks to be embedded later, not yet implemented here)
+
+    For now, our code will only accept list[float] until we wire in the AI model
+    service for text → embedding.
+    """
+
+    embedding: list[float] | list[str]
+    metadata: dict | None = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "embedding": [0.1, 0.2, 0.3],
+                "metadata": {
+                    "source": "some_file.md",
+                    "chunk_size": "1000",
+                },
+            }
+        }
+    }
+
+
+class CreateEmbeddingsBody(BaseModel):
+    """
+    Data for creating embeddings in a collection.
+    """
+
+    embeddings: list[EmbeddingToCreate]
