@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import get_authz_resource_path_from_collection_name, parse_and_auth_request
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from gen3_embeddings.db import Collection, DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import (
     collection_to_model,
@@ -11,6 +12,8 @@ from gen3_embeddings.models.helpers import (
 from gen3_embeddings.models.schemas import (
     CreateEmbeddingsBody,
     EmbeddingResponse,
+    EmbeddingResponseWithCollections,
+    PaginatedEmbeddingResponse,
     SingleEmbeddingResult,
     UpdateEmbeddingBody,
 )
@@ -145,7 +148,7 @@ async def delete_embedding(
 
 @embeddings_router.get(
     "/vectorstore/collections/{collection_name}/embeddings",
-    response_model=EmbeddingResponse,
+    response_model=PaginatedEmbeddingResponse,
     summary="Read all embeddings from collection",
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -153,6 +156,8 @@ async def list_embeddings_in_collection(
     request: Request,
     collection_name: str,
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
     dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
@@ -174,7 +179,15 @@ async def list_embeddings_in_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    embs = await dal.list_embeddings_in_collection(request, collection.id)
+    offset = (page - 1) * page_size
+    limit = page_size
+
+    embs = await dal.list_embeddings_in_collection(
+        request,
+        collection_id=collection.id,
+        offset=offset,
+        limit=limit,
+    )
     results: list[SingleEmbeddingResult] = []
 
     for emb in embs:
@@ -182,7 +195,16 @@ async def list_embeddings_in_collection(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    return EmbeddingResponse(embeddings=results)
+    next_page = page + 1 if len(results) == page_size else None
+    prev_page = page - 1 if page > 1 else None
+
+    return PaginatedEmbeddingResponse(
+        embeddings=results,
+        page=page,
+        page_size=page_size,
+        next_page=next_page,
+        prev_page=prev_page,
+    )
 
 
 @embeddings_router.post(
@@ -268,7 +290,7 @@ async def create_embeddings_in_collection(
 
 @embeddings_router.post(
     "/embeddings/bulk",
-    response_model=EmbeddingResponse,
+    response_model=EmbeddingResponseWithCollections,
     summary="Read select embeddings from unknown collections",
 )
 async def get_embeddings_bulk_unknown_collections(
@@ -294,7 +316,7 @@ async def get_embeddings_bulk_unknown_collections(
     """
     embs = await dal.get_embeddings_bulk(request, embedding_uuids)
     if not embs:
-        return EmbeddingResponse(embeddings=[], collections=[])
+        return EmbeddingResponseWithCollections(embeddings=[], collections=[])
 
     emb_by_id = {e.embedding_id: e for e in embs}
 
@@ -328,7 +350,7 @@ async def get_embeddings_bulk_unknown_collections(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    return EmbeddingResponse(
+    return EmbeddingResponseWithCollections(
         embeddings=results,
         collections=[collection_to_model(col) for col in collections.values()],
     )

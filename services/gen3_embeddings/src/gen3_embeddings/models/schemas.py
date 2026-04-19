@@ -18,8 +18,12 @@ class CollectionModel(BaseModel):
     self: str | None = None
 
 
-class CollectionsListModel(BaseModel):
+class PaginatedCollectionsResponse(BaseModel):
     collections: list[CollectionModel]
+    page: int
+    page_size: int
+    next_page: int | None = None
+    prev_page: int | None = None
 
 
 class EmbeddingInfo(BaseModel):
@@ -37,21 +41,21 @@ class SingleEmbeddingResult(BaseModel):
     info: EmbeddingInfo | None = None
 
 
-class EmbeddingResponse(BaseModel):
-    """
-    Response schema for embedding.
-    """
-
+class EmbeddingResponseWithCollections(BaseModel):
     embeddings: list[SingleEmbeddingResult]
     collections: list[CollectionModel] | None = None
 
 
-class EmbeddingResponseNoCollections(BaseModel):
-    """
-    Response schema for embedding operations that do not Collections.
-    """
-
+class EmbeddingResponse(BaseModel):
     embeddings: list[SingleEmbeddingResult]
+
+
+class PaginatedEmbeddingResponse(BaseModel):
+    embeddings: list[SingleEmbeddingResult]
+    page: int
+    page_size: int
+    next_page: int | None = None
+    prev_page: int | None = None
 
 
 class SearchRequestBody(BaseModel):

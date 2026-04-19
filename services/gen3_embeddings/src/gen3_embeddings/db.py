@@ -6,6 +6,7 @@ from typing import Self
 from uuid import UUID
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException, Request
 
 from gen3_embeddings import config
@@ -110,12 +111,21 @@ class DataAccessLayer:
         self, collection_name: str, description: str, dimensions: int, ai_model_name: str | None = None
     ) -> Collection:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("""
-                INSERT INTO collections (collection_name, description, ai_model_name, dimensions)
-                VALUES ($1, $2, $3, $4)
-                RETURNING *
-            """)
-            row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions)
+            try:
+                stmt = await conn.prepare(
+                    """
+                    INSERT INTO collections (collection_name, description, ai_model_name, dimensions)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING *
+                    """
+                )
+                row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions)
+            except UniqueViolationError:
+                # collection_name already exists
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Collection '{collection_name}' already exists",
+                )
             if not row:
                 raise HTTPException(status_code=400, detail="Failed to create collection")
             return Collection.from_record(row)
@@ -150,10 +160,14 @@ class DataAccessLayer:
             )
             return result.startswith("DELETE")
 
-    async def list_collections(self) -> list[Collection]:
+    async def list_collections(
+        self,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> list[Collection]:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("SELECT * FROM collections ORDER BY created_at")
-            rows = await stmt.fetch()
+            stmt = await conn.prepare("SELECT * FROM collections ORDER BY created_at LIMIT $2 OFFSET $1")
+            rows = await stmt.fetch(offset, limit)
             return [Collection.from_record(r) for r in rows]
 
     async def create_embedding(
@@ -311,10 +325,14 @@ class DataAccessLayer:
 
         return await self._with_rls(request, _query)
 
-    async def list_embeddings_in_collection(self, request: Request, collection_id: int) -> list[Embedding]:
+    async def list_embeddings_in_collection(
+        self, request: Request, collection_id: int, offset: int = 0, limit: int = 100
+    ) -> list[Embedding]:
         async def _query(conn):
-            stmt = await conn.prepare("SELECT * FROM embeddings WHERE collection_id = $1 ORDER BY created_at")
-            rows = await stmt.fetch(collection_id)
+            stmt = await conn.prepare(
+                "SELECT * FROM embeddings WHERE collection_id = $1 ORDER BY created_at OFFSET $2 LIMIT $3"
+            )
+            rows = await stmt.fetch(collection_id, offset, limit)
             return [Embedding.from_record(r) for r in rows]
 
         return await self._with_rls(request, _query)

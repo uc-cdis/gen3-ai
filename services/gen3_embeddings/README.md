@@ -419,6 +419,8 @@ uv run --directory "./services/gen3_embeddings" \
 export TOKEN=...
 curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings" -H "Authorization: Bearer $TOKEN"
 
+curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings?page=2&page_size=200" -H "Authorization: Bearer $TOKEN"
+
 curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings?no_embeddings_info=true" -H "Authorization: Bearer $TOKEN"
 
 curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings/64381055-2adf-44aa-9c99-b2aadf88d1c4" -H "Authorization: Bearer $TOKEN"
@@ -430,7 +432,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "index_name": "internal",
+    "collection_name": "internal",
     "description": "internal index",
     "dimensions": 3
   }'
@@ -559,11 +561,9 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=team7,team42"
 ```
 
 ## TODO
-- db op error handling: duplication when creating, search with diff dim
 - ai model
-- diff dim between indices in searching
-- table init need this?: ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
+- diff dim between indices in searching, error handling
+- table init need this?: ALTER TABLE accounts FORCE ROW LEVEL SECURITY; make app use dedicated user
 - don't print out detailed errors at client side
 - support DEBUG_SKIP_AUTH True for RLS
-- response pagatation
 - sanitize collection name

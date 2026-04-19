@@ -9,6 +9,8 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 1000
 
 DB_DRIVER = starlette_config("DB_DRIVER", default="postgresql")
 DB_USER = starlette_config("DB_USER", default="postgres")

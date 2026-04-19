@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import parse_and_auth_request
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from gen3_embeddings.db import DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model
 from gen3_embeddings.models.schemas import (
     CollectionModel,
-    CollectionsListModel,
     CreateCollectionBody,
+    PaginatedCollectionsResponse,
     UpdateCollectionBody,
 )
 
@@ -15,10 +16,15 @@ collections_router = APIRouter(tags=["Vectorstore Collections"])
 
 @collections_router.get(
     "/vectorstore/collections",
-    response_model=CollectionsListModel,
+    response_model=PaginatedCollectionsResponse,
     summary="Read all collections",
 )
-async def list_collections(request: Request, dal: DataAccessLayer = Depends(get_data_access_layer)):
+async def list_collections(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    dal: DataAccessLayer = Depends(get_data_access_layer),
+):
     """
     List all existing collections.
 
@@ -27,11 +33,24 @@ async def list_collections(request: Request, dal: DataAccessLayer = Depends(get_
         dal: Data access layer dependency.
 
     Returns:
-        CollectionsListModel containing all collections.
+        PaginatedCollectionsResponse containing all collections.
     """
     await parse_and_auth_request(request, "")
-    collections = await dal.list_collections()
-    return CollectionsListModel(collections=[collection_to_model(col) for col in collections])
+    offset = (page - 1) * page_size
+    limit = page_size
+
+    collections = await dal.list_collections(offset=offset, limit=limit)
+
+    next_page = page + 1 if len(collections) == page_size else None
+    prev_page = page - 1 if page > 1 else None
+
+    return PaginatedCollectionsResponse(
+        collections=[collection_to_model(col) for col in collections],
+        page=page,
+        page_size=page_size,
+        next_page=next_page,
+        prev_page=prev_page,
+    )
 
 
 @collections_router.post(
