@@ -424,14 +424,12 @@ _check_uv_modified_files:
 
     echo "Modified files:"
 
-    # Define a function to check specific files in a directory
     are_uv_files_modified() {
         local dir=$1
         local files=("uv.lock" "pyproject.toml")
         local found_modification=False
 
         for file in "${files[@]}"; do
-            # Check if the file exists in the directory before diffing
             if [[ -f "${dir}/${file}" ]]; then
                 output=$(git diff --name-only "${dir}/${file}")
 
