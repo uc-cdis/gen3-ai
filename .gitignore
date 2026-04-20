@@ -240,3 +240,6 @@ tmp/
 *.bak
 .benchmarks
 *.zip
+
+# misc
+changes.patch

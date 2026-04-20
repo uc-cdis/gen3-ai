@@ -360,8 +360,14 @@ update_versions: _check_dependencies
         "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE" > "$tmp"
     mv "$tmp" "$FILE"
 
-    echo "succesfully updated! NOTE: If this modified files, check them in!"
-    exit 0
+    echo
+    git diff $FILE > changes.patch
+    cat changes.patch
+    rm changes.patch
+    echo
+
+    echo "succesfully updated!"
+    echo "NOTE: If this modified files, check them in or pre-commit will FAIL!"
 
 _install_all: _check_dependencies
   #!/usr/bin/env bash
