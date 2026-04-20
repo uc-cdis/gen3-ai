@@ -360,14 +360,21 @@ update_versions: _check_dependencies
         "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE" > "$tmp"
     mv "$tmp" "$FILE"
 
-    echo
-    git diff $FILE > changes.patch
-    cat changes.patch
-    rm changes.patch
-    echo
+    output=$(git diff --name-only $FILE)
+    if [ ! -z "$output" ]; then
+        echo "Modified files:"
+        echo "$output"
+        modified=True
+    else
+        echo "Already up to date."
+        modified=False
+    fi
 
-    echo "succesfully updated!"
-    echo "NOTE: If this modified files, check them in or pre-commit will FAIL!"
+    if [[ "$modified" == "True" ]]; then
+      echo
+      echo "${RED}** WARNING: Auto-updated versions in automation file(s) (see above), so check them in! Otherwise pre-commit linting checks on remote may FAIL! **${RESET}"
+      echo
+    fi
 
 _install_all: _check_dependencies
   #!/usr/bin/env bash
@@ -405,7 +412,56 @@ _lint_all $EXTRA_ARG="": _check_dependencies
 
   report_error_or_success $overall_exit "just lint:" "linting" "all" "services!"
 
+  just _check_uv_modified_files
+
   exit $overall_exit
+# ... existing code ...
+
+_check_uv_modified_files:
+    #!/usr/bin/env bash
+    source scripts/.justfile_helpers.bash
+
+    modified=False
+
+    echo "Modified files:"
+
+    # Define a function to check specific files in a directory
+    are_uv_files_modified() {
+        local dir=$1
+        local files=("uv.lock" "pyproject.toml")
+        local found_modification=False
+
+        for file in "${files[@]}"; do
+            # Check if the file exists in the directory before diffing
+            if [[ -f "${dir}/${file}" ]]; then
+                output=$(git diff --name-only "${dir}/${file}")
+
+                if [[ -n "$output" ]]; then
+                    echo "$output"
+                    found_modification=True
+                fi
+            fi
+        done
+        return $( [[ "$found_modification" == "True" ]] && echo 0 || echo 1 )
+    }
+
+    for dir in libraries/* services/*; do
+        if [[ -d "$dir" ]]; then
+            if are_uv_files_modified "$dir"; then
+                modified=True
+            fi
+        fi
+    done
+
+    if [[ "$modified" == "True" ]]; then
+        echo
+        echo "${RED}** WARNING: Installation of services required locally-modified files (see above), so check them in! Otherwise pre-commit linting checks on remote may FAIL! **${RESET}"
+        echo
+    else
+        echo "No modified files. Linting complete."
+        echo
+    fi
+
 
 _format_all: _check_dependencies
   #!/usr/bin/env bash
