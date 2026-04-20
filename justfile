@@ -415,7 +415,6 @@ _lint_all $EXTRA_ARG="": _check_dependencies
   just _check_uv_modified_files
 
   exit $overall_exit
-# ... existing code ...
 
 _check_uv_modified_files:
     #!/usr/bin/env bash
