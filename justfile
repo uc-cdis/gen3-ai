@@ -360,8 +360,8 @@ update_versions: _check_dependencies
         "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE" > "$tmp"
     mv "$tmp" "$FILE"
 
-    echo "succesfully updated!"
-
+    echo "succesfully updated! NOTE: If this modified files, check them in!"
+    exit 0
 
 _install_all: _check_dependencies
   #!/usr/bin/env bash
@@ -395,6 +395,7 @@ _lint_all $EXTRA_ARG="": _check_dependencies
   done
 
   just update_versions
+  overall_exit=$((overall_exit | $?))
 
   report_error_or_success $overall_exit "just lint:" "linting" "all" "services!"
 
