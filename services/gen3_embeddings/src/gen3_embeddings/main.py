@@ -52,12 +52,35 @@ async def check_arborist_is_healthy(app):
 async def check_db_connection():
     """
     Simple check to ensure we can talk to the db (asyncpg pool test)
+    and ensure we are NOT using a superuser or bypassrls role.
     """
     try:
         logging.debug("Startup database connection test initiating. Attempting a simple query...")
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("SELECT 1;")
+
+            # Safety: verify current role privileges
+            row = await conn.fetchrow(
+                """
+                SELECT usesuper, usebypassrls, usename
+                FROM pg_user
+                WHERE usename = current_user;
+                """
+            )
+
+            usesuper = row["usesuper"]
+            usebypassrls = row["usebypassrls"]
+            usename = row["usename"]
+
+            if usesuper:
+                logging.error(f"DB user '{usename}' is SUPERUSER. This is unsafe for RLS.")
+                raise Exception("Configured DB user is SUPERUSER, aborting...")
+
+            if usebypassrls:
+                logging.error(f"DB user '{usename}' has BYPASSRLS. This is unsafe for RLS.")
+                raise Exception("Configured DB user has BYPASSRLS, aborting...")
+
         logging.debug("Startup database connection test PASSED.")
     except Exception as exc:
         logging.exception("Startup database connection test FAILED. Unable to connect to the configured database.")
