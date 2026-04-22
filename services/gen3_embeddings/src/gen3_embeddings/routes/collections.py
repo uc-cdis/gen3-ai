@@ -141,7 +141,7 @@ async def update_collection(
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    return {"status": "success"}
+    return collection_to_model(col)
 
 
 @collections_router.delete(

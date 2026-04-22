@@ -58,8 +58,8 @@ docker run --name pgvector \
 
 PGPASSWORD=testpass psql -h localhost -p 5432 -U testuser -d testdb
 ```
-
-For the following, make sure you update the vector_index_id according to the ids from creating indices outputs
+Create an app_user with limited permissions. A superuser can bypass RLS.
+For the following, make sure you update the collection_id according to the ids from creating indices outputs
 ```sql
 CREATE ROLE app_user
   LOGIN
@@ -414,7 +414,20 @@ uv run --directory "./services/gen3_embeddings" \
   --error-logfile -
   ```
 
-### Sample tests
+### Run tests
+
+```bash
+uv run pytest -n auto . -vv
+
+uv pip install pytest-cov
+
+uv run pytest -n auto . -vv \
+  --cov=gen3_embeddings \
+  --cov-report=term-missing \
+  --cov-report=html
+```
+
+### Sample manual tests
 ```bash
 export TOKEN=...
 curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings" -H "Authorization: Bearer $TOKEN"
@@ -563,7 +576,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=team7,team42"
 ## TODO
 - ai model
 - diff dim between indices in searching, error handling
-- table init need this?: ALTER TABLE accounts FORCE ROW LEVEL SECURITY; make app use dedicated user
 - don't print out detailed errors at client side
 - support DEBUG_SKIP_AUTH True for RLS
 - sanitize collection name
+- add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)

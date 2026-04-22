@@ -77,7 +77,7 @@ async def search_in_collection(
                 SingleSearchResult(
                     id=emb.embedding_id,
                     similarity_score=sim,
-                    embedding=emb_res,
+                    embedding=emb_res.model_dump(exclude_none=True),
                 )
             )
 
@@ -169,7 +169,7 @@ async def search_across_collections(
                 SingleSearchResult(
                     id=emb.embedding_id,
                     similarity_score=sim,
-                    embedding=emb_res,
+                    embedding=emb_res.model_dump(exclude_none=True),
                 )
             )
 

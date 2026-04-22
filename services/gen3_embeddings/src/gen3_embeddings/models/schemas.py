@@ -42,16 +42,16 @@ class SingleEmbeddingResult(BaseModel):
 
 
 class EmbeddingResponseWithCollections(BaseModel):
-    embeddings: list[SingleEmbeddingResult]
+    embeddings: list[dict]
     collections: list[CollectionModel] | None = None
 
 
 class EmbeddingResponse(BaseModel):
-    embeddings: list[SingleEmbeddingResult]
+    embeddings: list[dict]
 
 
 class PaginatedEmbeddingResponse(BaseModel):
-    embeddings: list[SingleEmbeddingResult]
+    embeddings: list[dict]
     page: int
     page_size: int
     next_page: int | None = None
@@ -76,7 +76,7 @@ class SingleSearchResult(BaseModel):
 
     id: UUID
     similarity_score: float
-    embedding: SingleEmbeddingResult
+    embedding: dict
 
 
 class SearchResponse(BaseModel):

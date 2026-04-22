@@ -24,6 +24,7 @@ embeddings_router = APIRouter(tags=["Embeddings", "Embeddings (Bulk)"])
 @embeddings_router.get(
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
+    response_model_exclude_none=True,
     summary="Read embedding from collection",
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -61,6 +62,7 @@ async def get_embedding_from_collection(
 @embeddings_router.put(
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
+    response_model_exclude_none=True,
     summary="Update embedding in collection",
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -198,8 +200,11 @@ async def list_embeddings_in_collection(
     next_page = page + 1 if len(results) == page_size else None
     prev_page = page - 1 if page > 1 else None
 
+    # remove keys with null value
+    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
+
     return PaginatedEmbeddingResponse(
-        embeddings=results,
+        embeddings=embeddings_serialized,
         page=page,
         page_size=page_size,
         next_page=next_page,
@@ -285,7 +290,10 @@ async def create_embeddings_in_collection(
         res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_embeddings_info))
         results.append(res)
 
-    return EmbeddingResponse(embeddings=results)
+    # remove keys with null value
+    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
+
+    return EmbeddingResponse(embeddings=embeddings_serialized)
 
 
 @embeddings_router.post(
@@ -350,8 +358,11 @@ async def get_embeddings_bulk_unknown_collections(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
+    # remove keys with null value
+    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
+
     return EmbeddingResponseWithCollections(
-        embeddings=results,
+        embeddings=embeddings_serialized,
         collections=[collection_to_model(col) for col in collections.values()],
     )
 
@@ -410,4 +421,7 @@ async def get_embeddings_bulk_from_collection(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    return EmbeddingResponse(embeddings=results)
+    # remove keys with null value
+    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
+
+    return EmbeddingResponse(embeddings=embeddings_serialized)
