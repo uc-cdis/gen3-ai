@@ -1,3 +1,4 @@
+from typing import Union
 from urllib.parse import urlparse
 
 import httpx
@@ -52,35 +53,34 @@ from gen3_inference.types import OpenResponsesError
 
 responses_router = APIRouter()
 
-AllResponseTypes = [
+AllResponseTypes = Union[
     # non-streaming
-    ResponseResource
-    |
+    ResponseResource,
     # streaming events
-    ResponseCreatedStreamingEvent
-    | ResponseQueuedStreamingEvent
-    | ResponseInProgressStreamingEvent
-    | ResponseCompletedStreamingEvent
-    | ResponseFailedStreamingEvent
-    | ResponseIncompleteStreamingEvent
-    | ResponseOutputItemAddedStreamingEvent
-    | ResponseOutputItemDoneStreamingEvent
-    | ResponseReasoningSummaryPartAddedStreamingEvent
-    | ResponseReasoningSummaryPartDoneStreamingEvent
-    | ResponseContentPartAddedStreamingEvent
-    | ResponseContentPartDoneStreamingEvent
-    | ResponseOutputTextDeltaStreamingEvent
-    | ResponseOutputTextDoneStreamingEvent
-    | ResponseRefusalDeltaStreamingEvent
-    | ResponseRefusalDoneStreamingEvent
-    | ResponseReasoningDeltaStreamingEvent
-    | ResponseReasoningDoneStreamingEvent
-    | ResponseReasoningSummaryDeltaStreamingEvent
-    | ResponseReasoningSummaryDoneStreamingEvent
-    | ResponseOutputTextAnnotationAddedStreamingEvent
-    | ResponseFunctionCallArgumentsDeltaStreamingEvent
-    | ResponseFunctionCallArgumentsDoneStreamingEvent
-    | ErrorStreamingEvent
+    ResponseCreatedStreamingEvent,
+    ResponseQueuedStreamingEvent,
+    ResponseInProgressStreamingEvent,
+    ResponseCompletedStreamingEvent,
+    ResponseFailedStreamingEvent,
+    ResponseIncompleteStreamingEvent,
+    ResponseOutputItemAddedStreamingEvent,
+    ResponseOutputItemDoneStreamingEvent,
+    ResponseReasoningSummaryPartAddedStreamingEvent,
+    ResponseReasoningSummaryPartDoneStreamingEvent,
+    ResponseContentPartAddedStreamingEvent,
+    ResponseContentPartDoneStreamingEvent,
+    ResponseOutputTextDeltaStreamingEvent,
+    ResponseOutputTextDoneStreamingEvent,
+    ResponseRefusalDeltaStreamingEvent,
+    ResponseRefusalDoneStreamingEvent,
+    ResponseReasoningDeltaStreamingEvent,
+    ResponseReasoningDoneStreamingEvent,
+    ResponseReasoningSummaryDeltaStreamingEvent,
+    ResponseReasoningSummaryDoneStreamingEvent,
+    ResponseOutputTextAnnotationAddedStreamingEvent,
+    ResponseFunctionCallArgumentsDeltaStreamingEvent,
+    ResponseFunctionCallArgumentsDoneStreamingEvent,
+    ErrorStreamingEvent,
 ]
 
 
