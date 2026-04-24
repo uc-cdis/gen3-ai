@@ -112,7 +112,7 @@ async def create_response(
     body: CreateResponseBody,
 ):
     """
-    Implements the /responses endpoint defined in the Open Responses OpenAPI spec,
+    Implements the /v1/responses endpoint defined in the Open Responses OpenAPI spec,
     using the models from openresponses_types.types
     """
     # this will search "locally" first, then try other configured hosts
