@@ -33,6 +33,7 @@ from openresponses_types.types import (
     # Core response resource
     ResponseResource,
 )
+from starlette import status
 
 from gen3_inference.config import (
     ALLOWED_GEN3_INFERENCE_HOSTS,
@@ -51,46 +52,59 @@ from gen3_inference.types import OpenResponsesError
 
 responses_router = APIRouter()
 
+AllResponseTypes = [
+    # non-streaming
+    ResponseResource
+    |
+    # streaming events
+    ResponseCreatedStreamingEvent
+    | ResponseQueuedStreamingEvent
+    | ResponseInProgressStreamingEvent
+    | ResponseCompletedStreamingEvent
+    | ResponseFailedStreamingEvent
+    | ResponseIncompleteStreamingEvent
+    | ResponseOutputItemAddedStreamingEvent
+    | ResponseOutputItemDoneStreamingEvent
+    | ResponseReasoningSummaryPartAddedStreamingEvent
+    | ResponseReasoningSummaryPartDoneStreamingEvent
+    | ResponseContentPartAddedStreamingEvent
+    | ResponseContentPartDoneStreamingEvent
+    | ResponseOutputTextDeltaStreamingEvent
+    | ResponseOutputTextDoneStreamingEvent
+    | ResponseRefusalDeltaStreamingEvent
+    | ResponseRefusalDoneStreamingEvent
+    | ResponseReasoningDeltaStreamingEvent
+    | ResponseReasoningDoneStreamingEvent
+    | ResponseReasoningSummaryDeltaStreamingEvent
+    | ResponseReasoningSummaryDoneStreamingEvent
+    | ResponseOutputTextAnnotationAddedStreamingEvent
+    | ResponseFunctionCallArgumentsDeltaStreamingEvent
+    | ResponseFunctionCallArgumentsDoneStreamingEvent
+    | ErrorStreamingEvent
+]
+
 
 @responses_router.post(
-    "/responses",
-    response_model=ResponseResource,
+    "/v1/responses",
+    response_model=AllResponseTypes,
+    summary="Standard Open Responses API",
+    description=(
+        "See official spec for details ([https://openresponses.org](https://openresponses.org)). "
+        "This OpenAPI spec here is auto-generated."
+    ),
     responses={
-        200: {
+        status.HTTP_200_OK: {
             "content": {
-                "application/json": {"schema": ResponseResource.model_json_schema()},
-                "text/event-stream": {
-                    "schema": {
-                        "oneOf": [
-                            ResponseCreatedStreamingEvent.model_json_schema(),
-                            ResponseQueuedStreamingEvent.model_json_schema(),
-                            ResponseInProgressStreamingEvent.model_json_schema(),
-                            ResponseCompletedStreamingEvent.model_json_schema(),
-                            ResponseFailedStreamingEvent.model_json_schema(),
-                            ResponseIncompleteStreamingEvent.model_json_schema(),
-                            ResponseOutputItemAddedStreamingEvent.model_json_schema(),
-                            ResponseOutputItemDoneStreamingEvent.model_json_schema(),
-                            ResponseReasoningSummaryPartAddedStreamingEvent.model_json_schema(),
-                            ResponseReasoningSummaryPartDoneStreamingEvent.model_json_schema(),
-                            ResponseContentPartAddedStreamingEvent.model_json_schema(),
-                            ResponseContentPartDoneStreamingEvent.model_json_schema(),
-                            ResponseOutputTextDeltaStreamingEvent.model_json_schema(),
-                            ResponseOutputTextDoneStreamingEvent.model_json_schema(),
-                            ResponseRefusalDeltaStreamingEvent.model_json_schema(),
-                            ResponseRefusalDoneStreamingEvent.model_json_schema(),
-                            ResponseReasoningDeltaStreamingEvent.model_json_schema(),
-                            ResponseReasoningDoneStreamingEvent.model_json_schema(),
-                            ResponseReasoningSummaryDeltaStreamingEvent.model_json_schema(),
-                            ResponseReasoningSummaryDoneStreamingEvent.model_json_schema(),
-                            ResponseOutputTextAnnotationAddedStreamingEvent.model_json_schema(),
-                            ResponseFunctionCallArgumentsDeltaStreamingEvent.model_json_schema(),
-                            ResponseFunctionCallArgumentsDoneStreamingEvent.model_json_schema(),
-                            ErrorStreamingEvent.model_json_schema(),
-                        ]
-                    }
-                },
+                "application/json": {},
+                "text/event-stream": {},
             }
-        }
+        },
+        status.HTTP_400_BAD_REQUEST: {"description": "Bad request, unable to get response"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
+        status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "description": "Something went wrong internally when processing the request"
+        },
     },
     tags=["Inference"],
 )

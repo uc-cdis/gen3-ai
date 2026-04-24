@@ -67,8 +67,7 @@ jobs:
 
   unit-test:
     name: Python Unit Test
-    # TODO: enable when security and post-commit work reliably
-    # needs: [ security, post-commit-check ]
+    needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.11.7'
