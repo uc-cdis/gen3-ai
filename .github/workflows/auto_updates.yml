@@ -66,6 +66,11 @@ jobs:
         run: |
           just update_versions
 
+      # will format and fix files
+      - name: pre-commit run -a
+        run: |
+          pre-commit run -a
+
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
