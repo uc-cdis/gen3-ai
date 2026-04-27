@@ -42,7 +42,7 @@ async def test_create_response_non_streaming_positive(
         AsyncMock(return_value=fake_client),
     )
 
-    resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("id") == "foo"
@@ -79,7 +79,7 @@ async def test_create_response_streaming_positive(
     )
 
     body = valid_user_msg_body_non_streaming.model_copy(update={"stream": True})
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 200
     # response should be: text/event-stream; charset=utf-8
@@ -98,7 +98,7 @@ async def test_get_ai_model_info_missing_model(
     """
     body = valid_user_msg_body_non_streaming.model_copy(update={"model": ""})
 
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 400
     data = resp.json()
@@ -130,7 +130,7 @@ async def test_get_ai_model_info_not_found(
     # Mock config to give one trusted host
     monkeypatch.setattr("gen3_inference.routes.responses.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
 
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 404
     data = resp.json()
@@ -186,7 +186,7 @@ async def test_get_ai_model_info_trusted_domain_success(
     monkeypatch.setattr("gen3_inference.routes.responses.ALLOWED_GEN3_INFERENCE_HOSTS", {VALID_AI_MODEL_INFO["url"]})
     monkeypatch.setattr("gen3_inference.config.GEN3_AI_MODEL_REPO_URL", "https://primary.com")
 
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 200
     data = resp.json()
@@ -210,7 +210,7 @@ async def test_get_inference_protocol_client_unknown(
     mock_get_model.return_value = mocked_return
 
     body = valid_user_msg_body_non_streaming.model_copy()
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 400
     data = resp.json()
@@ -231,7 +231,7 @@ async def test_get_inference_protocol_client_empty(
     mock_get_model.return_value = mocked_return
 
     body = valid_user_msg_body_non_streaming.model_copy()
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
 
     assert resp.status_code == 400
     data = resp.json()
@@ -245,7 +245,7 @@ async def test_create_response_missing_model(valid_user_msg_body_non_streaming: 
     The endpoint should return 400 before reaching the protocol client.
     """
     body = valid_user_msg_body_non_streaming.model_copy(update={"model": ""})
-    resp = client.post("/responses", json=json.loads(body.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
     assert resp.status_code == 400
     assert resp.json().get("error", {}).get("code") == ERROR_TYPE_INVALID_REQUEST
 
@@ -265,7 +265,7 @@ async def test_create_response_unknown_protocol(
 
     monkeypatch.setattr("gen3_inference.routes.responses.get_ai_model_info", fake_ai_info)
 
-    resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
     assert resp.status_code == 400
     assert resp.json().get("error", {}).get("code") == ERROR_TYPE_INVALID_REQUEST
 
@@ -287,7 +287,7 @@ async def test_create_response_model_not_found(
         detail=OpenResponsesError(type=ERROR_TYPE_NOT_FOUND, code=ERROR_TYPE_NOT_FOUND, message="not found").to_json(),
     )
 
-    resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
     assert resp.status_code == 404
     assert resp.json().get("error", {}).get("code") == ERROR_TYPE_NOT_FOUND
 
@@ -309,7 +309,7 @@ async def test_create_response_bogus_protocol(
     VALID_AI_MODEL_INFO["metadata"].update({"inference_protocol_clients": ["unknown"]})
     mock_get_model.return_value = VALID_AI_MODEL_INFO
 
-    resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
     assert resp.status_code == 400
     assert resp.json().get("error", {}).get("code") == ERROR_TYPE_INVALID_REQUEST
 
@@ -342,7 +342,7 @@ async def test_create_response_with_openresponses_client(
     monkeypatch.setattr("gen3_inference.routes.responses.get_inference_protocol_client", fake_get_client)
 
     # Now hit the endpoint
-    resp = client.post("/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
+    resp = client.post("/v1/responses", json=json.loads(valid_user_msg_body_non_streaming.model_dump_json()))
     assert resp.status_code == 200
     assert resp.json()["id"] == "test_create_response_with_openresponses_client"
     assert fake_client.generate_non_streaming_response.called
