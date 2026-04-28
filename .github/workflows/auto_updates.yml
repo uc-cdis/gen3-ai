@@ -16,7 +16,7 @@ jobs:
   update-check:
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.11.7'
+      UV_VERSION: '0.11.8'
       JUST_VERSION: '1.50.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
