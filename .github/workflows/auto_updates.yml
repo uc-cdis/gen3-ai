@@ -1,8 +1,5 @@
 name: Weekly Automatic Updates to API Docs & Tool Versions
 on:
-  # TODO: temporary to test on branch, remove after
-  push:
-
   # allow manual runs
   workflow_dispatch:
 
