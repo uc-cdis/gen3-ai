@@ -27,7 +27,11 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          # this uses the default repo-scoped, job-used GITHUB_TOKEN
+          # and saves it as git creds for this run only (it's
+          # removed in a post cleanup). this ensures
+          # future git commands are authed
+          persist-credentials: true
 
       - name: Set up python
         uses: actions/setup-python@v6
@@ -67,19 +71,13 @@ jobs:
         run: |
           just update_versions
 
-      - name: Create Branch so pre-commit doesn't complain about main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          BRANCH_NAME="chore/update-docs-and-versions-${{ github.run_id }}"
-          git checkout -b $BRANCH_NAME
-
       # will format and fix files
-      - name: pre-commit run -a
+      - name: format and fix files with `pre-commit run -a`
         run: |
           # force positive exit code.
           # pre-commit errors when files have to be formatted but automatically
-          # does the formatting. So exit successfully here no matter what, and if there
+          # does the formatting. Also we haven't created a branch yet so that will fail too.
+          # So exit successfully here no matter what, and if there
           # is a real issue, it will be captured by the resulting PR automation checks
           pre-commit run -a || true
 
@@ -130,7 +128,14 @@ jobs:
           git push origin $BRANCH_NAME
 
           # gh CLI is pre-installed in ubuntu-latest
+          # NOTE: --draft is required b/c the default GITHUB_TOKEN (which is used here)
+          #       will not trigger future `on: push` actions in the resulting PR. This is
+          #       a GH-required protection to prevent accidental infinite loops. To work around
+          #       this, we make the PR a draft, require a real person to manually "mark it ready"
+          #       and then the `automation.yml` workflow actions should run b/c we explicitly
+          #       tell it to run on a PR "ready" trigger.
           gh pr create \
             --title "chore(docs-and-versions): update API documentation and versions in workflows" \
             --body "Automated update of APIs docs and versions in workflows." \
             --head $BRANCH_NAME
+            --draft
