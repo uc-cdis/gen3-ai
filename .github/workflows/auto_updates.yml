@@ -114,7 +114,7 @@ jobs:
       - name: Create Pull Request If Changes Detected
         if: steps.check_changes.outputs.changes == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH_NAME="chore/update-docs-and-versions-${{ github.run_id }}"
 
