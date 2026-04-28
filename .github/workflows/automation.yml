@@ -1,6 +1,15 @@
-# push will run on every pushed commit to any branch (so this will rerun the tests
-# once a branch gets merged to main in addition to any new commits on any branch)
-on: push
+
+on:
+  # push will run on every pushed commit to any branch (so this will rerun the tests
+  # once a branch gets merged to main in addition to any new commits on any branch)
+  push:
+  # ready_for_review is required so when automated draft PRs are set to "ready",
+  # we run these required checks. This is a required workaround due to GH limiting
+  # automated PRs from triggering other workflow "on: push" triggers (in an attempt
+  # to prevent unintended infinite loops)
+  pull_request:
+    types: [ready_for_review]
+
 
 name: Automation
 
