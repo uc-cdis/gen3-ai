@@ -10,6 +10,11 @@ concurrency:
 
 jobs:
   post-commit-check:
+    # this post-commit-check ensures pre-commit checks are run regardless of local setup, which
+    # ensures that any PRs / edits done in the Github website directly
+    # still have some level of validation run over them (this ensures
+    # consistency with linting/formatting in addition to yet another
+    # barrier for any security issues)
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/pre-commit
     with:
