@@ -364,27 +364,20 @@ update_versions: _check_dependencies
         exit 1
     fi
 
-    # update versions in the CI files
-    FILE_1=.github/workflows/automation.yml
-    FILE_2=.github/workflows/api.yml
+    # update versions in all CI files in .github/workflows/
+    for file in .github/workflows/*.yml; do
+        echo "Updating $file..."
 
-    tmp=$(mktemp)
-    sed -E \
-        "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$FILE_1" > "$tmp"
-    mv "$tmp" "$FILE_1"
-    sed -E \
-        "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$FILE_2" > "$tmp"
-    mv "$tmp" "$FILE_2"
+        # Update UV_VERSION
+        tmp=$(mktemp)
+        sed -E "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
 
-    tmp=$(mktemp)
-    sed -E \
-        "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE_1" > "$tmp"
-    mv "$tmp" "$FILE_1"
-    sed -E \
-        "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$FILE_2" > "$tmp"
-    mv "$tmp" "$FILE_2"
+        # Update JUST_VERSION
+        tmp=$(mktemp)
+        sed -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
+    done
 
-    echo "succesfully updated!"
+    echo "up to date!"
 
 
 _install_all: _check_dependencies
