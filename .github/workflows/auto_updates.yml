@@ -1,5 +1,8 @@
 name: Weekly Automatic Updates to API Docs & Tool Versions
 on:
+  # TODO: temporary to test on branch, remove after
+  push:
+
   # allow manual runs
   workflow_dispatch:
 
@@ -76,13 +79,11 @@ jobs:
       # will format and fix files
       - name: pre-commit run -a
         run: |
-          pre-commit run -a
-
           # force positive exit code.
           # pre-commit errors when files have to be formatted but automatically
-          # does the formatting. So exit successfully here, and if there
+          # does the formatting. So exit successfully here no matter what, and if there
           # is a real issue, it will be captured by the resulting PR automation checks
-          exit 0
+          pre-commit run -a || true
 
       - name: Configure Git Credentials
         run: |
