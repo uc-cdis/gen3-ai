@@ -138,5 +138,5 @@ jobs:
           gh pr create \
             --title "chore(docs-and-versions): update API documentation and versions in workflows" \
             --body "Automated update of APIs docs and versions in workflows." \
-            --head $BRANCH_NAME
+            --head $BRANCH_NAME \
             --draft
