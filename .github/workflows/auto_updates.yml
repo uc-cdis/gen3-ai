@@ -137,6 +137,6 @@ jobs:
           #       tell it to run on a PR "ready" trigger.
           gh pr create \
             --title "chore(docs-and-versions): update API documentation and versions in workflows" \
-            --body "Automated update of APIs docs and versions in workflows." \
+            --body "Automated update of APIs docs and versions in workflows. Mark as 'Ready for Review' to start automated checks!" \
             --head $BRANCH_NAME \
             --draft
