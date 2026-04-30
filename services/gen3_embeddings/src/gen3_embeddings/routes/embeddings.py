@@ -2,7 +2,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
-from gen3_embeddings.auth import get_authz_resource_path_from_collection_name, parse_and_auth_request
+from gen3_embeddings.auth import (
+    get_allowed_authz_for_request,
+    get_authz_resource_path_from_collection_name,
+    parse_and_auth_request,
+)
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from gen3_embeddings.db import Collection, DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import (
@@ -38,6 +42,7 @@ async def get_embedding_from_collection(
     Read a single embedding from a specific collection.
 
     Args:
+        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
         dal: Data access layer dependency.
@@ -52,7 +57,13 @@ async def get_embedding_from_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    emb = await dal.get_embedding_by_collection_and_id(request, collection.id, embedding_uuid)
+    allowed_authz = await get_allowed_authz_for_request(request)
+
+    emb = await dal.get_embedding_by_collection_and_id(
+        collection_id=collection.id,
+        embedding_id=embedding_uuid,
+        allowed_authz=allowed_authz,
+    )
     if not emb:
         raise HTTPException(status_code=404, detail="Embedding not found")
 
@@ -77,10 +88,10 @@ async def update_embedding_in_collection(
     Update the embedding vector for a given collection and embedding ID.
 
     Args:
-        request: The request object
-        collection_name: Name of the collections.
+        request: The request object.
+        collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
-        body: Request body containing the new embedding vector.
+        body: Request body containing the new embedding vector and/or metadata.
         dal: Data access layer dependency.
 
     Returns:
@@ -97,12 +108,14 @@ async def update_embedding_in_collection(
     if body.embedding is not None and len(body.embedding) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
+    allowed_authz = await get_allowed_authz_for_request(request)
+
     emb = await dal.update_embedding(
-        request=request,
         collection_id=collection.id,
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
+        allowed_authz=allowed_authz,
     )
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
@@ -126,8 +139,8 @@ async def delete_embedding(
     Delete an embedding from a specific collection.
 
     Args:
-        request: The request object
-        collection_name: Name of the collections.
+        request: The request object.
+        collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding to delete.
         dal: Data access layer dependency.
 
@@ -141,7 +154,13 @@ async def delete_embedding(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    success = await dal.delete_embedding(request, collection.id, embedding_uuid)
+    allowed_authz = await get_allowed_authz_for_request(request)
+
+    success = await dal.delete_embedding(
+        collection_id=collection.id,
+        embedding_id=embedding_uuid,
+        allowed_authz=allowed_authz,
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Embedding not found or already deleted")
 
@@ -166,13 +185,15 @@ async def list_embeddings_in_collection(
     List all embeddings within a specific collection.
 
     Args:
-        request: The request object
-        collection_name: Name of the collections.
+        request: The request object.
+        collection_name: Name of the collection.
         no_embeddings_info: If True, omit the 'info' block in each embedding result.
+        page: Page number for pagination (1-based).
+        page_size: Number of items per page.
         dal: Data access layer dependency.
 
     Returns:
-        EmbeddingResponseNoCollection containing all embeddings in the collection.
+        PaginatedEmbeddingResponse containing all embeddings in the collection.
 
     Raises:
         HTTPException: 404 if the collection is not found.
@@ -184,11 +205,13 @@ async def list_embeddings_in_collection(
     offset = (page - 1) * page_size
     limit = page_size
 
+    allowed_authz = await get_allowed_authz_for_request(request)
+
     embs = await dal.list_embeddings_in_collection(
-        request,
         collection_id=collection.id,
         offset=offset,
         limit=limit,
+        allowed_authz=allowed_authz,
     )
     results: list[SingleEmbeddingResult] = []
 
@@ -200,7 +223,6 @@ async def list_embeddings_in_collection(
     next_page = page + 1 if len(results) == page_size else None
     prev_page = page - 1 if page > 1 else None
 
-    # remove keys with null value
     embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
 
     return PaginatedEmbeddingResponse(
@@ -227,16 +249,16 @@ async def create_embeddings_in_collection(
     dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
+
     TODO: implementaion for StringArrayInput and ai_model
     TODO: auth related
     TODO: work for authz_version
-
     Create one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
 
     Args:
-        request: The request object
+        request: The request object.
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
@@ -244,7 +266,7 @@ async def create_embeddings_in_collection(
         dal: Data access layer dependency.
 
     Returns:
-        EmbeddingResponseNoCollection containing the created embeddings.
+        EmbeddingResponse containing the created embeddings.
 
     Raises:
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
@@ -276,13 +298,15 @@ async def create_embeddings_in_collection(
         vectors.append([float(x) for x in emb])
         metadata_list.append(meta)
 
+    allowed_authz = await get_allowed_authz_for_request(request)
+
     created = await dal.create_embeddings_bulk(
-        request=request,
         collection_id=collection.id,
         embeddings=vectors,
         authz_version=0,
         authz=[get_authz_resource_path_from_collection_name(collection_name)],
         metadata_list=metadata_list,
+        allowed_authz=allowed_authz,
     )
 
     results: list[SingleEmbeddingResult] = []
@@ -290,7 +314,6 @@ async def create_embeddings_in_collection(
         res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_embeddings_info))
         results.append(res)
 
-    # remove keys with null value
     embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
 
     return EmbeddingResponse(embeddings=embeddings_serialized)
@@ -314,15 +337,21 @@ async def get_embeddings_bulk_unknown_collections(
     Read a selection of embeddings by UUID across any collection.
 
     Args:
-        request: The request object
+        request: The request object.
         embedding_uuids: List of embedding UUIDs to fetch.
         no_embeddings_info: If True, omit the 'info' block for each embedding.
         dal: Data access layer dependency.
 
     Returns:
-        EmbeddingResponse including collection metadata for each embedding.
+        EmbeddingResponseWithCollections including collection metadata
+        for each embedding.
     """
-    embs = await dal.get_embeddings_bulk(request, embedding_uuids)
+    allowed_authz = await get_allowed_authz_for_request(request)
+
+    embs = await dal.get_embeddings_bulk(
+        embedding_ids=embedding_uuids,
+        allowed_authz=allowed_authz,
+    )
     if not embs:
         return EmbeddingResponseWithCollections(embeddings=[], collections=[])
 
@@ -333,6 +362,7 @@ async def get_embeddings_bulk_unknown_collections(
 
     col_list = await dal.get_collection_by_id_bulk(collection_ids)
 
+    # Additional collection-level authorization
     for col in col_list:
         await parse_and_auth_request(request, col.collection_name)
         collections[col.id] = col
@@ -342,11 +372,9 @@ async def get_embeddings_bulk_unknown_collections(
     for input_index, emb_id in enumerate(embedding_uuids):
         emb = emb_by_id.get(emb_id)
         if not emb:
-            # Requested ID not found; skip or handle separately if desired
             continue
         col = collections.get(emb.collection_id)
         if not col:
-            # Collection missing for this embedding; skip
             continue
 
         res = embedding_to_result(
@@ -358,7 +386,6 @@ async def get_embeddings_bulk_unknown_collections(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    # remove keys with null value
     embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
 
     return EmbeddingResponseWithCollections(
@@ -384,8 +411,8 @@ async def get_embeddings_bulk_from_collection(
     Read a selection of embeddings by UUID from a specific collection.
 
     Args:
-        request: The request object
-        collection_name: Name of the collections.
+        request: The request object.
+        collection_name: Name of the collection.
         embedding_uuids: List of embedding UUIDs to fetch.
         no_embeddings_info: If True, omit the 'info' block for each embedding.
         dal: Data access layer dependency.
@@ -400,7 +427,13 @@ async def get_embeddings_bulk_from_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    embs = await dal.get_embeddings_bulk(request, embedding_uuids)
+    allowed_authz = await get_allowed_authz_for_request(request)
+
+    embs = await dal.get_embeddings_bulk(
+        embedding_ids=embedding_uuids,
+        allowed_authz=allowed_authz,
+    )
+    # Filter to the given collection
     embs = [e for e in embs if e.collection_id == collection.id]
 
     emb_by_id = {e.embedding_id: e for e in embs}
@@ -421,7 +454,6 @@ async def get_embeddings_bulk_from_collection(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    # remove keys with null value
     embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
 
     return EmbeddingResponse(embeddings=embeddings_serialized)

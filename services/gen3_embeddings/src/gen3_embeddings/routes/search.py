@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from gen3_embeddings.auth import parse_and_auth_request
+from gen3_embeddings.auth import (
+    get_allowed_authz_for_request,
+    parse_and_auth_request,
+)
 from gen3_embeddings.db import Collection, DataAccessLayer, Embedding, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
@@ -34,7 +37,7 @@ async def search_in_collection(
     Perform a vector search within a specific collection.
 
     Args:
-        request: The request object
+        request: The request object.
         body: SearchRequestBody containing the query vector and parameters.
         collection_name: Name of the collection to search.
         ai_model: Optional model name; not used in this minimal implementation.
@@ -42,7 +45,7 @@ async def search_in_collection(
         dal: Data access layer dependency.
 
     Returns:
-        SearchResponseNocollection containing search hits for this collection.
+        SearchResponse containing search hits for this collection.
 
     Raises:
         HTTPException: 404 if collection is not found; 400 if input is invalid.
@@ -58,13 +61,15 @@ async def search_in_collection(
     if len(query_vector) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
+    allowed_authz = await get_allowed_authz_for_request(request)
+
     rows = await dal.search_embeddings_in_collection(
-        request=request,
         collection_id=collection.id,
         query_vector=query_vector,
         top_k=body.top_k,
         score_range=body.range,
         filters=body.filters,
+        allowed_authz=allowed_authz,
     )
 
     results: list[SingleSearchResult] = []
@@ -107,7 +112,7 @@ async def search_across_collections(
     Perform a vector search across multiple collections.
 
     Args:
-        request: The request object
+        request: The request object.
         body: SearchRequestBody containing the query vector and parameters.
         collections: Optional comma-separated list of collection names to restrict the search.
         ai_model: Optional model name; not used in this minimal implementation.
@@ -122,37 +127,40 @@ async def search_across_collections(
     """
     if collections:
         names = [v.strip() for v in collections.split(",") if v.strip()]
-        collections: list[Collection] = []
+        collections_list: list[Collection] = []
         for name in names:
             await parse_and_auth_request(request, name)
             col = await dal.get_collection_by_name(name)
             if not col:
                 raise HTTPException(status_code=400, detail=f"Invalid collection: {name}")
-            collections.append(col)
+            collections_list.append(col)
     else:
-        collections = await dal.list_collections()
+        collections_list = await dal.list_collections()
 
-    if not collections:
+    if not collections_list:
         return SearchResponse(embeddings=[])
 
     if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
-    dims = collections[0].dimensions
+    dims = collections_list[0].dimensions
     if len(body.input) != dims:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
-    collection_ids = [col.id for col in collections]
+    collection_ids = [col.id for col in collections_list]
+
+    allowed_authz = await get_allowed_authz_for_request(request)
+
     rows = await dal.search_embeddings_across_collections(
-        request=request,
         collection_ids=collection_ids,
         query_vector=body.input,
         top_k=body.top_k,
         score_range=body.range,
         filters=body.filters,
+        allowed_authz=allowed_authz,
     )
 
-    collection_by_id = {col.id: col for col in collections}
+    collection_by_id = {col.id: col for col in collections_list}
 
     results: list[SingleSearchResult] = []
     hit_collection_ids: set[int] = set()

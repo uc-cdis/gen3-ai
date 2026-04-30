@@ -35,7 +35,7 @@ CREATE TABLE embeddings (
 -- CONCURRENTLY allows it to safely run in prod during other read/write operations (at the cost of increased time and resource usage)
 -- NOTE: if we end up needing to partition, we can't use CONCURRENTLY
 -- Concurrent builds for indexes on partitioned tables are currently not supported in postgres.
--- CREATE INDEX CONCURRENTLY ON embeddings USING hnsw ((embedding::vector(512)) vector_l2_ops) WHERE (vector_index_id = 2);
+-- CREATE INDEX CONCURRENTLY ON embeddings USING hnsw ((embedding::vector(512)) vector_l2_ops) WHERE (collection_id = 2);
 
 -- JSONB column metadata inverted index, so value searching on tags or something
 -- is optimized

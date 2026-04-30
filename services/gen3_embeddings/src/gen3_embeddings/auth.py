@@ -311,3 +311,21 @@ async def parse_and_auth_request(request: Request, collection_name: str):
         authz_access_method=method,
         authz_resources=[resource],
     )
+
+
+async def get_allowed_authz_for_request(request: Request) -> list[str]:
+    """
+    Compute the allowed authz resource tags for this request, based on
+    the user's authz mapping and the HTTP → CRUD mapping.
+
+    This is used by the route layer to supply allowed_authz into the
+    data access layer (DAL) for RLS.
+    """
+    user_authz_mapping = await get_user_authz_mapping(request=request)
+    method = _get_crud_action_from_request(request)
+    allowed_authz = get_allowed_authz_from_mapping(
+        authz_mapping=user_authz_mapping,
+        method=method,
+    )
+    logging.debug(f"allowed_authz for {method}: {allowed_authz}")
+    return allowed_authz
