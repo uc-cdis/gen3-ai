@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import parse_and_auth_request
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from gen3_embeddings.db import DataAccessLayer, get_data_access_layer
+from gen3_embeddings.database.db import DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model
 from gen3_embeddings.models.schemas import (
     CollectionModel,
@@ -79,6 +79,7 @@ async def create_collection(
         collection_name=body.collection_name,
         description=body.description,
         dimensions=body.dimensions,
+        vector_type=body.vector_type.value,
     )
     return collection_to_model(col)
 

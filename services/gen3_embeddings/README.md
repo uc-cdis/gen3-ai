@@ -580,3 +580,4 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=team7,team42"
 - support DEBUG_SKIP_AUTH True for RLS
 - sanitize collection name
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
+- add support for index

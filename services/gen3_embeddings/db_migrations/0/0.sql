@@ -6,26 +6,40 @@ CREATE TABLE collections (
     description TEXT,
     ai_model_name TEXT,
     dimensions INT NOT NULL,
+    vector_type TEXT NOT NULL DEFAULT 'vector',
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
--- single-table
-CREATE TABLE embeddings (
+CREATE TABLE embeddings_vector (
     collection_id BIGINT REFERENCES collections(id) ON DELETE CASCADE,
     embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    embedding VECTOR NOT NULL, -- different sizes, requires more careful expression indexing
-    authz_version INT NOT NULL,  -- future flexibility in case we need to change this whole authz schema/method. there's no real extensibility built in yet, but this will at least form a starting point for knowing this is a v0 authz record. idk I guess we'd have to migrate anyway, but if we wanted two versions in different records at the same time, this might be useful?
+    embedding VECTOR NOT NULL,
+    authz_version INT NOT NULL,
     authz TEXT[] NOT NULL,
     metadata JSONB DEFAULT '{}'::JSONB,
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
 
-    -- avoid duplicates inside the same collection
-    CONSTRAINT uniq_collection_uuid UNIQUE (collection_id, embedding_id)
+    CONSTRAINT embeddings_vector_uniq_collection_uuid UNIQUE (collection_id, embedding_id)
+);
+
+CREATE TABLE embeddings_halfvec (
+    collection_id BIGINT REFERENCES collections(id) ON DELETE CASCADE,
+    embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    embedding HALFVEC NOT NULL,
+    authz_version INT NOT NULL,
+    authz TEXT[] NOT NULL,
+    metadata JSONB DEFAULT '{}'::JSONB,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+
+    CONSTRAINT embeddings_halfvec_uniq_collection_uuid UNIQUE (collection_id, embedding_id)
 );
 
 
@@ -39,31 +53,43 @@ CREATE TABLE embeddings (
 
 -- JSONB column metadata inverted index, so value searching on tags or something
 -- is optimized
-CREATE INDEX idx_embeddings_metadata_gin
-    ON embeddings
-    USING GIN (metadata);
+CREATE INDEX idx_embeddings_vector_metadata_gin
+    ON embeddings_vector USING GIN (metadata);
+
+CREATE INDEX idx_embeddings_halfvec_metadata_gin
+    ON embeddings_halfvec USING GIN (metadata);
 
 -- on authz tags for faster filtering, similar to above
-CREATE INDEX idx_embeddings_authz_gin
-    ON embeddings
-    USING GIN (authz);
+CREATE INDEX idx_embeddings_vector_authz_gin
+    ON embeddings_vector USING GIN (authz);
+
+CREATE INDEX idx_embeddings_halfvec_authz_gin
+    ON embeddings_halfvec USING GIN (authz);
 
 -- row level security will enforce authz
-ALTER TABLE embeddings
-  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE embeddings_vector ENABLE ROW LEVEL SECURITY;
+ALTER TABLE embeddings_halfvec ENABLE ROW LEVEL SECURITY;
 
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL
 -- allowed_authz to the user's allowed authz resources from arborist
 -- applies to ALL (SELECT, INSERT, UPDATE, DELETE)
-CREATE POLICY authz_policy ON embeddings
+CREATE POLICY authz_policy_vector ON embeddings_vector
   USING (
-    -- reminder: authz is a TEXT[], so the GIN above makes this fast
     authz && current_setting('app.allowed_authz', true)::text[]
     AND authz_version = 0
   )
   WITH CHECK (
-    -- reminder: authz is a TEXT[], so the GIN above makes this fast
+    authz && current_setting('app.allowed_authz', true)::text[]
+    AND authz_version = 0
+  );
+
+CREATE POLICY authz_policy_halfvec ON embeddings_halfvec
+  USING (
+    authz && current_setting('app.allowed_authz', true)::text[]
+    AND authz_version = 0
+  )
+  WITH CHECK (
     authz && current_setting('app.allowed_authz', true)::text[]
     AND authz_version = 0
   );

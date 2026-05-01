@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from gen3_embeddings.db import Collection, Embedding
+from gen3_embeddings.database.db import Collection, Embedding
 from gen3_embeddings.models.schemas import (
     CollectionModel,
     EmbeddingInfo,
@@ -52,6 +52,7 @@ def collection_to_model(col: Collection) -> CollectionModel:
         collection_name=col.collection_name,
         description=col.description,
         dimensions=col.dimensions,
+        vector_type=col.vector_type,
         created_at=col.created_at,
         updated_at=col.updated_at,
         self=build_collection_self_url(col.collection_name),

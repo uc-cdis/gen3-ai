@@ -4,7 +4,7 @@ from gen3_embeddings.auth import (
     get_allowed_authz_for_request,
     parse_and_auth_request,
 )
-from gen3_embeddings.db import Collection, DataAccessLayer, Embedding, get_data_access_layer
+from gen3_embeddings.database.db import Collection, DataAccessLayer, Embedding, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
     SearchRequestBody,
@@ -57,6 +57,10 @@ async def search_in_collection(
     if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
+    # numeric vector check
+    if not isinstance(body.input, list) or not all(isinstance(x, (int, float)) for x in body.input):
+        raise HTTPException(status_code=400, detail="input must be a numeric vector")
+
     query_vector = body.input
     if len(query_vector) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
@@ -64,10 +68,12 @@ async def search_in_collection(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     rows = await dal.search_embeddings_in_collection(
-        collection_id=collection.id,
+        collection=collection,
         query_vector=query_vector,
         top_k=body.top_k,
-        score_range=body.range,
+        min_value=body.min_value,
+        max_value=body.max_value,
+        distance_metric=body.distance_metric,
         filters=body.filters,
         allowed_authz=allowed_authz,
     )
@@ -75,13 +81,14 @@ async def search_in_collection(
     results: list[SingleSearchResult] = []
     for row in rows:
         emb = Embedding.from_record(row)
-        sim = row["similarity_score"]
+        metric_value = row["value"]
         emb_res = embedding_to_result(emb=emb, collection=collection, include_info=(not no_embeddings_info))
         if isinstance(emb_res, SingleEmbeddingResult):
             results.append(
                 SingleSearchResult(
                     id=emb.embedding_id,
-                    similarity_score=sim,
+                    distance_metric=body.distance_metric,
+                    value=metric_value,
                     embedding=emb_res.model_dump(exclude_none=True),
                 )
             )
@@ -140,22 +147,35 @@ async def search_across_collections(
     if not collections_list:
         return SearchResponse(embeddings=[])
 
+    # Ensure same vector_type across all
+    vec_type = collections_list[0].vector_type
+    for col in collections_list:
+        if col.vector_type != vec_type:
+            raise HTTPException(
+                status_code=400,
+                detail="All collections in a single search must share the same vector_type",
+            )
+
     if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
-    dims = collections_list[0].dimensions
-    if len(body.input) != dims:
-        raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
+    if not isinstance(body.input, list) or not all(isinstance(x, (int, float)) for x in body.input):
+        raise HTTPException(status_code=400, detail="input must be a numeric vector")
 
-    collection_ids = [col.id for col in collections_list]
+    dims = collections_list[0].dimensions
+    query_vector = body.input
+    if len(query_vector) != dims:
+        raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
     allowed_authz = await get_allowed_authz_for_request(request)
 
     rows = await dal.search_embeddings_across_collections(
-        collection_ids=collection_ids,
-        query_vector=body.input,
+        collections=collections_list,
+        query_vector=query_vector,
         top_k=body.top_k,
-        score_range=body.range,
+        min_value=body.min_value,
+        max_value=body.max_value,
+        distance_metric=body.distance_metric,
         filters=body.filters,
         allowed_authz=allowed_authz,
     )
@@ -170,13 +190,15 @@ async def search_across_collections(
         if not col:
             continue
         hit_collection_ids.add(col.id)
-        sim = row["similarity_score"]
+
+        metric_value = row["value"]
         emb_res = embedding_to_result(emb, collection=col, include_info=(not no_embeddings_info))
-        if isinstance(emb_res, SingleEmbeddingResult):
+        if isinstance(emb_res, SingleSearchResult):
             results.append(
                 SingleSearchResult(
                     id=emb.embedding_id,
-                    similarity_score=sim,
+                    distance_metric=body.distance_metric,
+                    value=metric_value,
                     embedding=emb_res.model_dump(exclude_none=True),
                 )
             )

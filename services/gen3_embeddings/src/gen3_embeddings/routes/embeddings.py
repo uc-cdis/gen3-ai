@@ -8,7 +8,7 @@ from gen3_embeddings.auth import (
     parse_and_auth_request,
 )
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from gen3_embeddings.db import Collection, DataAccessLayer, get_data_access_layer
+from gen3_embeddings.database.db import Collection, DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_result,

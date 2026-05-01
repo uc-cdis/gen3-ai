@@ -295,7 +295,8 @@ async def parse_and_auth_request(request: Request, collection_name: str):
     Authorize the request with arborist to ensure the request can be madefrom gen3_embeddings.auth import parse_and_auth_request
 
     Args:
-        request: fastapi request entity
+        request: fastapi request entity.
+        collection_name: Name of the collection to authorize access to.
 
     Raises:
         HTTPException based on authorize_request outcome
@@ -329,3 +330,89 @@ async def get_allowed_authz_for_request(request: Request) -> list[str]:
     )
     logging.debug(f"allowed_authz for {method}: {allowed_authz}")
     return allowed_authz
+
+
+async def authorize_user_for_collection(
+    request: Request,
+    collection_name: str,
+    method: str | None = None,
+) -> None:
+    """
+    Authorize the current user for a specific collection and CRUD method.
+
+    This is a programmatic equivalent of using `parse_and_auth_request`
+    as a FastAPI dependency, but can be called directly in route logic.
+
+    Args:
+        request: FastAPI Request object.
+        collection_name: Name of the collection to authorize access to.
+        method: Logical CRUD method (read/create/update/delete). If not
+            provided, it is derived from the HTTP verb via
+            `_get_crud_action_from_request`.
+
+    Raises:
+        HTTPException: 403 if the user is not authorized.
+    """
+    if method is None:
+        method = _get_crud_action_from_request(request)
+
+    resource = get_authz_resource_path_from_collection_name(collection_name)
+    logging.debug(f"Authorizing user for collection '{collection_name}' with method '{method}', resource '{resource}'")
+
+    await authorize_request(
+        authz_access_method=method,
+        authz_resources=[resource],
+        request=request,
+    )
+
+
+async def get_allowed_collection_names_for_read(request: Request) -> set[str]:
+    """
+    Derive which collection names the current user is allowed to READ.
+
+    We:
+    - Get the user's full authz mapping from Arborist.
+    - Use `get_allowed_authz_from_mapping` for method 'read'.
+    - Interpret resources of the form:
+        /services/gen3-embeddings        → base service
+        /services/gen3-embeddings/foo    → collection 'foo'
+
+      i.e., last path segment is the collection_name (if not empty).
+
+    Returns:
+        A set of collection_name strings that the user is allowed to read.
+        If the user only has access to the base service resource and
+        no child resources, this set may be empty (depending on how
+        your policies are structured).
+    """
+    user_authz_mapping = await get_user_authz_mapping(request=request)
+
+    allowed_resources = get_allowed_authz_from_mapping(
+        authz_mapping=user_authz_mapping,
+        method="read",
+    )
+
+    logging.debug(f"Allowed resources for READ: {allowed_resources}")
+
+    # e.g. "/services/gen3-embeddings"
+    base = config.AUTHZ_SERVICE_RESOURCE.rstrip("/")
+
+    allowed_collection_names: set[str] = set()
+    for res in allowed_resources:
+        if not isinstance(res, str):
+            continue
+        if res == base:
+            # This is the base service resource; it doesn't correspond
+            # to a specific collection name.
+            continue
+        if res.startswith(base + "/"):
+            # Example: "/services/gen3-embeddings/my_collection"
+            # => collection_name is the last path segment.
+            parts = res.split("/")
+            if parts:
+                collection_name = parts[-1]
+                if collection_name:
+                    allowed_collection_names.add(collection_name)
+
+    logging.debug(f"Allowed collection names for READ: {allowed_collection_names}")
+    return allowed_collection_names

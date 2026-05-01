@@ -1,7 +1,21 @@
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+
+class VectorType(StrEnum):
+    vector = "vector"
+    halfvec = "halfvec"
+
+
+class DistanceMetric(StrEnum):
+    l2_distance = "l2_distance"
+    inner_product = "inner_product"
+    cosine_distance = "cosine_distance"
+    l1_distance = "l1_distance"
+    cosine_similarity = "cosine_similarity"
 
 
 class CollectionModel(BaseModel):
@@ -13,6 +27,7 @@ class CollectionModel(BaseModel):
     collection_name: str
     description: str | None = None
     dimensions: int
+    vector_type: VectorType
     created_at: datetime | None = None
     updated_at: datetime | None = None
     self: str | None = None
@@ -65,7 +80,9 @@ class SearchRequestBody(BaseModel):
 
     input: str | list[float]
     top_k: int = 10
-    range: float | None = Field(None, alias="range")
+    min_value: float | None = None
+    max_value: float | None = None
+    distance_metric: DistanceMetric = DistanceMetric.cosine_similarity
     filters: dict[str, str] | None = None
 
 
@@ -75,7 +92,9 @@ class SingleSearchResult(BaseModel):
     """
 
     id: UUID
-    similarity_score: float
+    distance_metric: DistanceMetric
+    # distance or similarity depending on metric
+    value: float
     embedding: dict
 
 
@@ -92,6 +111,7 @@ class CreateCollectionBody(BaseModel):
     collection_name: str
     description: str | None = None
     dimensions: int
+    vector_type: VectorType = VectorType.vector
 
 
 class UpdateCollectionBody(BaseModel):

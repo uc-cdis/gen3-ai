@@ -2,7 +2,7 @@ import ast
 import json
 from dataclasses import dataclass, fields
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 from uuid import UUID
 
 import asyncpg
@@ -10,6 +10,8 @@ from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException
 
 from gen3_embeddings import config
+from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 _pool: asyncpg.Pool | None = None
 
@@ -33,6 +35,7 @@ class Collection:
     description: str | None
     ai_model_name: str | None
     dimensions: int
+    vector_type: str
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -103,14 +106,19 @@ class DataAccessLayer:
                 return await fn(conn, *args, **kwargs)
 
     async def create_collection(
-        self, collection_name: str, description: str, dimensions: int, ai_model_name: str | None = None
+        self,
+        collection_name: str,
+        description: str,
+        dimensions: int,
+        ai_model_name: str | None = None,
+        vector_type: str = "vector",
     ) -> Collection:
         async with self.pool.acquire() as conn:
             try:
                 stmt = await conn.prepare(
                     """
-                    INSERT INTO collections (collection_name, description, ai_model_name, dimensions)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
+                    VALUES ($1, $2, $3, $4, $5)
                     RETURNING *
                     """
                 )
@@ -375,90 +383,91 @@ class DataAccessLayer:
 
     async def search_embeddings_in_collection(
         self,
-        collection_id: int,
+        collection: Collection,
         query_vector: list[float],
         top_k: int,
-        score_range: float | None,
+        min_value: float | None,
+        max_value: float | None,
+        distance_metric: DistanceMetric,
         filters: dict[str, str] | None,
         allowed_authz: list[str],
     ) -> list[asyncpg.Record]:
         """
-        TODO: embedding/query_vector has to be string currently, look into why.
-        Search embeddings within a single collection using pgvector
-        cosine distance.
-
-        Returns raw rows with an extra 'similarity_score' column.
+        Search embeddings within a single collection using the collection's vector_type.
         """
-        filters = filters or {}
-        where_clauses = ["collection_id = $1"]
-        params = [collection_id, json.dumps(query_vector), top_k]
+        table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
-        param_index = 4
-        for k, v in filters.items():
-            where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
-            params.append(v)
-            param_index += 1
+        # $1: collection_id, $2: vector, $3: top_k
+        params: list[Any] = [collection.id, query_vector, top_k]
 
-        where_sql = " AND ".join(where_clauses)
-        sql = f"""
-            SELECT *,
-                   1 - (embedding <=> $2::vector) AS similarity_score
-            FROM embeddings
-            WHERE {where_sql}
-            ORDER BY embedding <=> $2::vector
-            LIMIT $3
-        """
+        sql, extra_params = build_search_sql(
+            table=table,
+            distance_metric=distance_metric,
+            single_collection=True,
+            collection_ids_param="$1",
+            vector_param=f"$2{cast}",  # e.g. $2::vector or $2::halfvec
+            top_k_param="$3",
+            filters=filters,
+            min_value=min_value,
+            max_value=max_value,
+        )
+        params.extend(extra_params)
 
         async def _query(conn):
             stmt = await conn.prepare(sql)
             rows = await stmt.fetch(*params)
-            if score_range is not None:
-                rows = [r for r in rows if r["similarity_score"] >= score_range]
             return rows
 
         return await self._with_rls(allowed_authz, _query)
 
     async def search_embeddings_across_collections(
         self,
-        collection_ids: list[int],
+        collections: list[Collection],
         query_vector: list[float],
         top_k: int,
-        score_range: float | None,
+        min_value: float | None,
+        max_value: float | None,
+        distance_metric: DistanceMetric,
         filters: dict[str, str] | None,
         allowed_authz: list[str],
     ) -> list[asyncpg.Record]:
         """
-        Search embeddings across multiple collections using pgvector
-        cosine distance.
+        Search embeddings across multiple collections of the SAME vector_type.
         """
-        if not collection_ids:
+        if not collections:
             return []
 
-        filters = filters or {}
-        params = [collection_ids, json.dumps(query_vector), top_k]
-        where_clauses = ["collection_id = ANY($1::bigint[])"]
-        param_index = 4
+        # Ensure they all share the same vector_type
+        vec_type = collections[0].vector_type
+        for col in collections:
+            if col.vector_type != vec_type:
+                raise HTTPException(
+                    status_code=400,
+                    detail="All collections must share the same vector_type for a single search",
+                )
 
-        for k, v in filters.items():
-            where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
-            params.append(v)
-            param_index += 1
+        table, cast = get_embeddings_table_and_cast(VectorType(vec_type))
+        collection_ids = [col.id for col in collections]
 
-        where_sql = " AND ".join(where_clauses)
-        sql = f"""
-            SELECT *,
-                   1 - (embedding <=> $2::vector) AS similarity_score
-            FROM embeddings
-            WHERE {where_sql}
-            ORDER BY embedding <=> $2::vector
-            LIMIT $3
-        """
+        # $1: collection_ids, $2: vector, $3: top_k
+        params: list[Any] = [collection_ids, query_vector, top_k]
+
+        sql, extra_params = build_search_sql(
+            table=table,
+            distance_metric=distance_metric,
+            single_collection=False,
+            collection_ids_param="$1::bigint[]",
+            vector_param=f"$2{cast}",
+            top_k_param="$3",
+            filters=filters,
+            min_value=min_value,
+            max_value=max_value,
+        )
+        params.extend(extra_params)
 
         async def _query(conn):
             stmt = await conn.prepare(sql)
             rows = await stmt.fetch(*params)
-            if score_range is not None:
-                rows = [r for r in rows if r["similarity_score"] >= score_range]
             return rows
 
         return await self._with_rls(allowed_authz, _query)
