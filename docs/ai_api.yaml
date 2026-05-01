@@ -183,9 +183,11 @@ components:
         collection_id:
           type: integer
         authz:
-          type: string
-          format: url
-          example: "/vectorstore/collections/{collection_name}"
+          type: array
+          items:
+            type: string
+            format: url
+            example: "/vectorstore/collections/{collection_name}"
         authz_version:
           type: integer
           example: 0
