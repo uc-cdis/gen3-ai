@@ -105,6 +105,9 @@ class DataAccessLayer:
                 await conn.execute("SELECT set_config('app.allowed_authz', $1, true)", allowed_array)
                 return await fn(conn, *args, **kwargs)
 
+    def _get_embeddings_table_and_cast_for_collection(self, collection: Collection) -> tuple[str, str]:
+        return get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
     async def create_collection(
         self,
         collection_name: str,
@@ -122,7 +125,7 @@ class DataAccessLayer:
                     RETURNING *
                     """
                 )
-                row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions)
+                row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions, vector_type)
             except UniqueViolationError:
                 # collection_name already exists
                 raise HTTPException(
@@ -178,29 +181,30 @@ class DataAccessLayer:
 
     async def create_embedding(
         self,
-        collection_id: int,
+        collection: Collection,
         embedding: list[float],
         authz_version: int,
         authz: list[str],
         metadata: dict | None = None,
     ) -> Embedding:
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare(
-                """
-                INSERT INTO embeddings
+                f"""
+                INSERT INTO {table}
                 (collection_id, embedding, authz_version, authz, metadata)
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING *
                 """
             )
-            row = await stmt.fetchrow(collection_id, embedding, authz_version, authz, metadata or {})
+            row = await stmt.fetchrow(collection.id, embedding, authz_version, authz, metadata or {})
             if not row:
                 raise HTTPException(status_code=400, detail="Failed to create embedding")
             return Embedding.from_record(row)
 
     async def create_embeddings_bulk(
         self,
-        collection_id: int,
+        collection: Collection,
         embeddings: list[list[float]],
         authz_version: int,
         authz: list[str],
@@ -217,7 +221,7 @@ class DataAccessLayer:
         Bulk create multiple embeddings in the given collection.
 
         Args:
-            collection_id: ID of the collection to insert into.
+            collection: collection to insert into.
             embeddings: List of embedding vectors.
             authz_version: Authorization schema version.
             authz: Authorization tags.
@@ -235,17 +239,19 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
         async def _query(conn):
             results: list[Embedding] = []
             for emb_vec, meta in zip(embeddings, metadata_list):
                 row = await conn.fetchrow(
-                    """
-                    INSERT INTO embeddings
+                    f"""
+                    INSERT INTO {table}
                     (collection_id, embedding, authz_version, authz, metadata)
                     VALUES ($1, $2, $3, $4, $5)
                     RETURNING *
                     """,
-                    collection_id,
+                    collection.id,
                     json.dumps(emb_vec),
                     authz_version,
                     authz,
@@ -261,43 +267,35 @@ class DataAccessLayer:
 
         return await self._with_rls(allowed_authz, _query)
 
-    async def get_embedding_by_id(
-        self,
-        embedding_id: UUID,
-        allowed_authz: list[str],
-    ) -> Embedding | None:
-        async def _query(conn):
-            stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = $1")
-            row = await stmt.fetchrow(embedding_id)
-            return Embedding.from_record(row) if row else None
-
-        return await self._with_rls(allowed_authz, _query)
-
     async def get_embedding_by_collection_and_id(
         self,
-        collection_id: int,
+        collection: Collection,
         embedding_id: UUID,
         allowed_authz: list[str],
     ) -> Embedding | None:
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
         async def _query(conn):
-            stmt = await conn.prepare("SELECT * FROM embeddings WHERE collection_id = $1 AND embedding_id = $2")
-            row = await stmt.fetchrow(collection_id, embedding_id)
+            stmt = await conn.prepare(f"SELECT * FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+            row = await stmt.fetchrow(collection.id, embedding_id)
             return Embedding.from_record(row) if row else None
 
         return await self._with_rls(allowed_authz, _query)
 
     async def update_embedding(
         self,
-        collection_id: int,
+        collection: Collection,
         embedding_id: UUID,
         embedding: list[float] | None,
         metadata: dict | None,
         allowed_authz: list[str],
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
         async def _query(conn):
             set_parts = []
-            params = [collection_id, embedding_id]
+            params = [collection.id, embedding_id]
             param_idx = 3
 
             if embedding is not None:
@@ -312,15 +310,15 @@ class DataAccessLayer:
 
             if not set_parts:
                 # nothing to update
-                stmt = await conn.prepare("SELECT * FROM embeddings WHERE collection_id = $1 AND embedding_id = $2")
-                row = await stmt.fetchrow(collection_id, embedding_id)
+                stmt = await conn.prepare(f"SELECT * FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+                row = await stmt.fetchrow(collection.id, embedding_id)
                 return Embedding.from_record(row) if row else None
 
             set_clause = ", ".join(set_parts) + ", updated_at = NOW()"
 
             stmt = await conn.prepare(
                 f"""
-                UPDATE embeddings
+                UPDATE {table}
                 SET {set_clause}
                 WHERE collection_id = $1 AND embedding_id = $2
                 RETURNING *
@@ -333,13 +331,15 @@ class DataAccessLayer:
 
     async def delete_embedding(
         self,
-        collection_id: int,
+        collection: Collection,
         embedding_id: UUID,
         allowed_authz: list[str],
     ) -> bool:
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
         async def _query(conn):
             result = await conn.execute(
-                "DELETE FROM embeddings WHERE collection_id = $1 AND embedding_id = $2", collection_id, embedding_id
+                f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2", collection.id, embedding_id
             )
             return result.startswith("DELETE")
 
@@ -347,16 +347,18 @@ class DataAccessLayer:
 
     async def list_embeddings_in_collection(
         self,
-        collection_id: int,
+        collection: Collection,
         offset: int,
         limit: int,
         allowed_authz: list[str],
     ) -> list[Embedding]:
+        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
         async def _query(conn):
             stmt = await conn.prepare(
-                "SELECT * FROM embeddings WHERE collection_id = $1 ORDER BY created_at OFFSET $2 LIMIT $3"
+                f"SELECT * FROM {table} WHERE collection_id = $1 ORDER BY created_at OFFSET $2 LIMIT $3"
             )
-            rows = await stmt.fetch(collection_id, offset, limit)
+            rows = await stmt.fetch(collection.id, offset, limit)
             return [Embedding.from_record(r) for r in rows]
 
         return await self._with_rls(allowed_authz, _query)
@@ -364,12 +366,36 @@ class DataAccessLayer:
     async def get_embeddings_bulk(
         self,
         embedding_ids: list[UUID],
+        vector_type: VectorType | None,
         allowed_authz: list[str],
     ) -> list[Embedding]:
+        """
+        Fetch embeddings by IDs from the appropriate table(s).
+
+        If vector_type is given, only that table is queried.
+        If None, both tables are queried and results combined.
+        """
+
         async def _query(conn):
-            stmt = await conn.prepare("SELECT * FROM embeddings WHERE embedding_id = ANY($1::uuid[])")
-            rows = await stmt.fetch(embedding_ids)
-            return [Embedding.from_record(r) for r in rows]
+            results: list[Embedding] = []
+
+            def rows_to_embeddings(rows):
+                return [Embedding.from_record(r) for r in rows]
+
+            if vector_type:
+                table, _ = get_embeddings_table_and_cast(vector_type)
+                stmt = await conn.prepare(f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])")
+                rows = await stmt.fetch(embedding_ids)
+                results.extend(rows_to_embeddings(rows))
+            else:
+                # query both vector and halfvec tables
+                for vt in (VectorType.vector, VectorType.halfvec):
+                    table, _ = get_embeddings_table_and_cast(vt)
+                    stmt = await conn.prepare(f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])")
+                    rows = await stmt.fetch(embedding_ids)
+                    results.extend(rows_to_embeddings(rows))
+
+            return results
 
         return await self._with_rls(allowed_authz, _query)
 

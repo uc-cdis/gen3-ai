@@ -60,7 +60,7 @@ async def get_embedding_from_collection(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     emb = await dal.get_embedding_by_collection_and_id(
-        collection_id=collection.id,
+        collection=collection,
         embedding_id=embedding_uuid,
         allowed_authz=allowed_authz,
     )
@@ -111,7 +111,7 @@ async def update_embedding_in_collection(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     emb = await dal.update_embedding(
-        collection_id=collection.id,
+        collection=collection,
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
@@ -157,7 +157,7 @@ async def delete_embedding(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     success = await dal.delete_embedding(
-        collection_id=collection.id,
+        collection=collection,
         embedding_id=embedding_uuid,
         allowed_authz=allowed_authz,
     )
@@ -208,7 +208,7 @@ async def list_embeddings_in_collection(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     embs = await dal.list_embeddings_in_collection(
-        collection_id=collection.id,
+        collection=collection,
         offset=offset,
         limit=limit,
         allowed_authz=allowed_authz,
@@ -301,7 +301,7 @@ async def create_embeddings_in_collection(
     allowed_authz = await get_allowed_authz_for_request(request)
 
     created = await dal.create_embeddings_bulk(
-        collection_id=collection.id,
+        collection=collection,
         embeddings=vectors,
         authz_version=0,
         authz=[get_authz_resource_path_from_collection_name(collection_name)],
@@ -350,6 +350,7 @@ async def get_embeddings_bulk_unknown_collections(
 
     embs = await dal.get_embeddings_bulk(
         embedding_ids=embedding_uuids,
+        vector_type=None,
         allowed_authz=allowed_authz,
     )
     if not embs:
