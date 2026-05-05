@@ -25,7 +25,7 @@ jobs:
     # consistency with linting/formatting in addition to yet another
     # barrier for any security issues)
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
-    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/pre-commit
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
       UV_VERSION: '0.11.8'
       JUST_VERSION: '1.50.0'
