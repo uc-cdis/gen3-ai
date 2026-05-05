@@ -161,7 +161,7 @@ class DataAccessLayer:
                 # Make RLS safe even if user has no allowed resources
                 allowed_array = "{" + ",".join(allowed_authz) + "}"
                 # the true value means is_local is set to true, the new value will only apply during the current transaction.
-                await conn.execute("SELECT set_config('app.allowed_authz', $1, true)", allowed_array)
+                await conn.execute("SELECT set_config('app.allowed_authz', $1::text, true)", allowed_array)
                 return await fn(conn, *args, **kwargs)
 
     def _get_embeddings_table_and_cast_for_collection(self, collection: Collection) -> tuple[str, str]:
@@ -180,7 +180,7 @@ class DataAccessLayer:
                 stmt = await conn.prepare(
                     """
                     INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1::text, $2::text, $3::text, $4::int, $5::text)
                     RETURNING *
                     """
                 )
@@ -197,13 +197,13 @@ class DataAccessLayer:
 
     async def get_collection_by_name(self, collection_name: str) -> Collection | None:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1")
+            stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
             row = await stmt.fetchrow(collection_name)
             return Collection.from_record(row) if row else None
 
     async def get_collection_by_id(self, collection_id: int) -> Collection | None:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("SELECT * FROM collections WHERE id = $1")
+            stmt = await conn.prepare("SELECT * FROM collections WHERE id = $1::bigint")
             row = await stmt.fetchrow(collection_id)
             return Collection.from_record(row) if row else None
 
@@ -247,7 +247,7 @@ class DataAccessLayer:
 
     async def delete_collection(self, collection_name: str) -> bool:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1")
+            stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
             result = await stmt.execute(collection_name)
             return result.startswith("DELETE")
 
@@ -257,7 +257,7 @@ class DataAccessLayer:
         limit: int = 100,
     ) -> list[Collection]:
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("SELECT * FROM collections ORDER BY created_at LIMIT $2 OFFSET $1")
+            stmt = await conn.prepare("SELECT * FROM collections ORDER BY created_at LIMIT $2::int OFFSET $1::int")
             rows = await stmt.fetch(offset, limit)
             return [Collection.from_record(r) for r in rows]
 
@@ -269,13 +269,13 @@ class DataAccessLayer:
         authz: list[str],
         metadata: dict | None = None,
     ) -> Embedding:
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, cast = self._get_embeddings_table_and_cast_for_collection(collection)
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare(
                 f"""
                 INSERT INTO {table}
                 (collection_id, embedding, authz_version, authz, metadata)
-                VALUES ($1, $2, $3, $4, $5)
+                VALUES ($1::bigint, $2{cast}, $3::int, $4::text[], $5::jsonb)
                 RETURNING *
                 """
             )
@@ -321,7 +321,7 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, cast = self._get_embeddings_table_and_cast_for_collection(collection)
 
         async def _query(conn):
             results: list[Embedding] = []
@@ -330,7 +330,7 @@ class DataAccessLayer:
                     f"""
                     INSERT INTO {table}
                     (collection_id, embedding, authz_version, authz, metadata)
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1::bigint, $2{cast}, $3::int, $4::text[], $5::jsonb)
                     RETURNING *
                     """,
                     collection.id,
@@ -358,7 +358,9 @@ class DataAccessLayer:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
         async def _query(conn):
-            stmt = await conn.prepare(f"SELECT * FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+            stmt = await conn.prepare(
+                f"SELECT * FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+            )
             row = await stmt.fetchrow(collection.id, embedding_id)
             return Embedding.from_record(row) if row else None
 
@@ -440,7 +442,9 @@ class DataAccessLayer:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
         async def _query(conn):
-            stmt = await conn.prepare(f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+            stmt = await conn.prepare(
+                f"DELETE FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+            )
             result = await stmt.execute(collection.id, embedding_id)
             return result.startswith("DELETE")
 
@@ -457,7 +461,13 @@ class DataAccessLayer:
 
         async def _query(conn):
             stmt = await conn.prepare(
-                f"SELECT * FROM {table} WHERE collection_id = $1 ORDER BY created_at OFFSET $2 LIMIT $3"
+                f"""
+                SELECT * FROM {table}
+                WHERE collection_id = $1::bigint
+                ORDER BY created_at
+                OFFSET $2::int
+                LIMIT $3::int
+                """
             )
             rows = await stmt.fetch(collection.id, offset, limit)
             return [Embedding.from_record(r) for r in rows]
@@ -531,9 +541,9 @@ class DataAccessLayer:
             table=table,
             distance_metric=distance_metric,
             single_collection=True,
-            collection_ids_param="$1",
+            collection_ids_param="$1::bigint",
             vector_param=f"$2{cast}",  # e.g. $2::vector or $2::halfvec
-            top_k_param="$3",
+            top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
             max_value=max_value,
@@ -585,7 +595,7 @@ class DataAccessLayer:
             single_collection=False,
             collection_ids_param="$1::bigint[]",
             vector_param=f"$2{cast}",
-            top_k_param="$3",
+            top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
             max_value=max_value,
