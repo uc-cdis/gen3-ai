@@ -134,11 +134,8 @@ async def update_collection(
     Raises:
         HTTPException: 404 if collection is not found.
     """
-    update_fields = {}
-    if body.description is not None:
-        update_fields["description"] = body.description
 
-    col = await dal.update_collection(collection_name, update_fields)
+    col = await dal.update_collection(collection_name=collection_name, description=body.description)
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
 

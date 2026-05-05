@@ -1,3 +1,61 @@
+"""
+This file houses the database logic.
+
+OVERVIEW
+--------
+
+We're using asyncpg alongside FastAPI's dependency injection.
+
+This file contains the logic for database manipulation in a "data access layer"
+(DataAccessLayer) class, such that other areas of the code have simple
+`.create_*()`, `.list_*()`, `.search_*()` calls which won't require knowledge
+of how to manage connections or interact with the db directly. Connections are
+managed via an asyncpg connection pool and FastAPI's dependency injection
+provides a DAL instance per-request.
+
+DETAILS
+-------
+
+What do we do in this file?
+
+- We create an asyncpg connection pool as a module-level global
+    - The pool is initialized once (on demand) using the DB URL from config
+
+- We define lightweight dataclasses for Collections and Embeddings
+    - These mirror rows from the database and provide `.from_record()` helpers
+      to convert from asyncpg.Record objects
+
+- We define a DataAccessLayer class which isolates all database manipulations
+    - All CRUD and search operations go through this interface instead of
+      leaking raw SQL into the higher-level web app endpoint code
+    - DAL methods use prepared statements where appropriate as a security and
+      efficiency measure
+
+- We provide a `get_data_access_layer()` function which yields an instance
+  of the DAL bound to the global connection pool
+    - This function is used as a FastAPI dependency, so each request handler
+      can receive a DAL instance without managing connections manually
+
+- We implement Row Level Security (RLS) integration
+    - Before each logical operation, `_with_rls()` sets a per-transaction
+      PostgreSQL parameter `app.allowed_authz` using:
+          SELECT set_config('app.allowed_authz', $1, true);
+      where `$1` is a text[] of the user's allowed authz resources
+    - Because `set_config(..., true)` uses a local/transaction-scoped setting,
+      each request runs with its own authz context even when using a pooled
+      connection
+
+- We support multiple vector types as isolated domains
+    - Collections store a `vector_type` (e.g., 'vector', 'halfvec')
+    - Each vector type has its own embeddings table (e.g., `embeddings_vector`,
+      `embeddings_halfvec`)
+    - DAL methods route all embedding CRUD and search operations to the
+      appropriate table based on the collection's `vector_type`
+    - Search methods use pgvector operators and functions and expose
+      a uniform interface with configurable distance metrics, min/max thresholds,
+      and filters on metadata
+"""
+
 import ast
 import json
 from dataclasses import dataclass, fields
@@ -19,7 +77,7 @@ _pool: asyncpg.Pool | None = None
 async def get_pool():
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(str(config.DB_CONNECTION_STRING), min_size=1, max_size=10)
+        _pool = await asyncpg.create_pool(str(config.DB_CONNECTION_STRING), min_size=10, max_size=10)
     return _pool
 
 
@@ -102,6 +160,7 @@ class DataAccessLayer:
             async with conn.transaction():
                 # Make RLS safe even if user has no allowed resources
                 allowed_array = "{" + ",".join(allowed_authz) + "}"
+                # the true value means is_local is set to true, the new value will only apply during the current transaction.
                 await conn.execute("SELECT set_config('app.allowed_authz', $1, true)", allowed_array)
                 return await fn(conn, *args, **kwargs)
 
@@ -148,25 +207,48 @@ class DataAccessLayer:
             row = await stmt.fetchrow(collection_id)
             return Collection.from_record(row) if row else None
 
-    async def update_collection(self, collection_name: str, update_fields: dict) -> Collection | None:
-        if not update_fields:
-            return await self.get_collection_by_name(collection_name)
+    async def update_collection(self, collection_name: str, description: str | None) -> Collection | None:
+        set_parts = []
+        params = [collection_name]
+        param_idx = 2
 
-        keys, values = zip(*update_fields.items())
-        set_clause = ", ".join([f"{k} = ${i + 2}" for i, k in enumerate(keys)])
+        if description is not None:
+            set_parts.append(f"description = ${param_idx}::text")
+            params.append(description)
+            param_idx += 1
+
         async with self.pool.acquire() as conn:
+            if not set_parts:
+                # nothing to update
+                stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
+                row = await stmt.fetchrow(collection_name)
+                return Collection.from_record(row) if row else None
+
+            set_clause = ", ".join(set_parts) + ", updated_at = NOW()"
+
             stmt = await conn.prepare(
-                f"UPDATE collections SET {set_clause}, updated_at = NOW() WHERE collection_name = $1 RETURNING *"
+                f"""
+                UPDATE collections
+                SET {set_clause}
+                WHERE collection_name = $1::text
+                RETURNING *
+                """
             )
-            row = await stmt.fetchrow(collection_name, *values)
+            row = await stmt.fetchrow(*params)
             return Collection.from_record(row) if row else None
+
+    # async def delete_collection(self, collection_name: str) -> bool:
+    #     async with self.pool.acquire() as conn:
+    #         result = await conn.execute(
+    #             "DELETE FROM collections WHERE collection_name = $1",
+    #             collection_name,
+    #         )
+    #         return result.startswith("DELETE")
 
     async def delete_collection(self, collection_name: str) -> bool:
         async with self.pool.acquire() as conn:
-            result = await conn.execute(
-                "DELETE FROM collections WHERE collection_name = $1",
-                collection_name,
-            )
+            stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1")
+            result = await stmt.execute(collection_name)
             return result.startswith("DELETE")
 
     async def list_collections(
@@ -291,7 +373,7 @@ class DataAccessLayer:
         allowed_authz: list[str],
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, vector_cast = self._get_embeddings_table_and_cast_for_collection(collection)
 
         async def _query(conn):
             set_parts = []
@@ -299,18 +381,22 @@ class DataAccessLayer:
             param_idx = 3
 
             if embedding is not None:
-                set_parts.append(f"embedding = ${param_idx}::vector")
-                params.append(json.dumps(embedding))
+                set_parts.append(f"embedding = ${param_idx}{vector_cast}")
+                # params.append(json.dumps(embedding))
+                params.append(embedding)
                 param_idx += 1
 
             if metadata is not None:
-                set_parts.append(f"metadata = ${param_idx}")
-                params.append(json.dumps(metadata))
+                set_parts.append(f"metadata = ${param_idx}::jsonb")
+                # params.append(json.dumps(metadata))
+                params.append(metadata)
                 param_idx += 1
 
             if not set_parts:
                 # nothing to update
-                stmt = await conn.prepare(f"SELECT * FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+                stmt = await conn.prepare(
+                    f"SELECT * FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+                )
                 row = await stmt.fetchrow(collection.id, embedding_id)
                 return Embedding.from_record(row) if row else None
 
@@ -320,7 +406,7 @@ class DataAccessLayer:
                 f"""
                 UPDATE {table}
                 SET {set_clause}
-                WHERE collection_id = $1 AND embedding_id = $2
+                WHERE collection_id = $1::bigint AND embedding_id = $2::uuid
                 RETURNING *
                 """
             )
@@ -328,6 +414,22 @@ class DataAccessLayer:
             return Embedding.from_record(row) if row else None
 
         return await self._with_rls(allowed_authz, _query)
+
+    # async def delete_embedding(
+    #     self,
+    #     collection: Collection,
+    #     embedding_id: UUID,
+    #     allowed_authz: list[str],
+    # ) -> bool:
+    #     table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+
+    #     async def _query(conn):
+    #         result = await conn.execute(
+    #             f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2", collection.id, embedding_id
+    #         )
+    #         return result.startswith("DELETE")
+
+    #     return await self._with_rls(allowed_authz, _query)
 
     async def delete_embedding(
         self,
@@ -338,9 +440,8 @@ class DataAccessLayer:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
         async def _query(conn):
-            result = await conn.execute(
-                f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2", collection.id, embedding_id
-            )
+            stmt = await conn.prepare(f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2")
+            result = await stmt.execute(collection.id, embedding_id)
             return result.startswith("DELETE")
 
         return await self._with_rls(allowed_authz, _query)
