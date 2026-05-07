@@ -1,4 +1,3 @@
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -7,7 +6,7 @@ from urllib.parse import urljoin
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 
-from gen3_ai_model_repo.config import logging
+from gen3_ai_model_repo.services.storage_service import StorageService
 
 ai_models_router = APIRouter()
 
@@ -19,6 +18,8 @@ FAKE_COMMIT = "mock-commit-hash-123456"
 FAKE_ETAG = "mock-etag-123456"
 
 DOMAIN = "http://127.0.0.1:4141"
+
+storage_service = StorageService(BASE_FILES_DIR)
 
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}")
@@ -92,11 +93,11 @@ async def get_revision(namespace: str, repo: str, rev: str):
 async def head_file(namespace: str, repo: str, rev: str, path: str):
     path_parts = [namespace, repo]
     path_parts.extend(path.split("/"))
-    local_path = _get_local_file(path_parts)
-    content = _read_file(local_path)
+    local_path = storage_service.get_local_file(path_parts)
+    content = storage_service.read_file(local_path)
 
     size = len(content)
-    commit_hash, etag = _compute_hashes(content)
+    commit_hash, etag = storage_service.compute_hashes(content)
 
     # also mock the redirected signed URL locally via this same
     # web service. this will stream the file contents as if it
@@ -138,7 +139,7 @@ async def signed_url(path: str):
     This is necessary for large files and guarantees the
     client sees a proper `Content-Length` header.
     """
-    local_path = _get_local_file(path.split("/"))
+    local_path = storage_service.get_local_file(path.split("/"))
     file_size = local_path.stat().st_size
 
     media_type = "application/json" if path.endswith(".json") else "application/octet-stream"
@@ -164,20 +165,20 @@ async def signed_url(path: str):
     )
 
 
-def _get_local_file(path_parts: list[str]) -> Path:
-    local_path = BASE_FILES_DIR.joinpath(*path_parts)
-    logging.debug(f"looking for file: {local_path}")
-    if not local_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    logging.debug("found file!")
-    return local_path
+# def _get_local_file(path_parts: list[str]) -> Path:
+#     local_path = BASE_FILES_DIR.joinpath(*path_parts)
+#     logging.debug(f"looking for file: {local_path}")
+#     if not local_path.is_file():
+#         raise HTTPException(status_code=404, detail="File not found")
+#     logging.debug("found file!")
+#     return local_path
 
 
-def _read_file(local_path: Path) -> bytes:
-    return local_path.read_bytes()
+# def _read_file(local_path: Path) -> bytes:
+#     return local_path.read_bytes()
 
 
-def _compute_hashes(content: bytes) -> tuple[str, str]:
-    commit_hash = hashlib.sha256(content).hexdigest()
-    etag = hashlib.md5(content).hexdigest()
-    return commit_hash, etag
+# def _compute_hashes(content: bytes) -> tuple[str, str]:
+#     commit_hash = hashlib.sha256(content).hexdigest()
+#     etag = hashlib.md5(content).hexdigest()
+#     return commit_hash, etag
