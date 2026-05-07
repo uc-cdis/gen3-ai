@@ -418,12 +418,14 @@ source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
     { name = "common" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "asyncpg" },
     { name = "common", directory = "../../libraries/common" },
+    { name = "ruff", specifier = ">=0.15.12" },
 ]
 
 [package.metadata.requires-dev]
