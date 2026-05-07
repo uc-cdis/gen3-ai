@@ -17,7 +17,6 @@ CREATE TABLE embeddings_vector (
     embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     embedding VECTOR NOT NULL,
-    authz_version INT NOT NULL,
     authz TEXT[] NOT NULL,
     metadata JSONB DEFAULT '{}'::JSONB,
 
@@ -32,7 +31,6 @@ CREATE TABLE embeddings_halfvec (
     embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     embedding HALFVEC NOT NULL,
-    authz_version INT NOT NULL,
     authz TEXT[] NOT NULL,
     metadata JSONB DEFAULT '{}'::JSONB,
 
@@ -77,19 +75,15 @@ ALTER TABLE embeddings_halfvec ENABLE ROW LEVEL SECURITY;
 CREATE POLICY authz_policy_vector ON embeddings_vector
   USING (
     authz && current_setting('app.allowed_authz', true)::text[]
-    AND authz_version = 0
   )
   WITH CHECK (
     authz && current_setting('app.allowed_authz', true)::text[]
-    AND authz_version = 0
   );
 
 CREATE POLICY authz_policy_halfvec ON embeddings_halfvec
   USING (
     authz && current_setting('app.allowed_authz', true)::text[]
-    AND authz_version = 0
   )
   WITH CHECK (
     authz && current_setting('app.allowed_authz', true)::text[]
-    AND authz_version = 0
   );

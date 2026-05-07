@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import (
-    get_allowed_authz_for_request,
     parse_and_auth_request,
 )
 from gen3_embeddings.database.db import Collection, DataAccessLayer, Embedding, get_data_access_layer
@@ -65,8 +64,6 @@ async def search_in_collection(
     if len(query_vector) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
-    allowed_authz = await get_allowed_authz_for_request(request)
-
     rows = await dal.search_embeddings_in_collection(
         collection=collection,
         query_vector=query_vector,
@@ -75,7 +72,6 @@ async def search_in_collection(
         max_value=body.max_value,
         distance_metric=body.distance_metric,
         filters=body.filters,
-        allowed_authz=allowed_authz,
     )
 
     results: list[SingleSearchResult] = []
@@ -136,7 +132,6 @@ async def search_across_collections(
         names = [v.strip() for v in collections.split(",") if v.strip()]
         collections_list: list[Collection] = []
         for name in names:
-            await parse_and_auth_request(request, name)
             col = await dal.get_collection_by_name(name)
             if not col:
                 raise HTTPException(status_code=400, detail=f"Invalid collection: {name}")
@@ -167,8 +162,6 @@ async def search_across_collections(
     if len(query_vector) != dims:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
-    allowed_authz = await get_allowed_authz_for_request(request)
-
     rows = await dal.search_embeddings_across_collections(
         collections=collections_list,
         query_vector=query_vector,
@@ -177,7 +170,6 @@ async def search_across_collections(
         max_value=body.max_value,
         distance_metric=body.distance_metric,
         filters=body.filters,
-        allowed_authz=allowed_authz,
     )
 
     collection_by_id = {col.id: col for col in collections_list}

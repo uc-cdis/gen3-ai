@@ -22,9 +22,12 @@ def build_search_sql(
     table: str,
     distance_metric: DistanceMetric,
     single_collection: bool,
-    collection_ids_param: str,  # "$1" or "$1::bigint[]"
-    vector_param: str,  # e.g. "$2::vector" or "$2::halfvec"
-    top_k_param: str,  # "$3"
+    # "$1" or "$1::bigint[]"
+    collection_ids_param: str,
+    # e.g. "$2::vector" or "$2::halfvec"
+    vector_param: str,
+    # "$3"
+    top_k_param: str,
     filters: dict[str, str] | None,
     min_value: float | None,
     max_value: float | None,

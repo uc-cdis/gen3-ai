@@ -35,7 +35,6 @@ async def list_collections(
     Returns:
         PaginatedCollectionsResponse containing all collections.
     """
-    await parse_and_auth_request(request, "")
     offset = (page - 1) * page_size
     limit = page_size
 
@@ -74,7 +73,6 @@ async def create_collection(
     Returns:
         CollectionModel for the created collection.
     """
-    await parse_and_auth_request(request, body.collection_name)
     col = await dal.create_collection(
         collection_name=body.collection_name,
         description=body.description,

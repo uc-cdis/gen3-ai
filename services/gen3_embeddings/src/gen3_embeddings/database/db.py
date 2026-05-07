@@ -13,6 +13,11 @@ of how to manage connections or interact with the db directly. Connections are
 managed via an asyncpg connection pool and FastAPI's dependency injection
 provides a DAL instance per-request.
 
+Each DAL instance is also bound to the current user's authorization context:
+the caller's allowed authz resources are computed once (via the request) and
+stored on the DAL instance, so downstream DAL methods do not need to be passed
+`allowed_authz` explicitly.
+
 DETAILS
 -------
 
@@ -30,20 +35,27 @@ What do we do in this file?
       leaking raw SQL into the higher-level web app endpoint code
     - DAL methods use prepared statements where appropriate as a security and
       efficiency measure
+    - Each DAL instance carries a per-request `allowed_authz` list, derived
+      from the current user's Arborist authz mapping
 
 - We provide a `get_data_access_layer()` function which yields an instance
-  of the DAL bound to the global connection pool
-    - This function is used as a FastAPI dependency, so each request handler
-      can receive a DAL instance without managing connections manually
+  of the DAL bound to:
+    - the global asyncpg connection pool, and
+    - the current request's `allowed_authz` values
+  This function is used as a FastAPI dependency, so each request handler
+  can receive a DAL instance without managing connections or authz context
+  manually.
 
-- We implement Row Level Security (RLS) integration
-    - Before each logical operation, `_with_rls()` sets a per-transaction
-      PostgreSQL parameter `app.allowed_authz` using:
+- We implement Row Level Security (RLS) integration for embeddings tables
+    - Before each logical operation on embeddings, `_with_rls()` sets a
+      per-transaction PostgreSQL parameter `app.allowed_authz` using:
           SELECT set_config('app.allowed_authz', $1, true);
-      where `$1` is a text[] of the user's allowed authz resources
+      where `$1` is a text representation of the user's allowed authz resources
     - Because `set_config(..., true)` uses a local/transaction-scoped setting,
       each request runs with its own authz context even when using a pooled
       connection
+    - The embeddings tables (e.g., `embeddings_vector`, `embeddings_halfvec`)
+      define RLS policies that consult `current_setting('app.allowed_authz', true)`
 
 - We support multiple vector types as isolated domains
     - Collections store a `vector_type` (e.g., 'vector', 'halfvec')
@@ -54,6 +66,12 @@ What do we do in this file?
     - Search methods use pgvector operators and functions and expose
       a uniform interface with configurable distance metrics, min/max thresholds,
       and filters on metadata
+
+- We apply authz-aware filtering for collections at the application layer
+    - Collections themselves do not have RLS or authz tags stored in the table
+    - Instead, the DAL derives allowed collection names from the per-request
+      `allowed_authz` paths (e.g., "/vectorstore/collections/{collection_name}")
+      and filters collection-level queries accordingly where needed
 """
 
 import ast
@@ -65,9 +83,10 @@ from uuid import UUID
 
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from gen3_embeddings import config
+from gen3_embeddings.auth import get_allowed_authz_for_request
 from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
@@ -81,9 +100,11 @@ async def get_pool():
     return _pool
 
 
-async def get_data_access_layer():
+async def get_data_access_layer(request: Request):
     pool = await get_pool()
-    yield DataAccessLayer(pool)
+    allowed_authz = await get_allowed_authz_for_request(request)
+    dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
+    yield dal
 
 
 @dataclass
@@ -108,7 +129,6 @@ class Embedding:
     collection_id: int
     embedding_id: UUID
     embedding: list[float]
-    authz_version: int
     authz: list[str]
     metadata: dict | None
     created_at: datetime | None
@@ -145,10 +165,12 @@ class Embedding:
 
 
 class DataAccessLayer:
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: asyncpg.Pool, allowed_authz: list[str] | None = None):
         self.pool = pool
+        # Empty list means "no resources allowed", which is valid for RLS
+        self.allowed_authz = allowed_authz or []
 
-    async def _with_rls(self, allowed_authz: list[str], fn, *args, **kwargs):
+    async def _with_rls(self, fn, *args, **kwargs):
         """
         Run a DB operation with RLS (row level security) configured
         via the provided `allowed_authz` values.
@@ -159,13 +181,40 @@ class DataAccessLayer:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 # Make RLS safe even if user has no allowed resources
-                allowed_array = "{" + ",".join(allowed_authz) + "}"
+                allowed_array = "{" + ",".join(self.allowed_authz) + "}"
                 # the true value means is_local is set to true, the new value will only apply during the current transaction.
                 await conn.execute("SELECT set_config('app.allowed_authz', $1::text, true)", allowed_array)
                 return await fn(conn, *args, **kwargs)
 
     def _get_embeddings_table_and_cast_for_collection(self, collection: Collection) -> tuple[str, str]:
         return get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
+    def _get_allowed_collection_names_from_allowed_authz(self) -> set[str]:
+        """
+        Compute the collection names the user can access from self.allowed_authz,
+        based on the convention:
+
+          /vectorstore/collections
+          /vectorstore/collections/{collection_name}
+        """
+        base = "/vectorstore/collections"
+        allowed: set[str] = set()
+
+        for item in self.allowed_authz:
+            if not isinstance(item, str):
+                continue
+            if item == base:
+                # base resource: may mean "can access all collections", depending on policy
+                # for now, we'll pass
+                continue
+            if item.startswith(base + "/"):
+                # e.g. "/vectorstore/collections/my_collection"
+                parts = item.split("/")
+                if parts:
+                    name = parts[-1]
+                    if name:
+                        allowed.add(name)
+        return allowed
 
     async def create_collection(
         self,
@@ -175,6 +224,13 @@ class DataAccessLayer:
         ai_model_name: str | None = None,
         vector_type: str = "vector",
     ) -> Collection:
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+
+        if collection_name not in allowed_names:
+            raise HTTPException(
+                status_code=400, detail=f"Not authorized to create collection with name {collection_name}"
+            )
+
         async with self.pool.acquire() as conn:
             try:
                 stmt = await conn.prepare(
@@ -196,18 +252,34 @@ class DataAccessLayer:
             return Collection.from_record(row)
 
     async def get_collection_by_name(self, collection_name: str) -> Collection | None:
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+
+        if collection_name not in allowed_names:
+            return None
+
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
             row = await stmt.fetchrow(collection_name)
             return Collection.from_record(row) if row else None
 
     async def get_collection_by_id(self, collection_id: int) -> Collection | None:
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        if not allowed_names:
+            return None
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = $1::bigint")
             row = await stmt.fetchrow(collection_id)
-            return Collection.from_record(row) if row else None
+            if row and row.collection_name in allowed_names:
+                return Collection.from_record(row)
+            else:
+                return None
 
     async def update_collection(self, collection_name: str, description: str | None) -> Collection | None:
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+
+        if collection_name not in allowed_names:
+            return None
+
         set_parts = []
         params = [collection_name]
         param_idx = 2
@@ -246,6 +318,11 @@ class DataAccessLayer:
     #         return result.startswith("DELETE")
 
     async def delete_collection(self, collection_name: str) -> bool:
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+
+        if collection_name not in allowed_names:
+            return False
+
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
             result = await stmt.execute(collection_name)
@@ -256,42 +333,32 @@ class DataAccessLayer:
         offset: int = 0,
         limit: int = 100,
     ) -> list[Collection]:
-        async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("SELECT * FROM collections ORDER BY created_at LIMIT $2::int OFFSET $1::int")
-            rows = await stmt.fetch(offset, limit)
-            return [Collection.from_record(r) for r in rows]
+        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
 
-    async def create_embedding(
-        self,
-        collection: Collection,
-        embedding: list[float],
-        authz_version: int,
-        authz: list[str],
-        metadata: dict | None = None,
-    ) -> Embedding:
-        table, cast = self._get_embeddings_table_and_cast_for_collection(collection)
+        # If no allowed names, return empty result
+        if not allowed_names:
+            return []
+
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare(
-                f"""
-                INSERT INTO {table}
-                (collection_id, embedding, authz_version, authz, metadata)
-                VALUES ($1::bigint, $2{cast}, $3::int, $4::text[], $5::jsonb)
-                RETURNING *
+                """
+                SELECT *
+                FROM collections
+                WHERE collection_name = ANY($1::text[])
+                ORDER BY created_at
+                LIMIT $3::int
+                OFFSET $2::int
                 """
             )
-            row = await stmt.fetchrow(collection.id, embedding, authz_version, authz, metadata or {})
-            if not row:
-                raise HTTPException(status_code=400, detail="Failed to create embedding")
-            return Embedding.from_record(row)
+            rows = await stmt.fetch(list(allowed_names), offset, limit)
+            return [Collection.from_record(r) for r in rows]
 
     async def create_embeddings_bulk(
         self,
         collection: Collection,
         embeddings: list[list[float]],
-        authz_version: int,
         authz: list[str],
         metadata_list: list[dict] | None,
-        allowed_authz: list[str],
     ) -> list[Embedding]:
         """
         TODO: embeddings need to have same dim?
@@ -305,10 +372,8 @@ class DataAccessLayer:
         Args:
             collection: collection to insert into.
             embeddings: List of embedding vectors.
-            authz_version: Authorization schema version.
             authz: Authorization tags.
             metadata_list: Optional list of metadata dicts (one per embedding).
-            allowed_authz: RLS authz tags for the user.
 
         Returns:
             List of created Embedding instances.
@@ -329,15 +394,14 @@ class DataAccessLayer:
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO {table}
-                    (collection_id, embedding, authz_version, authz, metadata)
-                    VALUES ($1::bigint, $2{cast}, $3::int, $4::text[], $5::jsonb)
+                    (collection_id, embedding, authz, metadata)
+                    VALUES ($1::bigint, $2{cast}, $3::text[], $4::jsonb)
                     RETURNING *
                     """,
                     collection.id,
-                    json.dumps(emb_vec),
-                    authz_version,
+                    emb_vec,
                     authz,
-                    json.dumps(meta or {}),
+                    meta or {},
                 )
                 if not row:
                     raise HTTPException(
@@ -347,13 +411,12 @@ class DataAccessLayer:
                 results.append(Embedding.from_record(row))
             return results
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def get_embedding_by_collection_and_id(
         self,
         collection: Collection,
         embedding_id: UUID,
-        allowed_authz: list[str],
     ) -> Embedding | None:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
@@ -364,7 +427,7 @@ class DataAccessLayer:
             row = await stmt.fetchrow(collection.id, embedding_id)
             return Embedding.from_record(row) if row else None
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def update_embedding(
         self,
@@ -372,7 +435,6 @@ class DataAccessLayer:
         embedding_id: UUID,
         embedding: list[float] | None,
         metadata: dict | None,
-        allowed_authz: list[str],
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
         table, vector_cast = self._get_embeddings_table_and_cast_for_collection(collection)
@@ -415,7 +477,7 @@ class DataAccessLayer:
             row = await stmt.fetchrow(*params)
             return Embedding.from_record(row) if row else None
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     # async def delete_embedding(
     #     self,
@@ -437,7 +499,6 @@ class DataAccessLayer:
         self,
         collection: Collection,
         embedding_id: UUID,
-        allowed_authz: list[str],
     ) -> bool:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
@@ -448,14 +509,13 @@ class DataAccessLayer:
             result = await stmt.execute(collection.id, embedding_id)
             return result.startswith("DELETE")
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def list_embeddings_in_collection(
         self,
         collection: Collection,
         offset: int,
         limit: int,
-        allowed_authz: list[str],
     ) -> list[Embedding]:
         table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
 
@@ -472,13 +532,12 @@ class DataAccessLayer:
             rows = await stmt.fetch(collection.id, offset, limit)
             return [Embedding.from_record(r) for r in rows]
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def get_embeddings_bulk(
         self,
         embedding_ids: list[UUID],
         vector_type: VectorType | None,
-        allowed_authz: list[str],
     ) -> list[Embedding]:
         """
         Fetch embeddings by IDs from the appropriate table(s).
@@ -508,7 +567,7 @@ class DataAccessLayer:
 
             return results
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def get_collection_by_id_bulk(self, collection_ids: list[int]) -> list[Collection]:
         async with self.pool.acquire() as conn:
@@ -527,7 +586,6 @@ class DataAccessLayer:
         max_value: float | None,
         distance_metric: DistanceMetric,
         filters: dict[str, str] | None,
-        allowed_authz: list[str],
     ) -> list[asyncpg.Record]:
         """
         Search embeddings within a single collection using the collection's vector_type.
@@ -555,7 +613,7 @@ class DataAccessLayer:
             rows = await stmt.fetch(*params)
             return rows
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)
 
     async def search_embeddings_across_collections(
         self,
@@ -566,7 +624,6 @@ class DataAccessLayer:
         max_value: float | None,
         distance_metric: DistanceMetric,
         filters: dict[str, str] | None,
-        allowed_authz: list[str],
     ) -> list[asyncpg.Record]:
         """
         Search embeddings across multiple collections of the SAME vector_type.
@@ -607,4 +664,4 @@ class DataAccessLayer:
             rows = await stmt.fetch(*params)
             return rows
 
-        return await self._with_rls(allowed_authz, _query)
+        return await self._with_rls(_query)

@@ -44,7 +44,6 @@ class PaginatedCollectionsResponse(BaseModel):
 class EmbeddingInfo(BaseModel):
     collection_id: int
     authz: list[str]
-    authz_version: int
     metadata: dict | None = None
     self: str
 

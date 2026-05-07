@@ -401,7 +401,6 @@ DB_PASSWORD=app_user_pass
 DB_DATABASE=testdb
 DEBUG=True
 ARBORIST_URL="http://localhost:4280"
-GEN3_EMBEDDINGS_AUTHZ_SERVICE_RESOURCE="/vector/indices"
 ```
 run this under gen3-ai folder
 ```bash
