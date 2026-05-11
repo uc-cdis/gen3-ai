@@ -6,9 +6,13 @@ from urllib.parse import urljoin
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 
+from gen3_ai_model_repo.services.metadata_service import MetadataService
+from gen3_ai_model_repo.services.response_service import ResponseService
 from gen3_ai_model_repo.services.storage_service import StorageService
+from gen3_ai_model_repo.services.url_service import URLService
 
 ai_models_router = APIRouter()
+
 
 # note that the folder structure in BASE_FILES_DIR must be:
 #   BASE_FILES_DIR / {namespace} / {repo}
@@ -20,6 +24,10 @@ FAKE_ETAG = "mock-etag-123456"
 DOMAIN = "http://127.0.0.1:4141"
 
 storage_service = StorageService(BASE_FILES_DIR)
+
+metadata_service = MetadataService()
+url_service = URLService()
+response_service = ResponseService()
 
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}")
@@ -80,13 +88,7 @@ async def list_repo_tree(
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}")
 async def get_revision(namespace: str, repo: str, rev: str):
-    return {
-        "id": f"{namespace}/{repo}",
-        "revision": rev,
-        "sha": FAKE_COMMIT,
-        "commit": FAKE_COMMIT,
-        "tags": ["latest", "main"],
-    }
+    return metadata_service.get_revision(namespace, repo, rev)
 
 
 @ai_models_router.head("/{namespace}/{repo}/resolve/{rev}/{path:path}")
@@ -102,18 +104,9 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     # also mock the redirected signed URL locally via this same
     # web service. this will stream the file contents as if it
     # was a signed URL
-    signed_url = urljoin(
-        f"{DOMAIN}/signed-url/",
-        f"{namespace}/{repo}/{path}",
-    )
+    signed_url = url_service.build_signed_url(namespace, repo, rev, path)
 
-    headers = {
-        "X-Repo-Commit": commit_hash,
-        "X-Linked-Etag": etag,
-        "X-Linked-Size": str(size),
-        "Location": signed_url,
-    }
-    return Response(status_code=status.HTTP_200_OK, headers=headers)
+    return response_service.build_head_response(commit_hash, etag, size, signed_url)
 
 
 @ai_models_router.get("/{namespace}/{repo}/resolve/{rev}/{path:path}")
@@ -163,22 +156,3 @@ async def signed_url(path: str):
         media_type=media_type,
         headers=headers,
     )
-
-
-# def _get_local_file(path_parts: list[str]) -> Path:
-#     local_path = BASE_FILES_DIR.joinpath(*path_parts)
-#     logging.debug(f"looking for file: {local_path}")
-#     if not local_path.is_file():
-#         raise HTTPException(status_code=404, detail="File not found")
-#     logging.debug("found file!")
-#     return local_path
-
-
-# def _read_file(local_path: Path) -> bytes:
-#     return local_path.read_bytes()
-
-
-# def _compute_hashes(content: bytes) -> tuple[str, str]:
-#     commit_hash = hashlib.sha256(content).hexdigest()
-#     etag = hashlib.md5(content).hexdigest()
-#     return commit_hash, etag
