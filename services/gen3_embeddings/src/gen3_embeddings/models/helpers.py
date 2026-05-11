@@ -85,7 +85,6 @@ def embedding_to_result(
         info = EmbeddingInfo(
             collection_id=emb.collection_id,
             authz=emb.authz,
-            authz_version=emb.authz_version,
             self=build_embedding_self_url(collection_name, emb.embedding_id),
             metadata=emb.metadata,
         )

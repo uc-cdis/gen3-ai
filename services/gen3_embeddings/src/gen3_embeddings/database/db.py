@@ -186,9 +186,6 @@ class DataAccessLayer:
                 await conn.execute("SELECT set_config('app.allowed_authz', $1::text, true)", allowed_array)
                 return await fn(conn, *args, **kwargs)
 
-    def _get_embeddings_table_and_cast_for_collection(self, collection: Collection) -> tuple[str, str]:
-        return get_embeddings_table_and_cast(VectorType(collection.vector_type))
-
     def _get_allowed_collection_names_from_allowed_authz(self) -> set[str]:
         """
         Compute the collection names the user can access from self.allowed_authz,
@@ -222,9 +219,9 @@ class DataAccessLayer:
         description: str,
         dimensions: int,
         ai_model_name: str | None = None,
-        vector_type: str = "vector",
+        vector_type: VectorType = VectorType.vector,
     ) -> Collection:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
         if collection_name not in allowed_names:
             raise HTTPException(
@@ -240,7 +237,7 @@ class DataAccessLayer:
                     RETURNING *
                     """
                 )
-                row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions, vector_type)
+                row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions, vector_type.value)
             except UniqueViolationError:
                 # collection_name already exists
                 raise HTTPException(
@@ -252,7 +249,7 @@ class DataAccessLayer:
             return Collection.from_record(row)
 
     async def get_collection_by_name(self, collection_name: str) -> Collection | None:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
         if collection_name not in allowed_names:
             return None
@@ -263,7 +260,7 @@ class DataAccessLayer:
             return Collection.from_record(row) if row else None
 
     async def get_collection_by_id(self, collection_id: int) -> Collection | None:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
         if not allowed_names:
             return None
         async with self.pool.acquire() as conn:
@@ -275,7 +272,7 @@ class DataAccessLayer:
                 return None
 
     async def update_collection(self, collection_name: str, description: str | None) -> Collection | None:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
         if collection_name not in allowed_names:
             return None
@@ -309,31 +306,36 @@ class DataAccessLayer:
             row = await stmt.fetchrow(*params)
             return Collection.from_record(row) if row else None
 
-    # async def delete_collection(self, collection_name: str) -> bool:
-    #     async with self.pool.acquire() as conn:
-    #         result = await conn.execute(
-    #             "DELETE FROM collections WHERE collection_name = $1",
-    #             collection_name,
-    #         )
-    #         return result.startswith("DELETE")
-
     async def delete_collection(self, collection_name: str) -> bool:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
         if collection_name not in allowed_names:
             return False
 
         async with self.pool.acquire() as conn:
-            stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
-            result = await stmt.execute(collection_name)
+            result = await conn.execute(
+                "DELETE FROM collections WHERE collection_name = $1::text",
+                collection_name,
+            )
             return result.startswith("DELETE")
+
+    # async def delete_collection(self, collection_name: str) -> bool:
+    #     allowed_names = self._get_allowed_collection_names_from_allowed_authz()
+
+    #     if collection_name not in allowed_names:
+    #         return False
+
+    #     async with self.pool.acquire() as conn:
+    #         stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
+    #         result = await stmt.fetch(collection_name)
+    #         return result.startswith("DELETE")
 
     async def list_collections(
         self,
         offset: int = 0,
         limit: int = 100,
     ) -> list[Collection]:
-        allowed_names = self.get_allowed_collection_names_from_allowed_authz()
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
         # If no allowed names, return empty result
         if not allowed_names:
@@ -361,7 +363,6 @@ class DataAccessLayer:
         metadata_list: list[dict] | None,
     ) -> list[Embedding]:
         """
-        TODO: embeddings need to have same dim?
         TODO: why emb_vec and meta have to be string? and the vector return from
         TODO: asyncpg.exceptions.InsufficientPrivilegeError: new row violates row-level security policy for table "embeddings"
         the database is string instead of list of float? Current temp fix is convert
@@ -386,7 +387,7 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
-        table, cast = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
             results: list[Embedding] = []
@@ -399,9 +400,9 @@ class DataAccessLayer:
                     RETURNING *
                     """,
                     collection.id,
-                    emb_vec,
+                    json.dumps(emb_vec),
                     authz,
-                    meta or {},
+                    json.dumps(meta or {}),
                 )
                 if not row:
                     raise HTTPException(
@@ -418,7 +419,7 @@ class DataAccessLayer:
         collection: Collection,
         embedding_id: UUID,
     ) -> Embedding | None:
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
             stmt = await conn.prepare(
@@ -437,7 +438,7 @@ class DataAccessLayer:
         metadata: dict | None,
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
-        table, vector_cast = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
             set_parts = []
@@ -446,14 +447,14 @@ class DataAccessLayer:
 
             if embedding is not None:
                 set_parts.append(f"embedding = ${param_idx}{vector_cast}")
-                # params.append(json.dumps(embedding))
-                params.append(embedding)
+                params.append(json.dumps(embedding))
+                # params.append(embedding)
                 param_idx += 1
 
             if metadata is not None:
                 set_parts.append(f"metadata = ${param_idx}::jsonb")
-                # params.append(json.dumps(metadata))
-                params.append(metadata)
+                params.append(json.dumps(metadata))
+                # params.append(metadata)
                 param_idx += 1
 
             if not set_parts:
@@ -479,37 +480,38 @@ class DataAccessLayer:
 
         return await self._with_rls(_query)
 
-    # async def delete_embedding(
-    #     self,
-    #     collection: Collection,
-    #     embedding_id: UUID,
-    #     allowed_authz: list[str],
-    # ) -> bool:
-    #     table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
-
-    #     async def _query(conn):
-    #         result = await conn.execute(
-    #             f"DELETE FROM {table} WHERE collection_id = $1 AND embedding_id = $2", collection.id, embedding_id
-    #         )
-    #         return result.startswith("DELETE")
-
-    #     return await self._with_rls(allowed_authz, _query)
-
     async def delete_embedding(
         self,
         collection: Collection,
         embedding_id: UUID,
     ) -> bool:
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            stmt = await conn.prepare(
-                f"DELETE FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+            result = await conn.execute(
+                f"DELETE FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid",
+                collection.id,
+                embedding_id,
             )
-            result = await stmt.execute(collection.id, embedding_id)
             return result.startswith("DELETE")
 
         return await self._with_rls(_query)
+
+    # async def delete_embedding(
+    #     self,
+    #     collection: Collection,
+    #     embedding_id: UUID,
+    # ) -> bool:
+    #     table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
+    #     async def _query(conn):
+    #         stmt = await conn.prepare(
+    #             f"DELETE FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+    #         )
+    #         result = await stmt.execute(collection.id, embedding_id)
+    #         return result.startswith("DELETE")
+
+    #     return await self._with_rls(_query)
 
     async def list_embeddings_in_collection(
         self,
@@ -517,7 +519,7 @@ class DataAccessLayer:
         offset: int,
         limit: int,
     ) -> list[Embedding]:
-        table, _ = self._get_embeddings_table_and_cast_for_collection(collection)
+        table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
             stmt = await conn.prepare(
@@ -570,10 +572,17 @@ class DataAccessLayer:
         return await self._with_rls(_query)
 
     async def get_collection_by_id_bulk(self, collection_ids: list[int]) -> list[Collection]:
+        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
+
+        # If user has no allowed collection names, return empty
+        if not allowed_names:
+            return []
+
         async with self.pool.acquire() as conn:
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = ANY($1::bigint[])")
             rows = await stmt.fetch(collection_ids)
-            return [Collection.from_record(r) for r in rows]
+            filtered_rows = [row for row in rows if row["collection_name"] in allowed_names]
+            return [Collection.from_record(r) for r in filtered_rows]
 
     # -------- Search --------
 
@@ -593,7 +602,7 @@ class DataAccessLayer:
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         # $1: collection_id, $2: vector, $3: top_k
-        params: list[Any] = [collection.id, query_vector, top_k]
+        params: list[Any] = [collection.id, json.dumps(query_vector), top_k]
 
         sql, extra_params = build_search_sql(
             table=table,
@@ -624,27 +633,40 @@ class DataAccessLayer:
         max_value: float | None,
         distance_metric: DistanceMetric,
         filters: dict[str, str] | None,
+        vector_type: VectorType = VectorType.vector,
     ) -> list[asyncpg.Record]:
         """
         Search embeddings across multiple collections of the SAME vector_type.
+
+        The collections list will be filtered to only those whose vector_type matches
+        the given `vector_type` AND whose dimensions match the query vector length.
         """
         if not collections:
             return []
 
-        # Ensure they all share the same vector_type
-        vec_type = collections[0].vector_type
-        for col in collections:
-            if col.vector_type != vec_type:
-                raise HTTPException(
-                    status_code=400,
-                    detail="All collections must share the same vector_type for a single search",
-                )
+        # Filter collections by vector_type and dimensions
+        filtered_collections: list[Collection] = []
+        query_dims = len(query_vector)
 
-        table, cast = get_embeddings_table_and_cast(VectorType(vec_type))
-        collection_ids = [col.id for col in collections]
+        for col in collections:
+            if col.vector_type == vector_type.value and col.dimensions == query_dims:
+                filtered_collections.append(col)
+
+        if not filtered_collections:
+            # No collections meet the requested vector_type and dimension
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No collections available with the requested vector_type "
+                    f"'{vector_type.value}' and dimensions {query_dims}"
+                ),
+            )
+
+        table, cast = get_embeddings_table_and_cast(vector_type)
+        collection_ids = [col.id for col in filtered_collections]
 
         # $1: collection_ids, $2: vector, $3: top_k
-        params: list[Any] = [collection_ids, query_vector, top_k]
+        params: list[Any] = [collection_ids, json.dumps(query_vector), top_k]
 
         sql, extra_params = build_search_sql(
             table=table,

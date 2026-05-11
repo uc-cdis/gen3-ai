@@ -11,13 +11,18 @@ from gen3_embeddings.models.schemas import (
     UpdateCollectionBody,
 )
 
-collections_router = APIRouter(tags=["Vectorstore Collections"])
+collections_router = APIRouter()
 
 
 @collections_router.get(
     "/vectorstore/collections",
     response_model=PaginatedCollectionsResponse,
     summary="Read all collections",
+    tags=["Vectorstore Collections"],
+)
+@collections_router.get(
+    "/vectorstore/collections/",
+    include_in_schema=False,
 )
 async def list_collections(
     request: Request,
@@ -56,6 +61,11 @@ async def list_collections(
     "/vectorstore/collections",
     response_model=CollectionModel,
     summary="Create collection",
+    tags=["Vectorstore Collections"],
+)
+@collections_router.post(
+    "/vectorstore/collections/",
+    include_in_schema=False,
 )
 async def create_collection(
     request: Request,
@@ -77,7 +87,7 @@ async def create_collection(
         collection_name=body.collection_name,
         description=body.description,
         dimensions=body.dimensions,
-        vector_type=body.vector_type.value,
+        vector_type=body.vector_type,
     )
     return collection_to_model(col)
 
@@ -86,6 +96,12 @@ async def create_collection(
     "/vectorstore/collections/{collection_name}",
     response_model=CollectionModel,
     summary="Read collection info",
+    tags=["Vectorstore Collections"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@collections_router.get(
+    "/vectorstore/collections/{collection_name}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_collection(collection_name: str, dal: DataAccessLayer = Depends(get_data_access_layer)):
@@ -111,6 +127,12 @@ async def get_collection(collection_name: str, dal: DataAccessLayer = Depends(ge
 @collections_router.patch(
     "/vectorstore/collections/{collection_name}",
     summary="Update collection info",
+    tags=["Vectorstore Collections"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@collections_router.patch(
+    "/vectorstore/collections/{collection_name}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_collection(
@@ -144,6 +166,12 @@ async def update_collection(
     "/vectorstore/collections/{collection_name}",
     status_code=204,
     summary="Delete collection",
+    tags=["Vectorstore Collections"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@collections_router.delete(
+    "/vectorstore/collections/{collection_name}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_collection(collection_name: str, dal: DataAccessLayer = Depends(get_data_access_layer)):

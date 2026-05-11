@@ -21,7 +21,7 @@ from gen3_embeddings.models.schemas import (
     UpdateEmbeddingBody,
 )
 
-embeddings_router = APIRouter(tags=["Embeddings", "Embeddings (Bulk)"])
+embeddings_router = APIRouter()
 
 
 @embeddings_router.get(
@@ -29,6 +29,12 @@ embeddings_router = APIRouter(tags=["Embeddings", "Embeddings (Bulk)"])
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
     summary="Read embedding from collection",
+    tags=["Embeddings"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.get(
+    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embedding_from_collection(
@@ -71,6 +77,12 @@ async def get_embedding_from_collection(
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
     summary="Update embedding in collection",
+    tags=["Embeddings"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.put(
+    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_embedding_in_collection(
@@ -120,6 +132,12 @@ async def update_embedding_in_collection(
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     status_code=204,
     summary="Delete embedding from collection",
+    tags=["Embeddings"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.delete(
+    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_embedding(
@@ -161,6 +179,12 @@ async def delete_embedding(
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=PaginatedEmbeddingResponse,
     summary="Read all embeddings from collection",
+    tags=["Embeddings"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.get(
+    "/vectorstore/collections/{collection_name}/embeddings/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def list_embeddings_in_collection(
@@ -225,6 +249,12 @@ async def list_embeddings_in_collection(
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create embeddings in collection",
+    tags=["Embeddings"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.post(
+    "/vectorstore/collections/{collection_name}/embeddings/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def create_embeddings_in_collection(
@@ -238,8 +268,7 @@ async def create_embeddings_in_collection(
     """
 
     TODO: implementaion for StringArrayInput and ai_model
-    TODO: auth related
-    TODO: work for authz_version
+
     Create one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
@@ -288,7 +317,6 @@ async def create_embeddings_in_collection(
     created = await dal.create_embeddings_bulk(
         collection=collection,
         embeddings=vectors,
-        authz_version=0,
         authz=[get_authz_resource_path_from_collection_name(collection_name)],
         metadata_list=metadata_list,
     )
@@ -306,7 +334,12 @@ async def create_embeddings_in_collection(
 @embeddings_router.post(
     "/embeddings/bulk",
     response_model=EmbeddingResponseWithCollections,
+    tags=["Embeddings (Bulk Read)"],
     summary="Read select embeddings from unknown collections",
+)
+@embeddings_router.post(
+    "/embeddings/bulk/",
+    include_in_schema=False,
 )
 async def get_embeddings_bulk_unknown_collections(
     request: Request,
@@ -315,9 +348,6 @@ async def get_embeddings_bulk_unknown_collections(
     dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
-    TODO: collections list is needed as return?
-    TODO: update dal.get_collection_by_id_bulk. remove duplicates?; and handle its auth
-
     Read a selection of embeddings by UUID across any collection.
 
     Args:
@@ -340,7 +370,7 @@ async def get_embeddings_bulk_unknown_collections(
 
     emb_by_id = {e.embedding_id: e for e in embs}
 
-    collection_ids = [e.collection_id for e in embs]
+    collection_ids = list({e.collection_id for e in embs})
     collections: dict[int, Collection] = {}
 
     col_list = await dal.get_collection_by_id_bulk(collection_ids)
@@ -379,6 +409,12 @@ async def get_embeddings_bulk_unknown_collections(
     "/vectorstore/collections/{collection_name}/embeddings/bulk",
     response_model=EmbeddingResponse,
     summary="Read select embeddings from collection",
+    tags=["Embeddings (Bulk Read)"],
+    dependencies=[Depends(parse_and_auth_request)],
+)
+@embeddings_router.post(
+    "/vectorstore/collections/{collection_name}/embeddings/bulk/",
+    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embeddings_bulk_from_collection(
@@ -412,6 +448,7 @@ async def get_embeddings_bulk_from_collection(
 
     embs = await dal.get_embeddings_bulk(
         embedding_ids=embedding_uuids,
+        vector_type=None,
     )
     # Filter to the given collection
     embs = [e for e in embs if e.collection_id == collection.id]

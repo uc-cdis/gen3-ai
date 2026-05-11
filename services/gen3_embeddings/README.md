@@ -69,27 +69,118 @@ CREATE ROLE app_user
   NOCREATEROLE
   NOINHERIT;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections        TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_vector  TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_halfvec TO app_user;
 
 
-INSERT INTO collections (collection_name, description, ai_model_name, dimensions)
+INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
 VALUES
-  ('noaccess', 'RLS test collection', 'test-model', 3),
-  ('public', 'RLS test collection', 'test-model', 3),
-  ('team42', 'RLS test collection', 'test-model', 3),
-  ('internal', 'RLS test collection', 'test-model', 3),
-  ('team7', 'RLS test collection', 'test-model', 3)
-RETURNING id;
+  ('noaccess', 'noaccess collection', 'test-model', 3, 'vector'),
+  ('public',   'public collection', 'test-model', 3, 'vector'),
+  ('internal',   'internal collection', 'test-model', 3, 'vector'),
+  ('d3vector', 'd3 vector collection', 'test-model', 3, 'vector'),
+  ('d200vector',    'd200 vector collection', 'test-model', 200, 'vector'),
+  ('d3000halfvec',  'd5 halfvec collection', 'test-model', 3000, 'halfvec'),
+  ('d3halfvec', 'd3 halfvec collection', 'test-model', 3, 'halfvec')
+RETURNING *;
+
+INSERT INTO embeddings_vector (collection_id, embedding, authz, metadata)
+SELECT
+    1 AS collection_id,  -- noaccess
+    FORMAT('[%s,%s,%s]', g.i, g.i + 1, g.i + 2)::vector AS embedding,
+    ARRAY['/vectorstore/collections/noaccess']::text[]  AS authz,
+    jsonb_build_object(
+        'name', FORMAT('no_access_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 10000) AS g(i);
+
+INSERT INTO embeddings_vector (collection_id, embedding, authz, metadata)
+SELECT
+    2 AS collection_id,  -- public
+    FORMAT('[%s,%s,%s]', g.i, g.i + 10, g.i + 20)::vector AS embedding,
+    ARRAY['/vectorstore/collections/public']::text[]  AS authz,
+    jsonb_build_object(
+        'name', FORMAT('public_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 5000) AS g(i);
+
+INSERT INTO embeddings_vector (collection_id, embedding, authz, metadata)
+SELECT
+    3 AS collection_id,  -- internal
+    FORMAT('[%s,%s,%s]', g.i * 2, g.i * 2 + 1, g.i * 2 + 2)::vector AS embedding,
+    ARRAY['/vectorstore/collections/internal']::text[]  AS authz,
+    jsonb_build_object(
+        'name', FORMAT('internal_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 3000) AS g(i);
+
+INSERT INTO embeddings_vector (collection_id, embedding, authz, metadata)
+SELECT
+    4 AS collection_id,  -- d3vector
+    FORMAT('[%s,%s,%s]', g.i, g.i * 3, g.i * 5)::vector AS embedding,
+    ARRAY['/vectorstore/collections/d3vector']::text[] AS authz,
+    jsonb_build_object(
+        'name', FORMAT('d3vector_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 2000) AS g(i);
+
+INSERT INTO embeddings_vector (collection_id, embedding, authz, metadata)
+SELECT
+    5 AS collection_id,  -- d200vector
+    (
+        '[' ||
+        string_agg((g.i + offs)::text, ',' ORDER BY offs)
+        || ']'
+    )::vector AS embedding,
+    ARRAY['/vectorstore/collections/d200vector']::text[] AS authz,
+    jsonb_build_object(
+        'name', FORMAT('d200vector_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 500) AS g(i)
+CROSS JOIN LATERAL generate_series(0, 199) AS offs
+GROUP BY g.i;
+
+INSERT INTO embeddings_halfvec (collection_id, embedding, authz, metadata)
+SELECT
+    6 AS collection_id,  -- d3000halfvec
+    (
+        '[' ||
+        string_agg(
+            (g.i::float8 / (offs + 1))::text,
+            ',' ORDER BY offs
+        ) ||
+        ']'
+    )::halfvec AS embedding,
+    ARRAY['/vectorstore/collections/d3000halfvec']::text[] AS authz,
+    jsonb_build_object(
+        'name', FORMAT('d3000halfvec_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 50) AS g(i)
+CROSS JOIN LATERAL generate_series(0, 2999) AS offs
+GROUP BY g.i;
+
+INSERT INTO embeddings_halfvec (collection_id, embedding, authz, metadata)
+SELECT
+    7 AS collection_id,  -- d3halfvec
+    FORMAT('[%s.%s,%s.%s,%s.%s]',
+           g.i, 1,
+           g.i + 1, 2,
+           g.i + 2, 3)::halfvec AS embedding,
+    ARRAY['/vectorstore/collections/d3halfvec']::text[] AS authz,
+    jsonb_build_object(
+        'name', FORMAT('d3halfvec_%s', g.i),
+        'i', g.i
+    ) AS metadata
+FROM generate_series(1, 1000) AS g(i);
 
 
-INSERT INTO embeddings (collection_id, embedding, authz_version, authz, metadata)
-VALUES
-  (1, '[4,5,6]'::vector, 0, ARRAY['/vectorstore/collections/noaccess'],                  '{"name": "no_access"}'),
-  (2, '[1,2,3]'::vector, 0, ARRAY['/vectorstore/collections/public'],                  '{"name": "public_only"}'),
-  (3, '[2,3,4]'::vector, 0, ARRAY['/vectorstore/collections/team42', '/vectorstore/collections/internal'],     '{"name": "team_42_internal"}'),
-  (5, '[5,4,5]'::vector, 0, ARRAY['/vectorstore/collections/team7'],                  '{"name": "team_7_only"}'),
-  (5, '[3,4,5]'::vector, 0, ARRAY['/vectorstore/collections/team7'],                  '{"name": "team_7_only"}');
 ```
 
 ### Authz and prepare Arborist server
@@ -154,14 +245,17 @@ fence:
           subresources:
             - name: presigned_url
             - name: login
-      - name: vector
+      - name: vectorstore
         subresources:
-        - name: indices
+        - name: collections
           subresources:
+          - name: noaccess
           - name: public
           - name: internal
-          - name: team42
-          - name: team7
+          - name: d3vector
+          - name: d200vector
+          - name: d3000halfvec
+          - name: d3halfvec
       - name: open
       - name: programs
         subresources:
@@ -177,17 +271,24 @@ fence:
         role_ids:
         - gen3-embeddings-admin
         resource_paths:
+        - /vectorstore/collections/noaccess
         - /vectorstore/collections/public
-        - /vectorstore/collections/team42
         - /vectorstore/collections/internal
-        - /vectorstore/collections/team7
+        - /vectorstore/collections/d3vector
+        - /vectorstore/collections/d200vector
+        - /vectorstore/collections/d3000halfvec
+        - /vectorstore/collections/d3halfvec
       - id: services.gen3-embeddings-user
         description: CRUD access to embeddings
         role_ids:
         - gen3-embeddings-user
         resource_paths:
         - /vectorstore/collections/public
-        - /vectorstore/collections/team7
+        - /vectorstore/collections/internal
+        - /vectorstore/collections/d3vector
+        - /vectorstore/collections/d200vector
+        - /vectorstore/collections/d3000halfvec
+        - /vectorstore/collections/d3halfvec
       - id: workspace
         description: be able to use workspace
         resource_paths:
@@ -245,6 +346,18 @@ fence:
         - id: 'embeddings_reader'
           action:
             method: read
+            service: 'gen3-embeddings'
+        - id: 'embeddings_creator'
+          action:
+            method: create
+            service: 'gen3-embeddings'
+        - id: 'embeddings_updater'
+          action:
+            method: update
+            service: 'gen3-embeddings'
+        - id: 'embeddings_deleter'
+          action:
+            method: delete
             service: 'gen3-embeddings'
       - id: 'gen3-embeddings-admin'
         description: ''
@@ -369,7 +482,7 @@ fence:
       test:
         policies:
         - workspace
-        - services.gen3-embeddings-admin
+        - services.gen3-embeddings-user
 
     cloud_providers: {}
     groups: {}
@@ -429,14 +542,13 @@ uv run pytest -n auto . -vv \
 ### Sample manual tests
 ```bash
 export TOKEN=...
-curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings?page=2&page_size=200" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings?page=2&page_size=200" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings?no_embeddings_info=true" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings?no_embeddings_info=true" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/team7/embeddings/64381055-2adf-44aa-9c99-b2aadf88d1c4" -H "Authorization: Bearer $TOKEN"
-
+curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings/e3c5cfe0-20f8-4270-8c3d-30e73adbe83c" -H "Authorization: Bearer $TOKEN"
 
 curl -X DELETE "http://localhost:4142/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 
@@ -446,19 +558,20 @@ curl -X POST "http://localhost:4142/vectorstore/collections" \
   -d '{
     "collection_name": "internal",
     "description": "internal index",
-    "dimensions": 3
+    "dimensions": 3,
+    "vector_type": "halfvec"
   }'
 
 curl -X GET "http://localhost:4142/vectorstore/collections" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/team42" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:4142/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 
-curl -X PATCH "http://localhost:4142/vectorstore/collections/team42" \
+curl -X PATCH "http://localhost:4142/vectorstore/collections/internal" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"description": "Updated description"}'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/team42/embeddings" \
+curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -481,14 +594,14 @@ curl -X POST "http://localhost:4142/vectorstore/collections/team42/embeddings" \
   }'
 
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/team42/embeddings/74d0c5d7-2574-4289-87a3-db948c2b3e42" \
+curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "embedding": [0.5, 0.5, 0.5]
   }'
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/team42/embeddings/74d0c5d7-2574-4289-87a3-db948c2b3e42" \
+curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -499,7 +612,7 @@ curl -X PUT "http://localhost:4142/vectorstore/collections/team42/embeddings/74d
     }
   }'
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/team42/embeddings/74d0c5d7-2574-4289-87a3-db948c2b3e42" \
+curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -511,33 +624,71 @@ curl -X PUT "http://localhost:4142/vectorstore/collections/team42/embeddings/74d
     }
   }'
 
-curl -X DELETE "http://localhost:4142/vectorstore/collections/team42/embeddings/74d0c5d7-2574-4289-87a3-db948c2b3e42" -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" -H "Authorization: Bearer $TOKEN"
 
 curl -X POST "http://localhost:4142/embeddings/bulk" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
-    "da7d2a9f-13eb-4ef2-ab53-2740a7a803a3",
-    "405bb8a5-0df3-4da4-aebb-b8570e5ec0f7"
+    "2368bc06-5cec-4c40-a41e-c84aee3216d9",
+    "d4ade0e7-4194-4cb4-9a59-dcf586d35283",
+    "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
 curl -X POST "http://localhost:4142/embeddings/bulk?no_embeddings_info=true" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
-    "da7d2a9f-13eb-4ef2-ab53-2740a7a803a3",
-    "405bb8a5-0df3-4da4-aebb-b8570e5ec0f7"
+    "2368bc06-5cec-4c40-a41e-c84aee3216d9",
+    "d4ade0e7-4194-4cb4-9a59-dcf586d35283",
+    "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/team7/embeddings/bulk" \
+curl -X POST "http://localhost:4142/vectorstore/collections/d200vector/embeddings/bulk" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
-    "da1bcbcd-1164-4fb2-a613-1351521d96cf",
-    "dc4696bf-0aa3-42a5-b0ac-84b6ebf74c65"
+    "2368bc06-5cec-4c40-a41e-c84aee3216d9",
+    "d4ade0e7-4194-4cb4-9a59-dcf586d35283",
+    "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/team7/search" \
+curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [1.0, 0.0, 0.0],
+    "top_k": 2,
+    "filters": null,
+    "distance_metric": "l2_distance"
+  }'
+
+curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [1.0, 0.0, 0.0],
+    "top_k": 2,
+    "filters": null,
+    "distance_metric": "l2_distance",
+    "min_value": 4,
+    "max_value": 10
+  }'
+
+curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [1.0, 0.0, 0.0],
+    "top_k": 2,
+    "filters": null,
+    "distance_metric": "l2_distance",
+    "min_value": 10,
+    "max_value": 0
+  }'
+
+
+curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -546,7 +697,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/team7/search" \
     "filters": null
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/team7/search?no_embeddings_info=true" \
+curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search?no_embeddings_info=true" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -563,7 +714,16 @@ curl -X POST "http://localhost:4142/vectorstore/search" \
     "filters": null
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/search?collections=team7,team42" \
+curl -X POST "http://localhost:4142/vectorstore/search?vector_type=halfvec" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [1.0, 0.0, 0.0],
+    "top_k": 5,
+    "filters": null
+  }'
+
+curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vector" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -580,3 +740,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=team7,team42"
 - sanitize collection name
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
+- set app user
+- delete collection, and delete its embeddings?
+- output page_size value use the actual output size or the defined page size?
+- delete functions need some work
