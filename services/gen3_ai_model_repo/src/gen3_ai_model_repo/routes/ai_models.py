@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from shutil import rmtree
 from typing import Any
 from urllib.parse import urljoin
 
@@ -199,23 +200,32 @@ async def get_model_info(namespace: str, repo: str):
     response is not important for our testing purposes, so we return a static
     response with some placeholder data.
     """
+    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail="Repository not found")
+    files = []
+    for path in repo_path.rglob("*"):
+        if path.is_file():
+            relative_path = str(path.relative_to(BASE_FILES_DIR))
+            size = path.stat().st_size
+            files.append(
+                {
+                    "filename": relative_path,
+                    "size": size,
+                    "etag": FAKE_ETAG,
+                }
+            )
+    metadata_file = repo_path / "metadata.json"
+    metadata = {}
+    if metadata_file.exists():
+        metadata = json.loads(metadata_file.read_text())
     return {
         "id": f"{namespace}/{repo}",
         "sha": FAKE_COMMIT,
         "etag": FAKE_ETAG,
         "size": 123456,
-        "files": [
-            {
-                "filename": "config.json",
-                "size": 1234,
-                "etag": FAKE_ETAG,
-            },
-            {
-                "filename": "pytorch_model.bin",
-                "size": 123456,
-                "etag": FAKE_ETAG,
-            },
-        ],
+        "files": files,
+        "metadata": metadata,
         "securityStatus": {
             "status": "unscanned",
             "jFrogScan": {"status": "unscanned"},
@@ -225,3 +235,31 @@ async def get_model_info(namespace: str, repo: str):
             "virusTotalScan": {"status": "unscanned"},
         },
     }
+
+
+@ai_models_router.get("/api/models")
+async def list_models():
+    repos = []
+    for namespace_dir in BASE_FILES_DIR.iterdir():
+        if namespace_dir.is_dir():
+            for repo_dir in namespace_dir.iterdir():
+                if repo_dir.is_dir():
+                    repos.append(
+                        {
+                            "id": f"{namespace_dir.name}/{repo_dir.name}",
+                            "description": "This is a mock model repository.",
+                            "tags": ["example", "test"],
+                            "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
+                        }
+                    )
+
+        return repos
+
+
+@ai_models_router.delete("/api/models/{namespace}/{repo}")
+async def delete_model(namespace: str, repo: str):
+    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail="Repository not found")
+    rmtree(repo_path)
+    return {"status": "deleted", "repo": f"{namespace}/{repo}"}
