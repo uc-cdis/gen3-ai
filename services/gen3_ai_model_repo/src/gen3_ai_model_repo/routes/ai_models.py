@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -5,6 +6,7 @@ from urllib.parse import urljoin
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
+from pydantic import BaseModel
 
 from gen3_ai_model_repo.services.metadata_service import MetadataService
 from gen3_ai_model_repo.services.response_service import ResponseService
@@ -21,6 +23,7 @@ BASE_FILES_DIR = Path(__file__).parent / "testfiles"
 FAKE_COMMIT = "mock-commit-hash-123456"
 FAKE_ETAG = "mock-etag-123456"
 
+
 DOMAIN = "http://127.0.0.1:4141"
 
 storage_service = StorageService(BASE_FILES_DIR)
@@ -28,6 +31,35 @@ storage_service = StorageService(BASE_FILES_DIR)
 metadata_service = MetadataService()
 url_service = URLService()
 response_service = ResponseService()
+
+
+class UploadModelRequest(BaseModel):
+    description: str
+    tags: list[str] = []
+
+
+@ai_models_router.post("/api/models/{namespace}/{repo}/upload")
+async def upload_model(namespace: str, repo: str, request: UploadModelRequest):
+    # In a real implementation, you'd handle the file upload, store it in S3,
+    # compute hashes, update metadata, etc. Here we just return a success response.
+
+    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
+    repo_path.mkdir(parents=True, exist_ok=True)
+    metadata_file = repo_path / "metadata.json"
+
+    metadata_content = {
+        "namespace": namespace,
+        "repo": repo,
+        "description": "This is a mock model repository.",
+        "tags": request.tags,
+        "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
+    }
+    metadata_file.write_text(json.dumps(metadata_content))
+    return {
+        "status": "uploaded",
+        "repo": f"{namespace}/{repo}",
+        "metadata_file": str(metadata_file),
+    }
 
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}")
@@ -59,7 +91,8 @@ async def list_repo_tree(
 
     def make_entry(path: Path) -> dict[str, Any]:
         rel = str(path.relative_to(BASE_FILES_DIR))
-        oid = FAKE_COMMIT
+        content = path.read_bytes()
+        oid, _ = storage_service.compute_hashes(content)
         size = path.stat().st_size
         return {
             "type": "file",
@@ -156,3 +189,39 @@ async def signed_url(path: str):
         media_type=media_type,
         headers=headers,
     )
+
+
+@ai_models_router.get("/api/models/{namespace}/{repo}/info")
+async def get_model_info(namespace: str, repo: str):
+    """
+    Return a mock model info response. This is used by the Hugging Face Hub
+    to display metadata about the model in the UI. The actual content of the
+    response is not important for our testing purposes, so we return a static
+    response with some placeholder data.
+    """
+    return {
+        "id": f"{namespace}/{repo}",
+        "sha": FAKE_COMMIT,
+        "etag": FAKE_ETAG,
+        "size": 123456,
+        "files": [
+            {
+                "filename": "config.json",
+                "size": 1234,
+                "etag": FAKE_ETAG,
+            },
+            {
+                "filename": "pytorch_model.bin",
+                "size": 123456,
+                "etag": FAKE_ETAG,
+            },
+        ],
+        "securityStatus": {
+            "status": "unscanned",
+            "jFrogScan": {"status": "unscanned"},
+            "protectAiScan": {"status": "unscanned"},
+            "avScan": {"status": "unscanned"},
+            "pickleImportScan": {"status": "unscanned"},
+            "virusTotalScan": {"status": "unscanned"},
+        },
+    }
