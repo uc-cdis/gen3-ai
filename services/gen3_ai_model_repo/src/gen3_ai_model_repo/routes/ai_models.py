@@ -1,11 +1,8 @@
-import json
 from datetime import datetime
 from pathlib import Path
-from shutil import rmtree
-from typing import Any
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -40,22 +37,15 @@ class UploadModelRequest(BaseModel):
 
 
 @ai_models_router.post("/api/models/{namespace}/{repo}/upload")
-async def upload_model(namespace: str, repo: str, request: UploadModelRequest):
-    # In a real implementation, you'd handle the file upload, store it in S3,
-    # compute hashes, update metadata, etc. Here we just return a success response.
+async def upload_model(
+    namespace: str,
+    repo: str,
+    request: UploadModelRequest,
+    authorization: str | None = Header(default=None),
+):
+    await _validate_token(authorization)
 
-    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
-    repo_path.mkdir(parents=True, exist_ok=True)
-    metadata_file = repo_path / "metadata.json"
-
-    metadata_content = {
-        "namespace": namespace,
-        "repo": repo,
-        "description": "This is a mock model repository.",
-        "tags": request.tags,
-        "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
-    }
-    metadata_file.write_text(json.dumps(metadata_content))
+    metadata_file = metadata_service.create_metadata(namespace, repo, request.description, request.tags)
     return {
         "status": "uploaded",
         "repo": f"{namespace}/{repo}",
@@ -77,47 +67,10 @@ async def list_repo_tree(
     itself).  The output matches the structure documented by Hugging Face
     but contains only the essential fields.
     """
-    target = BASE_FILES_DIR / Path(path)
-
-    # validate the path exists
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Folder not found")
-
-    # gather all files under target. If target is a file, return it
-    # as the single entry
-    if target.is_file():
-        files = [target]
-    else:
-        files = [path for path in target.rglob("*") if path.is_file()]
-
-    def make_entry(path: Path) -> dict[str, Any]:
-        rel = str(path.relative_to(BASE_FILES_DIR))
-        content = path.read_bytes()
-        oid, _ = storage_service.compute_hashes(content)
-        size = path.stat().st_size
-        return {
-            "type": "file",
-            "oid": oid,
-            "size": size,
-            "path": rel,
-            "lfs": {"oid": oid, "size": size, "pointerSize": size},
-            "xetHash": None,
-            "lastCommit": {
-                "id": oid,
-                "title": "Mock title",
-                "date": datetime.now().isoformat(timespec="seconds") + "Z",
-            },
-            "securityFileStatus": {
-                "status": "unscanned",
-                "jFrogScan": {"status": "unscanned"},
-                "protectAiScan": {"status": "unscanned"},
-                "avScan": {"status": "unscanned"},
-                "pickleImportScan": {"status": "unscanned"},
-                "virusTotalScan": {"status": "unscanned"},
-            },
-        }
-
-    return [make_entry(path) for path in files]
+    files = storage_service.list_repository_files(namespace, repo)
+    if not files:
+        raise HTTPException(status_code=404, detail="Repository or path not found")
+    return files
 
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}")
@@ -215,10 +168,7 @@ async def get_model_info(namespace: str, repo: str):
                     "etag": FAKE_ETAG,
                 }
             )
-    metadata_file = repo_path / "metadata.json"
-    metadata = {}
-    if metadata_file.exists():
-        metadata = json.loads(metadata_file.read_text())
+    metadata = metadata_service.load_metadata(namespace, repo)
     return {
         "id": f"{namespace}/{repo}",
         "sha": FAKE_COMMIT,
@@ -239,27 +189,38 @@ async def get_model_info(namespace: str, repo: str):
 
 @ai_models_router.get("/api/models")
 async def list_models():
-    repos = []
-    for namespace_dir in BASE_FILES_DIR.iterdir():
-        if namespace_dir.is_dir():
-            for repo_dir in namespace_dir.iterdir():
-                if repo_dir.is_dir():
-                    repos.append(
-                        {
-                            "id": f"{namespace_dir.name}/{repo_dir.name}",
-                            "description": "This is a mock model repository.",
-                            "tags": ["example", "test"],
-                            "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
-                        }
-                    )
-
-        return repos
+    return metadata_service.list_repositories()
 
 
 @ai_models_router.delete("/api/models/{namespace}/{repo}")
-async def delete_model(namespace: str, repo: str):
+async def delete_model(namespace: str, repo: str, authorization: str | None = Header(default=None)):
+    await _validate_token(authorization)
+    if metadata_service.delete_repository(namespace, repo):
+        return {"status": "deleted", "repo": f"{namespace}/{repo}"}
+    return {
+        "status": "error",
+        "message": f"Failed to delete repository {namespace}/{repo}",
+    }
+
+
+@ai_models_router.get("/api/models/{namespace}/{repo}/revisions")
+async def list_model_revisions(namespace: str, repo: str, authorization: str | None = Header(default=None)):
+    await _validate_token(authorization)
     repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail="Repository not found")
-    rmtree(repo_path)
-    return {"status": "deleted", "repo": f"{namespace}/{repo}"}
+    return {
+        "repo": f"{namespace}/{repo}",
+        "revisions": [
+            {
+                "id": FAKE_COMMIT,
+                "commit": FAKE_COMMIT,
+                "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
+            }
+        ],
+    }
+
+
+async def _validate_token(authorization: str | None):
+    if authorization != "Bearer mock-token-123456":
+        raise HTTPException(status_code=401, detail="Unauthorized")
