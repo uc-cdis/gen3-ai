@@ -56,6 +56,10 @@ class MetadataService:
         rmtree(repo_path)
         return True
 
+    def repository_exists(self, namespace: str, repo: str) -> bool:
+        repo_path = self.base_file_dir / Path(namespace) / Path(repo)
+        return repo_path.exists() and repo_path.is_dir()
+
     def get_revision(self, namespace: str, repo: str, rev: str):
         return {
             "id": f"{namespace}/{repo}",

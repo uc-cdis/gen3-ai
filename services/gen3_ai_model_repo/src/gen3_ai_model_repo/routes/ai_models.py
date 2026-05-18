@@ -6,6 +6,15 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
+from gen3_ai_model_repo.models.repo_model import (
+    RepositoryInfoModel,
+    RepositoryModel,
+    RevisionListResponseModel,
+    RevisionModel,
+    TreeEntryModel,
+    UploadModelResponse,
+)
+from gen3_ai_model_repo.services.auth_service import AuthService
 from gen3_ai_model_repo.services.metadata_service import MetadataService
 from gen3_ai_model_repo.services.response_service import ResponseService
 from gen3_ai_model_repo.services.storage_service import StorageService
@@ -26,7 +35,9 @@ DOMAIN = "http://127.0.0.1:4141"
 
 storage_service = StorageService(BASE_FILES_DIR)
 
-metadata_service = MetadataService()
+auth_service = AuthService()
+
+metadata_service = MetadataService(BASE_FILES_DIR)
 url_service = URLService()
 response_service = ResponseService()
 
@@ -36,14 +47,14 @@ class UploadModelRequest(BaseModel):
     tags: list[str] = []
 
 
-@ai_models_router.post("/api/models/{namespace}/{repo}/upload")
+@ai_models_router.post("/api/models/{namespace}/{repo}/upload", response_model=UploadModelResponse)
 async def upload_model(
     namespace: str,
     repo: str,
     request: UploadModelRequest,
     authorization: str | None = Header(default=None),
 ):
-    await _validate_token(authorization)
+    auth_service.validate_token(authorization)
 
     metadata_file = metadata_service.create_metadata(namespace, repo, request.description, request.tags)
     return {
@@ -53,8 +64,11 @@ async def upload_model(
     }
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}")
-@ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}/{path:path}")
+@ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}", response_model=list[TreeEntryModel])
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/tree/{rev}/{path:path}",
+    response_model=list[TreeEntryModel],
+)
 async def list_repo_tree(
     namespace: str,
     repo: str,
@@ -73,7 +87,7 @@ async def list_repo_tree(
     return files
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}")
+@ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}", response_model=RevisionModel)
 async def get_revision(namespace: str, repo: str, rev: str):
     return metadata_service.get_revision(namespace, repo, rev)
 
@@ -145,7 +159,7 @@ async def signed_url(path: str):
     )
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/info")
+@ai_models_router.get("/api/models/{namespace}/{repo}/info", response_model=RepositoryInfoModel)
 async def get_model_info(namespace: str, repo: str):
     """
     Return a mock model info response. This is used by the Hugging Face Hub
@@ -176,7 +190,7 @@ async def get_model_info(namespace: str, repo: str):
         "size": 123456,
         "files": files,
         "metadata": metadata,
-        "securityStatus": {
+        "security_status": {
             "status": "unscanned",
             "jFrogScan": {"status": "unscanned"},
             "protectAiScan": {"status": "unscanned"},
@@ -187,14 +201,17 @@ async def get_model_info(namespace: str, repo: str):
     }
 
 
-@ai_models_router.get("/api/models")
+@ai_models_router.get("/api/models", response_model=list[RepositoryModel])
 async def list_models():
     return metadata_service.list_repositories()
 
 
 @ai_models_router.delete("/api/models/{namespace}/{repo}")
 async def delete_model(namespace: str, repo: str, authorization: str | None = Header(default=None)):
-    await _validate_token(authorization)
+    auth_service.validate_token(authorization)
+    exists = metadata_service.repository_exists(namespace, repo)
+    if not exists:
+        raise HTTPException(status_code=404, detail="Repository not found")
     if metadata_service.delete_repository(namespace, repo):
         return {"status": "deleted", "repo": f"{namespace}/{repo}"}
     return {
@@ -203,9 +220,9 @@ async def delete_model(namespace: str, repo: str, authorization: str | None = He
     }
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/revisions")
+@ai_models_router.get("/api/models/{namespace}/{repo}/revisions", response_model=RevisionListResponseModel)
 async def list_model_revisions(namespace: str, repo: str, authorization: str | None = Header(default=None)):
-    await _validate_token(authorization)
+    auth_service.validate_token(authorization)
     repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -219,8 +236,3 @@ async def list_model_revisions(namespace: str, repo: str, authorization: str | N
             }
         ],
     }
-
-
-async def _validate_token(authorization: str | None):
-    if authorization != "Bearer mock-token-123456":
-        raise HTTPException(status_code=401, detail="Unauthorized")
