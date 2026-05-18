@@ -537,6 +537,11 @@ uv run pytest -n auto . -vv \
   --cov=gen3_embeddings \
   --cov-report=term-missing \
   --cov-report=html
+
+uv run pytest -n auto . --maxfail=1 --disable-warnings \
+  --cov=gen3_embeddings.database.db \
+  --cov=gen3_embeddings.database.helpers \
+  --cov-report=term-missing
 ```
 
 ### Sample manual tests
@@ -591,6 +596,36 @@ curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings"
         }
       }
     ]
+  }'
+
+curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "authz": ["/vectorstore/collections/d3halfvec", "/vectorstore/collections/d200vector"],
+    "embeddings": [
+      {
+        "embedding": [0.1, 0.2, 0.3],
+        "metadata": {
+          "source": "some_file.md",
+          "chunk_size": "1000"
+        }
+      },
+      {
+        "embedding": [0.4, 0.2, 0.3],
+        "metadata": {
+          "source": "some_file1.md",
+          "chunk_size": "10001"
+        }
+      }
+    ]
+  }'
+
+curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/07fc788b-4f54-478f-a821-1c4235a8369e" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "authz": ["/vectorstore/collections/d3halfvec", "/vectorstore/collections/internal"]
   }'
 
 

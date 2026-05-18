@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from gen3_embeddings.auth import (
-    parse_and_auth_request,
+from gen3_embeddings.database.db import (
+    Collection,
+    DataAccessLayer,
+    Embedding,
+    get_data_access_layer_for_read_operations,
 )
-from gen3_embeddings.database.db import Collection, DataAccessLayer, Embedding, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
     SearchRequestBody,
@@ -21,12 +23,10 @@ vectorstore_search_router = APIRouter()
     response_model=SearchResponse,
     summary="Search embeddings in collection",
     tags=["Vectorstore Search"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 @vectorstore_search_router.post(
     "/vectorstore/collections/{collection_name}/search/",
     include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def search_in_collection(
     request: Request,
@@ -34,7 +34,7 @@ async def search_in_collection(
     collection_name: str,
     ai_model: str | None = Query(None, alias="ai_model"),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
     TODO: support for ai_model
@@ -119,7 +119,7 @@ async def search_across_collections(
     ai_model: str | None = Query(None, alias="ai_model"),
     vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
     TODO: support for ai_model

@@ -128,6 +128,7 @@ class UpdateEmbeddingBody(BaseModel):
 
     embedding: list[float] | None = None
     metadata: dict | None = None
+    authz: list[str] | None = None
 
 
 class EmbeddingToCreate(BaseModel):
@@ -161,6 +162,8 @@ class EmbeddingToCreate(BaseModel):
 class CreateEmbeddingsBody(BaseModel):
     """
     Data for creating embeddings in a collection.
+    authz example: "authz": ["/vectorstore/collections/my_collection", "/my/custom/path"]
     """
 
+    authz: list[str] | None = None
     embeddings: list[EmbeddingToCreate]

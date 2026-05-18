@@ -3,11 +3,17 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import (
+    authorize_request,
     get_authz_resource_path_from_collection_name,
     parse_and_auth_request,
 )
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from gen3_embeddings.database.db import Collection, DataAccessLayer, get_data_access_layer
+from gen3_embeddings.database.db import (
+    Collection,
+    DataAccessLayer,
+    get_data_access_layer,
+    get_data_access_layer_for_read_operations,
+)
 from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_result,
@@ -116,11 +122,23 @@ async def update_embedding_in_collection(
     if body.embedding is not None and len(body.embedding) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
+    # If authz is being updated, check update permission on new authz paths
+    if body.authz is not None:
+        if body.authz == []:
+            raise HTTPException(status_code=400, detail="authz cannot be empty when provided")
+
+        await authorize_request(
+            request=request,
+            authz_access_method="update",
+            authz_resources=body.authz,
+        )
+
     emb = await dal.update_embedding(
         collection=collection,
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
+        new_authz=body.authz,
     )
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
@@ -273,6 +291,12 @@ async def create_embeddings_in_collection(
 
     This minimal implementation only accepts raw numeric vectors.
 
+    - If `body.authz` is provided (list of authz paths), use those authz paths for all embeddings.
+    - If not provided, default authz is `/vectorstore/collections/{collection_name}`.
+    - Check `create` on:
+        - the collection authz path, and
+        - the embedding authz paths.
+
     Args:
         request: The request object.
         collection_name: Name of the collection.
@@ -293,6 +317,24 @@ async def create_embeddings_in_collection(
 
     if not body.embeddings:
         raise HTTPException(status_code=400, detail="embeddings must be a non-empty array")
+
+    default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
+    embedding_authz_paths = body.authz or [default_collection_authz]
+
+    # 1) Check create on collection authz
+    await authorize_request(
+        request=request,
+        authz_access_method="create",
+        authz_resources=[default_collection_authz],
+    )
+
+    # 2) Check create on embedding authz paths
+    if embedding_authz_paths != [default_collection_authz]:
+        await authorize_request(
+            request=request,
+            authz_access_method="create",
+            authz_resources=embedding_authz_paths,
+        )
 
     vectors: list[list[float]] = []
     metadata_list: list[dict] = []
@@ -317,7 +359,7 @@ async def create_embeddings_in_collection(
     created = await dal.create_embeddings_bulk(
         collection=collection,
         embeddings=vectors,
-        authz=[get_authz_resource_path_from_collection_name(collection_name)],
+        authz=embedding_authz_paths,
         metadata_list=metadata_list,
     )
 
@@ -345,7 +387,7 @@ async def get_embeddings_bulk_unknown_collections(
     request: Request,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
     Read a selection of embeddings by UUID across any collection.
@@ -410,19 +452,17 @@ async def get_embeddings_bulk_unknown_collections(
     response_model=EmbeddingResponse,
     summary="Read select embeddings from collection",
     tags=["Embeddings (Bulk Read)"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 @embeddings_router.post(
     "/vectorstore/collections/{collection_name}/embeddings/bulk/",
     include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embeddings_bulk_from_collection(
     request: Request,
     collection_name: str,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
     TODO: post here but actually reading, how to hanle aurhz here?

@@ -86,7 +86,7 @@ from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException, Request
 
 from gen3_embeddings import config
-from gen3_embeddings.auth import get_allowed_authz_for_request
+from gen3_embeddings.auth import get_allowed_authz_for_request, get_allowed_authz_for_request_with_method
 from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
@@ -103,6 +103,13 @@ async def get_pool():
 async def get_data_access_layer(request: Request):
     pool = await get_pool()
     allowed_authz = await get_allowed_authz_for_request(request)
+    dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
+    yield dal
+
+
+async def get_data_access_layer_for_read_operations(request: Request):
+    pool = await get_pool()
+    allowed_authz = await get_allowed_authz_for_request_with_method(request, method="read")
     dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
     yield dal
 
@@ -208,6 +215,10 @@ class DataAccessLayer:
                 # e.g. "/vectorstore/collections/my_collection"
                 parts = item.split("/")
                 if parts:
+                    if len(parts) != 4:
+                        # # Expect exactly: ["", "vectorstore", "collections", "{collection_name}"]
+                        # This covers "/vectorstore/collections/a/b" (len=5), etc.
+                        continue
                     name = parts[-1]
                     if name:
                         allowed.add(name)
@@ -436,6 +447,7 @@ class DataAccessLayer:
         embedding_id: UUID,
         embedding: list[float] | None,
         metadata: dict | None,
+        new_authz: list[str] | None = None,
     ) -> Embedding | None:
         # TODO: embedding has to be string currently, look into why.
         table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
@@ -455,6 +467,11 @@ class DataAccessLayer:
                 set_parts.append(f"metadata = ${param_idx}::jsonb")
                 params.append(json.dumps(metadata))
                 # params.append(metadata)
+                param_idx += 1
+
+            if new_authz is not None:
+                set_parts.append(f"authz = ${param_idx}::text[]")
+                params.append(new_authz)
                 param_idx += 1
 
             if not set_parts:

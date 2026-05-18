@@ -330,3 +330,13 @@ async def get_allowed_authz_for_request(request: Request) -> list[str]:
     )
     logging.debug(f"allowed_authz for {method}: {allowed_authz}")
     return allowed_authz
+
+
+async def get_allowed_authz_for_request_with_method(request: Request, method: str) -> list[str]:
+    user_authz_mapping = await get_user_authz_mapping(request=request)
+    allowed_authz = get_allowed_authz_from_mapping(
+        authz_mapping=user_authz_mapping,
+        method=method,
+    )
+    logging.debug(f"allowed_authz for {method}: {allowed_authz}")
+    return allowed_authz
