@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -92,7 +91,7 @@ async def get_revision(namespace: str, repo: str, rev: str):
     return metadata_service.get_revision(namespace, repo, rev)
 
 
-@ai_models_router.head("/{namespace}/{repo}/resolve/{rev}/{path:path}")
+@ai_models_router.head("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
 async def head_file(namespace: str, repo: str, rev: str, path: str):
     path_parts = [namespace, repo]
     path_parts.extend(path.split("/"))
@@ -110,14 +109,16 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     return response_service.build_head_response(commit_hash, etag, size, signed_url)
 
 
-@ai_models_router.get("/{namespace}/{repo}/resolve/{rev}/{path:path}")
+@ai_models_router.get("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
 async def get_file(namespace: str, repo: str, rev: str, path: str):
+    print(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
     signed_url = urljoin(
         f"{DOMAIN}/signed-url/",
         f"{namespace}/{repo}/{path}",
     )
     # this redirect is how our service would work. we'd do auth checks, find
     # the file in s3, create a signed URL and return
+    print(f"Redirecting to signed URL: {signed_url}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
 
 
@@ -177,12 +178,17 @@ async def get_model_info(namespace: str, repo: str):
             size = path.stat().st_size
             files.append(
                 {
-                    "filename": relative_path,
+                    "type": "file",
+                    "oid": relative_path,
                     "size": size,
-                    "etag": FAKE_ETAG,
                 }
             )
-    metadata = metadata_service.load_metadata(namespace, repo)
+
+    try:
+        metadata = metadata_service.load_metadata(namespace, repo)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Metadata file not found")
+
     return {
         "id": f"{namespace}/{repo}",
         "sha": FAKE_COMMIT,
@@ -231,8 +237,8 @@ async def list_model_revisions(namespace: str, repo: str, authorization: str | N
         "revisions": [
             {
                 "id": FAKE_COMMIT,
-                "commit": FAKE_COMMIT,
-                "created_at": datetime.now().isoformat(timespec="seconds") + "Z",
+                "revision": "main",
+                "sha": FAKE_COMMIT,
             }
         ],
     }
