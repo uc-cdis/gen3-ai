@@ -1,6 +1,15 @@
-# push will run on every pushed commit to any branch (so this will rerun the tests
-# once a branch gets merged to main in addition to any new commits on any branch)
-on: push
+
+on:
+  # push will run on every pushed commit to any branch (so this will rerun the tests
+  # once a branch gets merged to main in addition to any new commits on any branch)
+  push:
+  # ready_for_review is required so when automated draft PRs are set to "ready",
+  # we run these required checks. This is a required workaround due to GH limiting
+  # automated PRs from triggering other workflow "on: push" triggers (in an attempt
+  # to prevent unintended infinite loops)
+  pull_request:
+    types: [ready_for_review]
+
 
 name: Automation
 
@@ -10,8 +19,13 @@ concurrency:
 
 jobs:
   post-commit-check:
+    # this post-commit-check ensures pre-commit checks are run regardless of local setup, which
+    # ensures that any PRs / edits done in the Github website directly
+    # still have some level of validation run over them (this ensures
+    # consistency with linting/formatting in addition to yet another
+    # barrier for any security issues)
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
-    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/pre-commit
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
       UV_VERSION: '0.11.15'
       JUST_VERSION: '1.51.0'
@@ -67,8 +81,7 @@ jobs:
 
   unit-test:
     name: Python Unit Test
-    # TODO: enable when security and post-commit work reliably
-    # needs: [ security, post-commit-check ]
+    needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.11.15'

@@ -24,7 +24,7 @@ async def test_create_response_non_streaming_function_called(
     mock_get_client.return_value = mock_inference_client
 
     input_body = json.loads(valid_user_msg_body_non_streaming.model_dump_json())
-    response = client.post("/responses", json=input_body)
+    response = client.post("/v1/responses", json=input_body)
 
     assert response.status_code == 200
     assert response.json() == VALID_NON_STREAMED_RESPONSE
@@ -53,7 +53,7 @@ async def test_create_response_streaming_function_called(
     input_body = json.loads(valid_user_msg_body_non_streaming.model_dump_json())
     input_body["stream"] = True
 
-    response = client.post("/responses", json=input_body)
+    response = client.post("/v1/responses", json=input_body)
 
     assert response.status_code == 200
     # the body of a StreamingResponse is a raw byte stream – decode it
