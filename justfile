@@ -55,68 +55,103 @@ setup: _check_dependencies
   echo "pre-commit git hook is installed."
 
 
-setup_db: _check_dependencies
+setup_db $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
 
   # this includes some helpers for colored line printing
   source scripts/.justfile_helpers.bash
 
-  for dir in services/*; do
-    if [[ -n "${dir#services/}" ]]; then
-      if [ "${dir#services/}" == "gen3_inference" ]; then
-        print_header "just setup_db:" "No PostgreSQL db needed for" "${dir#services/}" "service. Nothing to do."
-      else
-        print_header "just setup_db:" "setting up PostgreSQL db for" "${dir#services/}" "service..."
-        # TODO: Make a utility for running this outside the justfile
-        if [ ! -f "${dir}/.env" ]; then
-          echo "${RED}** WARNING: .env file not found in "${dir}". Will rely on environment variables. **${RESET}"
-        else
-          echo "Found .env file. Using it to set up database."
-          set -a
-            source "${dir}/.env"
-          set +a
-        fi
+  run_for_service() {
+    local service_name="$1"
+    local dir="services/$service_name"
 
-        if [[ -z ${PGDATABASE:-} ]]; then
-          echo "PGDATABASE not set, using ${dir#services/}..."
-          export PGDATABASE="${dir#services/}"
-        fi
-
-        psql \
-          -d postgres \
-          -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
-          -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
-          2>/dev/null || echo "Database already exists."
-
-        # run migrations if they exist
-        MIGRATIONS_DIR="${dir}/db_migrations"
-        if [ -d "$MIGRATIONS_DIR" ]; then
-          print_header "just setup:" "running" "migrations for" "${dir#services/}" "..."
-
-          # Get all .sql files, sort them numerically, and iterate
-          for migration_file in $(find "$MIGRATIONS_DIR" -name "*.sql" | sort -V); do
-            echo "Applying migration: $migration_file"
-
-            # Run the migration
-            psql \
-              --set ON_ERROR_STOP=1 \
-              -d "${PGDATABASE}" \
-              -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
-              -f "$migration_file"
-
-            # Check if psql failed
-            if [ $? -ne 0 ]; then
-              echo "${RED}** ERROR: Migration $migration_file failed. Perhaps it was already ran. **${RESET}"
-              exit 1
-            fi
-          done
-
-          echo "${GREEN}Migrations applied successfully.${RESET}"
-        fi
-      fi
+    if [ ! -d "$dir" ]; then
+      echo "${RED}** ERROR: Service directory '$dir' does not exist. **${RESET}"
+      exit 1
     fi
-  done
+
+    if [ "$service_name" == "gen3_inference" ]; then
+      print_header "just setup_db:" "No PostgreSQL db needed for" "$service_name" "service. Nothing to do."
+      return
+    fi
+
+    print_header "just setup_db:" "setting up PostgreSQL db for" "$service_name" "service..."
+
+    # TODO: Make a utility for running this outside the justfile
+    if [ ! -f "${dir}/.env" ]; then
+      echo "${RED}** WARNING: .env file not found in '${dir}'. Will rely on environment variables. **${RESET}"
+    else
+      echo "Found .env file. Using it to set up database."
+      set -a
+        source "${dir}/.env"
+      set +a
+    fi
+
+    if [[ -z ${PGDATABASE:-} ]]; then
+      echo "PGDATABASE not set, using ${service_name}..."
+      export PGDATABASE="${service_name}"
+    fi
+
+    psql \
+      -d postgres \
+      -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+      -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
+      2>/dev/null || echo "Database already exists."
+
+    # run migrations if they exist
+    MIGRATIONS_DIR="${dir}/db_migrations"
+    if [ -d "$MIGRATIONS_DIR" ]; then
+      print_header "just setup_db:" "running" "migrations for" "$service_name" "..."
+
+       # defaults for app user if not set
+      if [ "$service_name" == "gen3_embeddings" ]; then
+        : "${DB_APP_USER:=app_user}"
+        : "${DB_APP_USER_PASSWORD:=app_user_password}"
+      fi
+
+      # Get all .sql files, sort them numerically, and iterate
+      for migration_file in $(find "$MIGRATIONS_DIR" -name "*.sql" | sort -V); do
+        echo "Applying migration: $migration_file"
+
+        # Run the migration
+        if [ "$service_name" == "gen3_embeddings" ]; then
+          # pass app user vars into psql
+          psql \
+            --set ON_ERROR_STOP=1 \
+            --set DB_APP_USER="${DB_APP_USER}" \
+            --set DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD}" \
+            -d "${PGDATABASE}" \
+            -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+            -f "$migration_file"
+        else
+          psql \
+            --set ON_ERROR_STOP=1 \
+            -d "${PGDATABASE}" \
+            -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+            -f "$migration_file"
+        fi
+
+        # Check if psql failed
+        if [ $? -ne 0 ]; then
+          echo "${RED}** ERROR: Migration $migration_file failed. Perhaps it was already ran. **${RESET}"
+          exit 1
+        fi
+      done
+
+      echo "${GREEN}Migrations applied successfully.${RESET}"
+    fi
+  }
+
+  if [ "$SERVICE" == "all" ]; then
+    for dir in services/*; do
+      if [[ -n "${dir#services/}" ]]; then
+        run_for_service "${dir#services/}"
+      fi
+    done
+  else
+    run_for_service "$SERVICE"
+  fi
 
 openapi:
   #!/usr/bin/env bash

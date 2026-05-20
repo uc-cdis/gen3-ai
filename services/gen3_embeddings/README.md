@@ -54,26 +54,35 @@ docker run --name pgvector \
     -p 5432:5432 \
     -v $(pwd)/db_migrations/0/0.sql:/docker-entrypoint-initdb.d/0.sql \
     -d pgvector/pgvector:pg18-trixie
-
-
-PGPASSWORD=testpass psql -h localhost -p 5432 -U testuser -d testdb
 ```
+
+Create `.env` file under gen3_embeddings folder
+```bash
+PGHOST=localhost
+PGPORT=5432
+PGUSER=testuser
+PGPASSWORD=testpass
+PGDATABASE=gen3embeddings
+
+DB_APP_USER=embeddings_user
+DB_APP_USER_PASSWORD=embeddings_pass
+
+DEBUG=True
+ARBORIST_URL="http://localhost:4280"
+VERBOSE_INTERNAL_LOGS=True
+```
+
+Setup db, run this under gen3-ai folder:
+```bash
+just setup_db gen3_embeddings
+```
+
 Create an app_user with limited permissions. A superuser can bypass RLS.
 For the following, make sure you update the collection_id according to the ids from creating indices outputs
+```bash
+PGPASSWORD=testpass psql -h localhost -p 5432 -U testuser -d gen3embeddings
+```
 ```sql
-CREATE ROLE app_user
-  LOGIN
-  PASSWORD 'app_user_pass'
-  NOSUPERUSER
-  NOCREATEDB
-  NOCREATEROLE
-  NOINHERIT;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections        TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_vector  TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_halfvec TO app_user;
-
-
 INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
 VALUES
   ('noaccess', 'noaccess collection', 'test-model', 3, 'vector'),
@@ -505,16 +514,6 @@ portal:
 ```
 
 ### Start gen3_embeddings server
-Create `.env` file under gen3_embeddings folder
-```bash
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=app_user
-DB_PASSWORD=app_user_pass
-DB_DATABASE=testdb
-DEBUG=True
-ARBORIST_URL="http://localhost:4280"
-```
 run this under gen3-ai folder
 ```bash
 uv run --directory "./services/gen3_embeddings" \
@@ -769,13 +768,11 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 
 ## TODO
 - ai model
-- diff dim between indices in searching, error handling
 - don't print out detailed errors at client side
 - support DEBUG_SKIP_AUTH True for RLS
 - sanitize collection name
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
 - set app user
-- delete collection, and delete its embeddings?
 - output page_size value use the actual output size or the defined page size?
 - delete functions need some work

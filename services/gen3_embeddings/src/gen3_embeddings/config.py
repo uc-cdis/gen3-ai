@@ -12,17 +12,21 @@ logging = common_config.logging
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 1000
 
-DB_DRIVER = starlette_config("DB_DRIVER", default="postgresql")
-DB_USER = starlette_config("DB_USER", default="postgres")
-DB_PASSWORD = starlette_config("DB_PASSWORD", cast=Secret, default=None)
-DB_HOST = starlette_config("DB_HOST", default="localhost")
-DB_PORT = starlette_config("DB_PORT", cast=int, default="5432")
-DB_DATABASE = starlette_config("DB_DATABASE", default="testgen3embeddings")
+PGDRIVER = starlette_config("PGDRIVER", default="postgresql")
+PGUSER = starlette_config("PGUSER", default="postgres")
+PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default=None)
+PGHOST = starlette_config("PGHOST", default="localhost")
+PGPORT = starlette_config("PGPORT", cast=int, default="5432")
+PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
 
+DB_APP_USER = starlette_config("DB_APP_USER", default="app_user")
+DB_APP_USER_PASSWORD = starlette_config("DB_APP_USER_PASSWORD", default="app_user_password")
+
+# make sure to use DB_APP_USER and DB_APP_USER_PASSWORD in the connection string, not PGUSER and PGPASSWORD
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
     cast=Secret,
-    default=f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}",
+    default=f"{PGDRIVER}://{DB_APP_USER}:{DB_APP_USER_PASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}",
 )
 
 URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_URL_PREFIX", default="", cast=str)
