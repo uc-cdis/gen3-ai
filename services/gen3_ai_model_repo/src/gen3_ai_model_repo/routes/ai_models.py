@@ -5,6 +5,17 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
+from gen3_ai_model_repo.auth import validate_token
+from gen3_ai_model_repo.metadata import (
+    create_metadata,
+    delete_repository,
+    list_repositories,
+    load_metadata,
+    repository_exists,
+)
+from gen3_ai_model_repo.metadata import (
+    get_revision as metadata_get_revision,
+)
 from gen3_ai_model_repo.models.repo_model import (
     RepositoryInfoModel,
     RepositoryModel,
@@ -13,11 +24,14 @@ from gen3_ai_model_repo.models.repo_model import (
     TreeEntryModel,
     UploadModelResponse,
 )
-from gen3_ai_model_repo.services.auth_service import AuthService
-from gen3_ai_model_repo.services.metadata_service import MetadataService
-from gen3_ai_model_repo.services.response_service import ResponseService
-from gen3_ai_model_repo.services.storage_service import StorageService
-from gen3_ai_model_repo.services.url_service import URLService
+from gen3_ai_model_repo.response import build_head_response
+from gen3_ai_model_repo.storage import (
+    compute_hashes,
+    get_local_file,
+    list_repository_files,
+    read_file,
+)
+from gen3_ai_model_repo.url import build_signed_url
 
 ai_models_router = APIRouter()
 
@@ -32,14 +46,6 @@ FAKE_ETAG = "mock-etag-123456"
 
 DOMAIN = "http://127.0.0.1:4141"
 
-storage_service = StorageService(BASE_FILES_DIR)
-
-auth_service = AuthService()
-
-metadata_service = MetadataService(BASE_FILES_DIR)
-url_service = URLService()
-response_service = ResponseService()
-
 
 class UploadModelRequest(BaseModel):
     description: str
@@ -53,9 +59,9 @@ async def upload_model(
     request: UploadModelRequest,
     authorization: str | None = Header(default=None),
 ):
-    auth_service.validate_token(authorization)
+    validate_token(authorization)
 
-    metadata_file = metadata_service.create_metadata(namespace, repo, request.description, request.tags)
+    metadata_file = create_metadata(BASE_FILES_DIR, namespace, repo, request.description, request.tags)
     return {
         "status": "uploaded",
         "repo": f"{namespace}/{repo}",
@@ -80,7 +86,7 @@ async def list_repo_tree(
     itself).  The output matches the structure documented by Hugging Face
     but contains only the essential fields.
     """
-    files = storage_service.list_repository_files(namespace, repo)
+    files = list_repository_files(BASE_FILES_DIR, namespace, repo)
     if not files:
         raise HTTPException(status_code=404, detail="Repository or path not found")
     return files
@@ -88,25 +94,25 @@ async def list_repo_tree(
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}", response_model=RevisionModel)
 async def get_revision(namespace: str, repo: str, rev: str):
-    return metadata_service.get_revision(namespace, repo, rev)
+    return metadata_get_revision(namespace, repo, rev)
 
 
 @ai_models_router.head("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
 async def head_file(namespace: str, repo: str, rev: str, path: str):
     path_parts = [namespace, repo]
     path_parts.extend(path.split("/"))
-    local_path = storage_service.get_local_file(path_parts)
-    content = storage_service.read_file(local_path)
+    local_path = get_local_file(BASE_FILES_DIR, path_parts)
+    content = read_file(local_path)
 
     size = len(content)
-    commit_hash, etag = storage_service.compute_hashes(content)
+    commit_hash, etag = compute_hashes(content)
 
     # also mock the redirected signed URL locally via this same
     # web service. this will stream the file contents as if it
     # was a signed URL
-    signed_url = url_service.build_signed_url(namespace, repo, rev, path)
+    signed_url = build_signed_url(namespace, repo, rev, path)
 
-    return response_service.build_head_response(commit_hash, etag, size, signed_url)
+    return build_head_response(commit_hash, etag, size, signed_url)
 
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
@@ -134,7 +140,7 @@ async def signed_url(path: str):
     This is necessary for large files and guarantees the
     client sees a proper `Content-Length` header.
     """
-    local_path = storage_service.get_local_file(path.split("/"))
+    local_path = get_local_file(BASE_FILES_DIR, path.split("/"))
     file_size = local_path.stat().st_size
 
     media_type = "application/json" if path.endswith(".json") else "application/octet-stream"
@@ -185,7 +191,7 @@ async def get_model_info(namespace: str, repo: str):
             )
 
     try:
-        metadata = metadata_service.load_metadata(namespace, repo)
+        metadata = load_metadata(BASE_FILES_DIR, namespace, repo)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Metadata file not found")
 
@@ -209,16 +215,16 @@ async def get_model_info(namespace: str, repo: str):
 
 @ai_models_router.get("/api/models", response_model=list[RepositoryModel])
 async def list_models():
-    return metadata_service.list_repositories()
+    return list_repositories(BASE_FILES_DIR)
 
 
 @ai_models_router.delete("/api/models/{namespace}/{repo}")
 async def delete_model(namespace: str, repo: str, authorization: str | None = Header(default=None)):
-    auth_service.validate_token(authorization)
-    exists = metadata_service.repository_exists(namespace, repo)
+    validate_token(authorization)
+    exists = repository_exists(BASE_FILES_DIR, namespace, repo)
     if not exists:
         raise HTTPException(status_code=404, detail="Repository not found")
-    if metadata_service.delete_repository(namespace, repo):
+    if delete_repository(BASE_FILES_DIR, namespace, repo):
         return {"status": "deleted", "repo": f"{namespace}/{repo}"}
     return {
         "status": "error",
@@ -228,7 +234,7 @@ async def delete_model(namespace: str, repo: str, authorization: str | None = He
 
 @ai_models_router.get("/api/models/{namespace}/{repo}/revisions", response_model=RevisionListResponseModel)
 async def list_model_revisions(namespace: str, repo: str, authorization: str | None = Header(default=None)):
-    auth_service.validate_token(authorization)
+    validate_token(authorization)
     repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail="Repository not found")

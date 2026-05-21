@@ -1,7 +1,6 @@
 # clear cache: rm -r ~/.cache/gen3
 # run with: HF_HUB_CACHE=~/.cache/gen3 HF_TOKEN=foobar HF_ENDPOINT=http://0.0.0.0:4141 uv run python transformers_example.py
 
-import os
 
 from huggingface_hub import hf_hub_download
 
