@@ -401,26 +401,58 @@ class DataAccessLayer:
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            results: list[Embedding] = []
-            for emb_vec, meta in zip(embeddings, metadata_list):
-                row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {table}
-                    (collection_id, embedding, authz, metadata)
-                    VALUES ($1::bigint, $2{cast}, $3::text[], $4::jsonb)
-                    RETURNING *
-                    """,
-                    collection.id,
-                    json.dumps(emb_vec),
-                    authz,
-                    json.dumps(meta or {}),
+            """
+            Convert data in bulk to JSON, then use postgres support for JSON -> records
+            to bulk insert in a single transaction.
+            """
+            payload_data = [
+                {
+                    "collection_id": collection.id,
+                    "embedding": json.dumps(emb_vec),
+                    "authz": authz,
+                    "metadata": metadata or {},
+                }
+                for emb_vec, metadata in zip(embeddings, metadata_list)
+            ]
+
+            # convert the entire batch into a single JSON string
+            json_payload = json.dumps(payload_data)
+
+            # execute one concurrent safe query
+            stmt = await conn.prepare(
+                f"""
+                INSERT INTO {table} (collection_id, embedding, authz, metadata)
+                SELECT
+                    raw.collection_id,
+                    raw.embedding{cast},
+                    raw.authz,
+                    raw.metadata
+                FROM jsonb_to_recordset($1::jsonb) AS raw(
+                    collection_id bigint,
+                    embedding text,
+                    authz text[],
+                    metadata jsonb
                 )
-                if not row:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Failed to create embedding in bulk insert",
-                    )
-                results.append(Embedding.from_record(row))
+                -- only return what we need back, not the embedding itself b/c it's big
+                -- and we already have it in Python
+                RETURNING embedding_id, created_at, updated_at;
+                """
+            )
+            rows = await stmt.fetch(json_payload)
+
+            results = [
+                Embedding(
+                    embedding_id=row["embedding_id"],
+                    collection_id=collection.id,
+                    embedding=emb_vec,
+                    authz=authz,
+                    metadata=meta,
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row, emb_vec, meta in zip(rows, embeddings, metadata_list)
+            ]
+
             return results
 
         return await self._with_rls(_query)

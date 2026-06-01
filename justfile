@@ -102,9 +102,9 @@ setup_db $SERVICE="all": _check_dependencies
     # run migrations if they exist
     MIGRATIONS_DIR="${dir}/db_migrations"
     if [ -d "$MIGRATIONS_DIR" ]; then
-      print_header "just setup_db:" "running" "migrations for" "$service_name" "..."
+      print_header "just setup_db:" "running migrations for" "$service_name" "service" "..."
 
-       # defaults for app user if not set
+      # defaults for app user if not set
       if [ "$service_name" == "gen3_embeddings" ]; then
         : "${DB_APP_USER:=app_user}"
         : "${DB_APP_USER_PASSWORD:=app_user_password}"
