@@ -1,4 +1,6 @@
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 
 import asyncpg
 
@@ -59,3 +61,19 @@ async def get_db_pool():
         await connect_db()
 
     return db_pool
+
+
+@dataclass
+class ModelRepository:
+    """
+    Dataclass representing a model_repositories table row.
+    """
+
+    id: int
+    namespace: str
+    repo_name: str
+    description: str | None
+    tags: list[str]
+    current_revision: str
+    created_at: datetime
+    updated_at: datetime

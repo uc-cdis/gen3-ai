@@ -22,7 +22,7 @@ DB_DRIVER = starlette_config(
 
 DB_USER = starlette_config(
     "DB_USER",
-    default="postgres",
+    default="sairamkova",
 )
 
 DB_PASSWORD = starlette_config(
