@@ -264,12 +264,14 @@ build $SERVICE="all": _check_dependencies
 
 @docker_run $SERVICE $EXTERNAL_PORT="8001" $INTERNAL_PORT="4141": _check_dependencies
   #!/usr/bin/env bash
+  source scripts/.justfile_helpers.bash
+
   print_header "just docker_run:" "running" "$SERVICE" "service..."
-  docker kill $SERVICE
-  docker rm $SERVICE
-  SERVICE_NAME=$SERVICE docker run --name $SERVICE \
-  --env-file "./.env" \
-  -v "$PROMETHEUS_MULTIPROC_DIR":"$PROMETHEUS_MULTIPROC_DIR" \
+
+  docker kill "$SERVICE" 2>/dev/null || true
+  docker rm "$SERVICE" 2>/dev/null || true
+  docker run --name $SERVICE \
+  --env-file "services/$SERVICE/.env" \
   -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} \
   $SERVICE:latest
 
