@@ -5,7 +5,6 @@ description = "Gen3 AI Model Repo"
 dependencies = [
     "common",
     "asyncpg",
-    "ruff>=0.15.12",
     "huggingface-hub>=1.14.0",
 ]
 requires-python = "~=3.13.0"

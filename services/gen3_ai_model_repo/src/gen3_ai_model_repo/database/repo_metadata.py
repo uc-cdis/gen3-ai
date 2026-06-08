@@ -1,0 +1,263 @@
+"""
+Repository metadata database operations.
+
+Handles CRUD operations for repository metadata including
+namespace, repository name, description, and tags.
+"""
+
+from gen3_ai_model_repo.database.db import get_db_pool
+from gen3_ai_model_repo.models.schemas import RepositoryMetadataModel
+
+
+async def create_repository_metadata(
+    namespace: str,
+    repo_name: str,
+    description: str,
+    tags: list[str] | None = None,
+) -> RepositoryMetadataModel:
+    """
+    Insert repository metadata into database.
+
+    Creates a new repository metadata entry or updates an existing one
+    if a repository with the same namespace and repo_name already exists.
+
+    Args:
+        namespace: The namespace/organization for the repository.
+        repo_name: The name of the repository.
+        description: A description of the repository.
+        tags: Optional list of tags for the repository.
+
+    Returns:
+        RepositoryMetadataModel: The created or updated repository metadata.
+    """
+    if tags is None:
+        tags = []
+
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO model_repositories (
+                namespace,
+                repo_name,
+                description,
+                tags
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (namespace, repo_name)
+            DO UPDATE SET
+                description = EXCLUDED.description,
+                tags = EXCLUDED.tags,
+                updated_at = NOW();
+            """,
+            namespace,
+            repo_name,
+            description,
+            tags,
+        )
+
+    return await get_repository_metadata(
+        namespace,
+        repo_name,
+    )
+
+
+async def get_repository_metadata(
+    namespace: str,
+    repo_name: str,
+) -> RepositoryMetadataModel | None:
+    """
+    Retrieve repository metadata from database.
+
+    Args:
+        namespace: The namespace/organization for the repository.
+        repo_name: The name of the repository.
+
+    Returns:
+        RepositoryMetadataModel if found, None otherwise.
+    """
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                namespace,
+                repo_name,
+                description,
+                tags,
+                created_at
+            FROM model_repositories
+            WHERE namespace = $1
+            AND repo_name = $2;
+            """,
+            namespace,
+            repo_name,
+        )
+
+    if row is None:
+        return None
+
+    return RepositoryMetadataModel(
+        namespace=row["namespace"],
+        repo=row["repo_name"],
+        description=row["description"],
+        tags=row["tags"],
+        created_at=row["created_at"],
+    )
+
+
+async def delete_repository_metadata(
+    namespace: str,
+    repo_name: str,
+) -> bool:
+    """
+    Delete repository metadata from database.
+
+    Args:
+        namespace: The namespace/organization for the repository.
+        repo_name: The name of the repository.
+
+    Returns:
+        True if deletion was successful, False otherwise.
+    """
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM model_repositories
+            WHERE namespace = $1
+            AND repo_name = $2;
+            """,
+            namespace,
+            repo_name,
+        )
+
+    return result == "DELETE 1"
+
+
+async def repository_exists(
+    namespace: str,
+    repo_name: str,
+) -> bool:
+    """
+    Check whether a repository exists in the database.
+
+    Args:
+        namespace: The namespace/organization for the repository.
+        repo_name: The name of the repository.
+
+    Returns:
+        True if the repository exists, False otherwise.
+    """
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM model_repositories
+            WHERE namespace = $1
+            AND repo_name = $2;
+            """,
+            namespace,
+            repo_name,
+        )
+
+    return row is not None
+
+
+async def list_all_repositories() -> list[RepositoryMetadataModel]:
+    """
+    Return all repositories from the database.
+
+    Returns:
+        A list of RepositoryMetadataModel objects for all repositories.
+    """
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                namespace,
+                repo_name,
+                description,
+                tags,
+                created_at
+            FROM model_repositories;
+            """
+        )
+
+    return [
+        RepositoryMetadataModel(
+            namespace=row["namespace"],
+            repo=row["repo_name"],
+            description=row["description"],
+            tags=row["tags"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+async def update_repository_metadata(
+    namespace: str,
+    repo_name: str,
+    description: str | None = None,
+    tags: list[str] | None = None,
+) -> RepositoryMetadataModel | None:
+    """
+    Update repository metadata.
+
+    Selectively updates description and/or tags for an existing repository.
+    Only provided fields will be updated.
+
+    Args:
+        namespace: The namespace/organization for the repository.
+        repo_name: The name of the repository.
+        description: Optional new description for the repository.
+        tags: Optional new list of tags for the repository.
+
+    Returns:
+        RepositoryMetadataModel of the updated repository, or None if not found.
+    """
+    pool = await get_db_pool()
+
+    set_clauses = []
+    values = []
+
+    if description is not None:
+        values.append(description)
+        set_clauses.append(f"description = ${len(values)}")
+
+    if tags is not None:
+        values.append(tags)
+        set_clauses.append(f"tags = ${len(values)}")
+
+    if not set_clauses:
+        return await get_repository_metadata(
+            namespace,
+            repo_name,
+        )
+
+    values.extend([namespace, repo_name])
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            UPDATE model_repositories
+            SET {", ".join(set_clauses)},
+                updated_at = NOW()
+            WHERE namespace = ${len(values) - 1}
+            AND repo_name = ${len(values)};
+            """,
+            *values,
+        )
+
+    return await get_repository_metadata(
+        namespace,
+        repo_name,
+    )

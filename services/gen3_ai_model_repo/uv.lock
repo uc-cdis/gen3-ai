@@ -437,7 +437,6 @@ dependencies = [
     { name = "asyncpg" },
     { name = "common" },
     { name = "huggingface-hub" },
-    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -445,7 +444,6 @@ requires-dist = [
     { name = "asyncpg" },
     { name = "common", directory = "../../libraries/common" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
-    { name = "ruff", specifier = ">=0.15.12" },
 ]
 
 [package.metadata.requires-dev]
