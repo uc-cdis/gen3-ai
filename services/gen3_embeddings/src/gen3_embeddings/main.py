@@ -75,11 +75,15 @@ async def check_db_connection():
 
             if usesuper:
                 logging.error(f"DB user '{usename}' is SUPERUSER. This is unsafe for RLS.")
-                raise Exception("Configured DB user is SUPERUSER, aborting...")
+                raise Exception(
+                    "Configured DB user is SUPERUSER, which bypasses REQUIRED row-level security. Aborting..."
+                )
 
             if usebypassrls:
                 logging.error(f"DB user '{usename}' has BYPASSRLS. This is unsafe for RLS.")
-                raise Exception("Configured DB user has BYPASSRLS, aborting...")
+                raise Exception(
+                    "Configured DB user has BYPASSRLS, which bypasses REQUIRED row-level security. Aborting..."
+                )
 
         logging.debug("Startup database connection test PASSED.")
     except Exception as exc:

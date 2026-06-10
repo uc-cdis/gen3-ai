@@ -2,12 +2,18 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+from pgvector import HalfVector, Vector
 from pydantic import BaseModel, Field
 
 
 class VectorType(StrEnum):
     vector = "vector"
     halfvec = "halfvec"
+
+
+class VectorPrecision(StrEnum):
+    float16 = "float16"
+    float32 = "float32"
 
 
 class DistanceMetric(StrEnum):
@@ -49,23 +55,51 @@ class EmbeddingInfo(BaseModel):
 
 
 class SingleEmbeddingResult(BaseModel):
-    vector: list[float]
+    vector: Vector | HalfVector
     input_index: int | None = None
     embedding_id: UUID
     info: EmbeddingInfo | None = None
 
+    # @field_serializer("vector")
+    # def serialize_vector(self, vector: Vector | HalfVector):
+    #     """
+    #     Tells pydantic how to convert pgvector types to
+    #     a JSON-serializable type
+    #     """
+    #     return vector.to_numpy()
+
+    # this is to support Vector / HalfVector
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class SingleEmbeddingResultBinary(BaseModel):
+    vector_base64: bytes
+    precision: VectorPrecision
+    input_index: int | None = None
+    embedding_id: UUID
+    info: EmbeddingInfo | None = None
+
+    model_config = {
+        "ser_json_bytes": "base64",
+    }
+
 
 class EmbeddingResponseWithCollections(BaseModel):
-    embeddings: list[dict]
+    embeddings: list[SingleEmbeddingResult]
     collections: list[CollectionModel] | None = None
 
 
 class EmbeddingResponse(BaseModel):
-    embeddings: list[dict]
+    embeddings: list[SingleEmbeddingResult]
+
+
+class EmbeddingResponseBinary(BaseModel):
+    embeddings: list[SingleEmbeddingResultBinary]
+    count: int
 
 
 class PaginatedEmbeddingResponse(BaseModel):
-    embeddings: list[dict]
+    embeddings: list[SingleEmbeddingResult]
     page: int
     page_size: int
     next_page: int | None = None

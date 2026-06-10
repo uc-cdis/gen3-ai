@@ -21,9 +21,11 @@ from gen3_embeddings.models.helpers import (
 from gen3_embeddings.models.schemas import (
     CreateEmbeddingsBody,
     EmbeddingResponse,
+    EmbeddingResponseBinary,
     EmbeddingResponseWithCollections,
     PaginatedEmbeddingResponse,
     SingleEmbeddingResult,
+    SingleEmbeddingResultBinary,
     UpdateEmbeddingBody,
 )
 
@@ -449,7 +451,8 @@ async def get_embeddings_bulk_unknown_collections(
 
 @embeddings_router.post(
     "/vectorstore/collections/{collection_name}/embeddings/bulk",
-    response_model=EmbeddingResponse,
+    # do NOT add a response model class in this path operation decorator
+    # just rely on it in the typed return. FastAPI docs say this is more performant
     summary="Read select embeddings from collection",
     tags=["Embeddings (Bulk Read)"],
 )
@@ -461,9 +464,10 @@ async def get_embeddings_bulk_from_collection(
     request: Request,
     collection_name: str,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
+    # TODO: make this True by default - e.g. query param to FORCE to include
     no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-):
+) -> EmbeddingResponseBinary:
     """
     TODO: post here but actually reading, how to hanle aurhz here?
 
@@ -483,19 +487,19 @@ async def get_embeddings_bulk_from_collection(
         HTTPException: 404 if the collection is not found.
     """
     collection = await dal.get_collection_by_name(collection_name)
+
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     embs = await dal.get_embeddings_bulk(
         embedding_ids=embedding_uuids,
-        vector_type=None,
+        collection_id=collection.id,
+        vector_type=collection.vector_type,
     )
-    # Filter to the given collection
-    embs = [e for e in embs if e.collection_id == collection.id]
 
     emb_by_id = {e.embedding_id: e for e in embs}
 
-    results: list[SingleEmbeddingResult] = []
+    binary_results: list[SingleEmbeddingResultBinary] = []
     # Preserve original order and input collection
     for input_index, emb_id in enumerate(embedding_uuids):
         emb = emb_by_id.get(emb_id)
@@ -507,10 +511,9 @@ async def get_embeddings_bulk_from_collection(
             collection=collection,
             input_index=input_index,
             include_info=(not no_embeddings_info),
+            binary_embeddings=True,
+            precision="float16" if collection.vector_type == "halfvec" else "float32",
         )
-        if isinstance(res, SingleEmbeddingResult):
-            results.append(res)
+        binary_results.append(res)
 
-    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
-
-    return EmbeddingResponse(embeddings=embeddings_serialized)
+    return EmbeddingResponseBinary(embeddings=binary_results, count=len(binary_results))

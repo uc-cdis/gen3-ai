@@ -5,6 +5,7 @@ from gen3_embeddings.models.schemas import (
     CollectionModel,
     EmbeddingInfo,
     SingleEmbeddingResult,
+    SingleEmbeddingResultBinary,
 )
 
 
@@ -64,7 +65,9 @@ def embedding_to_result(
     collection: Collection | None,
     include_info: bool = True,
     input_index: int | None = None,
-) -> SingleEmbeddingResult:
+    binary_embeddings: bool = False,
+    precision: str = "float32",
+) -> SingleEmbeddingResult | SingleEmbeddingResultBinary:
     """
     Convert a DB Embedding dataclass into an API embedding result.
 
@@ -89,9 +92,33 @@ def embedding_to_result(
             metadata=emb.metadata,
         )
 
-    return SingleEmbeddingResult(
-        vector=emb.embedding,
-        embedding_id=emb.embedding_id,
-        input_index=input_index,
-        info=info,
-    )
+    single_embedding = None
+
+    if binary_embeddings:
+        print(f"DEBUG: Type of embedding is {type(emb.embedding)}")
+
+        if hasattr(emb.embedding, "to_binary"):
+            # works for both Vector and HalfVector classes
+            emb_bytes = emb.embedding.to_binary()
+        else:
+            # works for the numpy arrays
+            emb_bytes = emb.embedding.tobytes()
+
+        single_embedding = SingleEmbeddingResultBinary(
+            vector_base64=emb_bytes,
+            precision=precision,
+            embedding_id=emb.embedding_id,
+            input_index=input_index,
+            info=info,
+        )
+    else:
+        print(f"DEBUG: Type of embedding is {type(emb.embedding)}")
+
+        single_embedding = SingleEmbeddingResult(
+            vector=emb.embedding,
+            embedding_id=emb.embedding_id,
+            input_index=input_index,
+            info=info,
+        )
+
+    return single_embedding
