@@ -41,48 +41,94 @@ https://github.com/pgvector/pgvector?tab=readme-ov-file#indexing-progress
 SELECT phase, round(100.0 * blocks_done / nullif(blocks_total, 0), 1) AS "%" FROM pg_stat_progress_create_index;
 ```
 
+## Install with Helm
+
+Right now there are still some issues, but you can deploy the service through Helm.
+Issues:
+
+- The pgvector Postgres image is used for all services.
+- You have to use a locally built gen3_embeddings image; the GA build process has not been tested.
+- There is an authentication issue when the app is deployed in the cluster that requires debugging.
+
+Prepare a values.yaml file with at least the following configuration:
+```yaml
+postgresql:
+  image:
+    registry: docker.io
+    repository: pgvector/pgvector
+    tag: pg18-trixie
+    pullPolicy: IfNotPresent
+  primary:
+    containerSecurityContext:
+      runAsUser: 0
+
+gen3-embeddings:
+  enabled: true
+  debug: true
+  image:
+    repository: gen3_embeddings
+    pullPolicy: IfNotPresent
+    tag: latest
+```
+
+Build and load the image into Kind:
+```bash
+just build gen3_embeddings
+
+kind load docker-image gen3_embeddings:latest
+```
+
+Download Helm charts and install the services
+```bash
+git clone --branch feat/add-gen3-embeddings --single-branch https://github.com/uc-cdis/gen3-helm.git
+
+cd helm
+
+helm dependency update ./gen3
+
+helm install gen3-test ./gen3 -f /PTAH_TO_YOUR/values-gen3-embeddings.yaml
+```
+Now you can try (change the hostname):
+```bash
+curl -X GET "https://markx.dev.planx-pla.net/embeddings/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
+```
 
 ## Running and testing locally
 
 ### Create a pgvector database, create app db user, load test datasets
 
+Run this under the gen3_embeddings folder to access the migration file
 ```bash
 docker run --name pgvector \
-    -e POSTGRES_USER=testuser \
-    -e POSTGRES_PASSWORD=testpass \
-    -e POSTGRES_DB=testdb \
+    -e POSTGRES_USER=adminuser \
+    -e POSTGRES_PASSWORD=adminpass \
+    -e POSTGRES_DB=gen3embeddings \
     -p 5432:5432 \
     -v $(pwd)/db_migrations/0/0.sql:/docker-entrypoint-initdb.d/0.sql \
     -d pgvector/pgvector:pg18-trixie
 ```
 
-Create `.env` file under gen3_embeddings folder
+Create an app user with limited permissions. A superuser can bypass RLS, and the app won't allow a superuser. for example create an app user and load some test data:
+
 ```bash
-PGHOST=localhost
-PGPORT=5432
-PGUSER=testuser
-PGPASSWORD=testpass
-PGDATABASE=gen3embeddings
-
-DB_APP_USER=embeddings_user
-DB_APP_USER_PASSWORD=embeddings_pass
-
-DEBUG=True
-ARBORIST_URL="http://localhost:4280"
-VERBOSE_INTERNAL_LOGS=True
-```
-
-Setup db, run this under gen3-ai folder:
-```bash
-just setup_db gen3_embeddings
-```
-
-Create an app_user with limited permissions. A superuser can bypass RLS.
-For the following, make sure you update the collection_id according to the ids from creating indices outputs
-```bash
-PGPASSWORD=testpass psql -h localhost -p 5432 -U testuser -d gen3embeddings
+PGPASSWORD=adminpass psql -h localhost -p 5432 -U adminuser -d gen3embeddings
 ```
 ```sql
+-- Create an app_user with limited permissions. A superuser can bypass RLS.
+CREATE ROLE embeddings_user
+  LOGIN
+  PASSWORD 'embeddings_pass'
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections        TO embeddings_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_vector  TO embeddings_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_halfvec TO embeddings_user;
+```
+```sql
+-- For the following, make sure you update the collection_id according to the ids from creating indices outputs
 INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
 VALUES
   ('noaccess', 'noaccess collection', 'test-model', 3, 'vector'),
@@ -513,6 +559,19 @@ portal:
     tag: dev
 ```
 
+Create `.env` file under gen3_embeddings folder
+```bash
+PGHOST=localhost
+PGPORT=5432
+PGUSER=embeddings_user
+PGPASSWORD=embeddings_pass
+PGDATABASE=gen3embeddings
+
+DEBUG=True
+ARBORIST_URL="http://localhost:4280"
+VERBOSE_INTERNAL_LOGS=True
+```
+
 ### Start gen3_embeddings server
 run this under gen3-ai folder
 ```bash
@@ -776,3 +835,9 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 - set app user
 - output page_size value use the actual output size or the defined page size?
 - delete functions need some work
+- the unauthorized error got 500
+- move get_allowed_authz_for_request logic out of db.py
+- Creating a duplicate collections should 409 instead of 400 imo. Right now if I try to recreate the same one I get a 400
+- when attempting to create a collection that I do not have the authorization to create, I would expect a 401. right now getting a 400 bad request
+- The type used is in the response, so if the user doesn't supply vector_type, we should default based on the dimensions, if they provide vector_type=vector AND try to exceed, then error, yes. but if they don't provide, we should just pick vector or halfvec based on the dimensions size
+- no duplcicate embeddings in the same collection

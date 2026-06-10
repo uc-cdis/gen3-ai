@@ -87,16 +87,3 @@ CREATE POLICY authz_policy_halfvec ON embeddings_halfvec
   WITH CHECK (
     authz && current_setting('app.allowed_authz', true)::text[]
   );
-
--- Create an app_user with limited permissions. A superuser can bypass RLS.
-CREATE ROLE :"DB_APP_USER"
-  LOGIN
-  PASSWORD :'DB_APP_USER_PASSWORD'
-  NOSUPERUSER
-  NOCREATEDB
-  NOCREATEROLE
-  NOINHERIT;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections        TO :"DB_APP_USER";
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_vector  TO :"DB_APP_USER";
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_halfvec TO :"DB_APP_USER";

@@ -7,6 +7,7 @@ from gen3authz.client.arborist.async_client import ArboristClient
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.database.db import get_pool
+from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
 from gen3_embeddings.routes.search import vectorstore_search_router
@@ -15,6 +16,7 @@ route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
 route_aggregator.include_router(collections_router)
 route_aggregator.include_router(vectorstore_search_router)
+route_aggregator.include_router(basic_router)
 
 
 @asynccontextmanager
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI):
     # Startup logic
     await check_db_connection()
 
+    logging.debug(f"Initializing Arborist ({config.ARBORIST_URL}) client for authorization...")
     app.state.arborist_client = ArboristClient(
         arborist_base_url=config.ARBORIST_URL,
     )
