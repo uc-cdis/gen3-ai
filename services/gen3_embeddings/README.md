@@ -93,6 +93,12 @@ Now you can try (change the hostname):
 curl -X GET "https://markx.dev.planx-pla.net/embeddings/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 ```
 
+If you got errors like this one on your local Helm:
+```
+fastapi.exceptions.HTTPException: 403: Cannot fetch pubkey from issuer https://markx.dev.planx-pla.net/user: All connection attempts failed
+```
+Follow [this](https://ctds-planx.atlassian.net/wiki/spaces/PD/pages/3755474945/Setting+up+a+local+dev+env+using+Helm#Ingress%3A) to fix it.
+
 ## Running and testing locally
 
 ### Create a pgvector database, create app db user, load test datasets
