@@ -30,6 +30,11 @@ COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAM
 COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
 COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/gunicorn.conf.py /services/gunicorn.conf.py
 
+COPY --chown=gen3:gen3 /scripts/run_sql_files.py /services/${SERVICE_NAME}/db_migrations/run_sql_files.py
+# Conditionally copy db_migrations if it exists in build context
+# The wildcard prevents Docker from failing if db_migrations is missing
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/db_migrations* /services/${SERVICE_NAME}/db_migrations/
+
 WORKDIR /services/${SERVICE_NAME}
 
 # Builder stage installs dependencies

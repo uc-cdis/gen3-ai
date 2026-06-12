@@ -54,7 +54,7 @@ setup: _check_dependencies
 
   echo "pre-commit git hook is installed."
 
-
+# setup_db is not working right now
 setup_db $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail

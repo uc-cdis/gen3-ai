@@ -19,14 +19,10 @@ PGHOST = starlette_config("PGHOST", default="localhost")
 PGPORT = starlette_config("PGPORT", cast=int, default="5432")
 PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
 
-DB_APP_USER = starlette_config("DB_APP_USER", default="app_user")
-DB_APP_USER_PASSWORD = starlette_config("DB_APP_USER_PASSWORD", default="app_user_password")
-
-# make sure to use DB_APP_USER and DB_APP_USER_PASSWORD in the connection string, not PGUSER and PGPASSWORD
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
     cast=Secret,
-    default=f"{PGDRIVER}://{DB_APP_USER}:{DB_APP_USER_PASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}",
+    default=f"{PGDRIVER}://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}",
 )
 
 URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_URL_PREFIX", default="", cast=str)
