@@ -131,7 +131,6 @@ jobs:
     needs: [post-commit-check, security]
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
-      BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
       BUILD_ARGS: SERVICE_NAME=gen3_embeddings
       OVERRIDE_REPO_NAME: gen3_embeddings
