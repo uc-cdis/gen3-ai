@@ -38,12 +38,7 @@ SELECT phase, round(100.0 * blocks_done / nullif(blocks_total, 0), 1) AS "%" FRO
 
 ## Install with Helm
 
-Right now there are still some issues, but you can deploy the service through Helm.
-Issues:
-
-- The pgvector Postgres image is used for all services.
-- You have to use a locally built gen3_embeddings image; the GA build process has not been tested.
-- There is an authentication issue when the app is deployed in the cluster that requires debugging.
+Right now in order to make the gen3_embeddings service work in your local deployment, the pgvector Postgres image is used for all gen3 services. (pending fix: [ticket](https://ctds-planx.atlassian.net/browse/GPE-2406?visitedUserSeg=true))
 
 Prepare a values.yaml file with at least the following configuration:
 
@@ -62,17 +57,9 @@ gen3-embeddings:
   enabled: true
   debug: true
   image:
-    repository: gen3_embeddings
-    pullPolicy: IfNotPresent
-    tag: latest
-```
-
-Build and load the image into Kind:
-
-```bash
-just build gen3_embeddings
-
-kind load docker-image gen3_embeddings:latest
+    repository: quay.io/cdis/gen3_embeddings
+    pullPolicy: Always
+    tag: feat_embedding
 ```
 
 Download Helm charts and install the services
@@ -90,7 +77,7 @@ helm install gen3-test ./gen3 -f /PTAH_TO_YOUR/values-gen3-embeddings.yaml
 Now you can try (change the hostname):
 
 ```bash
-curl -X GET "https://markx.dev.planx-pla.net/embeddings/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
+curl -X GET "https://markx.dev.planx-pla.net/ai/vectorstore/collections/" -H "Authorization: Bearer $TOKEN"
 ```
 
 If you got errors like this one on your local Helm:
