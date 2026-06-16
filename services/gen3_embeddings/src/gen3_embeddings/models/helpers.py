@@ -60,14 +60,59 @@ def collection_to_model(col: Collection) -> CollectionModel:
     )
 
 
+def embedding_to_binary_result(
+    emb: Embedding,
+    collection: Collection | None,
+    include_info: bool = True,
+    input_index: int | None = None,
+    precision: str = "float32",
+) -> SingleEmbeddingResultBinary:
+    """
+    Convert a DB Embedding dataclass into an API embedding result.
+
+    Args:
+        emb: Dataclass representing an embeddings table row.
+        collection: Optional Collection dataclass for the embedding.
+        include_info: easily control `no_embeddings_info`.
+        input_index: Position of this embedding in the original request/input.
+
+    Returns:
+        SingleEmbeddingResultBinary object
+    """
+    info: EmbeddingInfo | None = None
+    if include_info:
+        collection_name = None
+        if collection:
+            collection_name = collection.collection_name
+        info = EmbeddingInfo(
+            collection_id=emb.collection_id,
+            authz=emb.authz,
+            self=build_embedding_self_url(collection_name, emb.embedding_id),
+            metadata=emb.metadata,
+        )
+
+    if hasattr(emb.embedding, "to_binary"):
+        # works for both Vector and HalfVector classes
+        emb_bytes = emb.embedding.to_binary()
+    else:
+        # works for the numpy arrays
+        emb_bytes = emb.embedding.tobytes()
+
+    return SingleEmbeddingResultBinary(
+        vector_base64=emb_bytes,
+        precision=precision,
+        embedding_id=emb.embedding_id,
+        input_index=input_index,
+        info=info,
+    )
+
+
 def embedding_to_result(
     emb: Embedding,
     collection: Collection | None,
     include_info: bool = True,
     input_index: int | None = None,
-    binary_embeddings: bool = False,
-    precision: str = "float32",
-) -> SingleEmbeddingResult | SingleEmbeddingResultBinary:
+) -> SingleEmbeddingResult:
     """
     Convert a DB Embedding dataclass into an API embedding result.
 
@@ -92,33 +137,9 @@ def embedding_to_result(
             metadata=emb.metadata,
         )
 
-    single_embedding = None
-
-    if binary_embeddings:
-        print(f"DEBUG: Type of embedding is {type(emb.embedding)}")
-
-        if hasattr(emb.embedding, "to_binary"):
-            # works for both Vector and HalfVector classes
-            emb_bytes = emb.embedding.to_binary()
-        else:
-            # works for the numpy arrays
-            emb_bytes = emb.embedding.tobytes()
-
-        single_embedding = SingleEmbeddingResultBinary(
-            vector_base64=emb_bytes,
-            precision=precision,
-            embedding_id=emb.embedding_id,
-            input_index=input_index,
-            info=info,
-        )
-    else:
-        print(f"DEBUG: Type of embedding is {type(emb.embedding)}")
-
-        single_embedding = SingleEmbeddingResult(
-            vector=emb.embedding,
-            embedding_id=emb.embedding_id,
-            input_index=input_index,
-            info=info,
-        )
-
-    return single_embedding
+    return SingleEmbeddingResult(
+        vector=emb.embedding,
+        embedding_id=emb.embedding_id,
+        input_index=input_index,
+        info=info,
+    )

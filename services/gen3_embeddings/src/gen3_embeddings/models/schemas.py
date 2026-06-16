@@ -2,8 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pgvector import HalfVector, Vector
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VectorType(StrEnum):
@@ -55,21 +54,13 @@ class EmbeddingInfo(BaseModel):
 
 
 class SingleEmbeddingResult(BaseModel):
-    vector: Vector | HalfVector
+    vector: list[float]  # TODO: try to switch to Vector / HalfVector
     input_index: int | None = None
     embedding_id: UUID
     info: EmbeddingInfo | None = None
 
-    # @field_serializer("vector")
-    # def serialize_vector(self, vector: Vector | HalfVector):
-    #     """
-    #     Tells pydantic how to convert pgvector types to
-    #     a JSON-serializable type
-    #     """
-    #     return vector.to_numpy()
-
     # this is to support Vector / HalfVector
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SingleEmbeddingResultBinary(BaseModel):

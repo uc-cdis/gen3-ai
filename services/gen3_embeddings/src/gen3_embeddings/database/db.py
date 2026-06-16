@@ -620,7 +620,6 @@ class DataAccessLayer:
 
                 stmt = await conn.prepare(raw_stmt)
                 rows = await stmt.fetch(embedding_ids)
-                print(f"DEBUG: Type received from DAL: {rows[0]}")
                 results.extend(rows_to_embeddings(rows))
             else:
                 # query both vector and halfvec tables
@@ -634,7 +633,6 @@ class DataAccessLayer:
                     stmt = await conn.prepare(raw_stmt)
 
                     rows = await stmt.fetch(embedding_ids)
-                    print(f"DEBUG: Type received from DAL: {rows[0]}")
                     results.extend(rows_to_embeddings(rows))
 
             return results

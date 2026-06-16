@@ -9,28 +9,23 @@ We use [pgvector](https://github.com/pgvector/pgvector) in a PostgreSQL database
 By default:
 
 * We use a variable `vector`-type column which supports vectors of up to 2,000 dimensions
-* We create a HNSW index for optimizing L2 distance for every service-level "Vector Index"
-    * A "Vector Index" practically is a metadata table + a group of similarly dimensioned vectors
+* If you have a collection with embedding dimensionality of >2000, we use pgvector's `halfvec`
+* We create a HNSW index for optimizing L2 distance for every service-level "Vectorstore Collection"
+    - A "Vectorstore Collection" practically is a metadata table + a group of similarly dimensioned vectors
       in the embedding table
 * Modifications to queries are possible through the API (e.g. sacrificing time for more accuracy), see the API specification for more details
-
-> If you need to support indexing >2000 dimension vectors: the service will need to be modified. This is a limitation of pgvector. The `vector` column allows higher dimensionality, but the indexing can't go beyond 2000.
-> https://github.com/pgvector/pgvector?tab=readme-ov-file#what-if-i-want-to-index-vectors-with-more-than-2000-dimensions
-> The best bet for up to 4000 would be to use half-precision INDEXING
 
 ## Startup
 
 * Log current index size and available memory:
-    * SHOW config_file;
-    * SHOW shared_buffers;
-    * SELECT pg_size_pretty(pg_relation_size('index_name'));
-    * https://github.com/pgvector/pgvector?tab=readme-ov-file#do-indexes-need-to-fit-into-memory
-
+    - SHOW config_file;
+    - SHOW shared_buffers;
+    - SELECT pg_size_pretty(pg_relation_size('index_name'));
+    - https://github.com/pgvector/pgvector?tab=readme-ov-file#do-indexes-need-to-fit-into-memory
 
 ## Querying
 
 Support setting this via query param: https://github.com/pgvector/pgvector?tab=readme-ov-file#query-options
-
 
 ## Misc
 
@@ -51,6 +46,7 @@ Issues:
 - There is an authentication issue when the app is deployed in the cluster that requires debugging.
 
 Prepare a values.yaml file with at least the following configuration:
+
 ```yaml
 postgresql:
   image:
@@ -72,6 +68,7 @@ gen3-embeddings:
 ```
 
 Build and load the image into Kind:
+
 ```bash
 just build gen3_embeddings
 
@@ -79,6 +76,7 @@ kind load docker-image gen3_embeddings:latest
 ```
 
 Download Helm charts and install the services
+
 ```bash
 git clone --branch feat/add-gen3-embeddings --single-branch https://github.com/uc-cdis/gen3-helm.git
 
@@ -88,15 +86,19 @@ helm dependency update ./gen3
 
 helm install gen3-test ./gen3 -f /PTAH_TO_YOUR/values-gen3-embeddings.yaml
 ```
+
 Now you can try (change the hostname):
+
 ```bash
 curl -X GET "https://markx.dev.planx-pla.net/embeddings/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 ```
 
 If you got errors like this one on your local Helm:
+
 ```
 fastapi.exceptions.HTTPException: 403: Cannot fetch pubkey from issuer https://markx.dev.planx-pla.net/user: All connection attempts failed
 ```
+
 Follow [this](https://ctds-planx.atlassian.net/wiki/spaces/PD/pages/3755474945/Setting+up+a+local+dev+env+using+Helm#Ingress%3A) to fix it.
 
 ## Running and testing locally
@@ -104,6 +106,7 @@ Follow [this](https://ctds-planx.atlassian.net/wiki/spaces/PD/pages/3755474945/S
 ### Create a pgvector database, create app db user, load test datasets
 
 Run this under the gen3_embeddings folder to access the migration file
+
 ```bash
 docker run --name pgvector \
     -e POSTGRES_USER=adminuser \
@@ -119,6 +122,7 @@ Create an app user with limited permissions. A superuser can bypass RLS, and the
 ```bash
 PGPASSWORD=adminpass psql -h localhost -p 5432 -U adminuser -d gen3embeddings
 ```
+
 ```sql
 -- Create an app_user with limited permissions. A superuser can bypass RLS.
 CREATE ROLE embeddings_user
@@ -133,6 +137,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE collections        TO embeddings_u
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_vector  TO embeddings_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE embeddings_halfvec TO embeddings_user;
 ```
+
 ```sql
 -- For the following, make sure you update the collection_id according to the ids from creating indices outputs
 INSERT INTO collections (collection_name, description, ai_model_name, dimensions, vector_type)
@@ -245,6 +250,7 @@ FROM generate_series(1, 1000) AS g(i);
 ```
 
 ### Authz and prepare Arborist server
+
 Launch Arborist server using gen3-helm, you can use the following example values.yaml file, update it accordingly. After launch run `kubectl port-forward svc/arborist-service -n default 4280:80`
 
 ```yaml
@@ -566,6 +572,7 @@ portal:
 ```
 
 Create `.env` file under gen3_embeddings folder
+
 ```bash
 PGHOST=localhost
 PGPORT=5432
@@ -579,7 +586,9 @@ VERBOSE_INTERNAL_LOGS=True
 ```
 
 ### Start gen3_embeddings server
+
 run this under gen3-ai folder
+
 ```bash
 uv run --directory "./services/gen3_embeddings" \
   gunicorn \
@@ -588,7 +597,7 @@ uv run --directory "./services/gen3_embeddings" \
   --bind 0.0.0.0:4142 \
   --access-logfile - \
   --error-logfile -
-  ```
+```
 
 ### Run tests
 
@@ -609,6 +618,7 @@ uv run pytest -n auto . --maxfail=1 --disable-warnings \
 ```
 
 ### Sample manual tests
+
 ```bash
 export TOKEN=...
 curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings" -H "Authorization: Bearer $TOKEN"
@@ -832,6 +842,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 ```
 
 ## TODO
+
 - ai model
 - don't print out detailed errors at client side
 - support DEBUG_SKIP_AUTH True for RLS

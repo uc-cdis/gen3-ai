@@ -7,7 +7,7 @@ from gen3_embeddings.auth import (
     get_authz_resource_path_from_collection_name,
     parse_and_auth_request,
 )
-from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
 from gen3_embeddings.database.db import (
     Collection,
     DataAccessLayer,
@@ -16,6 +16,7 @@ from gen3_embeddings.database.db import (
 )
 from gen3_embeddings.models.helpers import (
     collection_to_model,
+    embedding_to_binary_result,
     embedding_to_result,
 )
 from gen3_embeddings.models.schemas import (
@@ -254,10 +255,8 @@ async def list_embeddings_in_collection(
     next_page = page + 1 if len(results) == page_size else None
     prev_page = page - 1 if page > 1 else None
 
-    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
-
     return PaginatedEmbeddingResponse(
-        embeddings=embeddings_serialized,
+        embeddings=results,
         page=page,
         page_size=page_size,
         next_page=next_page,
@@ -324,6 +323,7 @@ async def create_embeddings_in_collection(
     embedding_authz_paths = body.authz or [default_collection_authz]
 
     # 1) Check create on collection authz
+    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
     await authorize_request(
         request=request,
         authz_access_method="create",
@@ -331,6 +331,7 @@ async def create_embeddings_in_collection(
     )
 
     # 2) Check create on embedding authz paths
+    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
     if embedding_authz_paths != [default_collection_authz]:
         await authorize_request(
             request=request,
@@ -346,17 +347,22 @@ async def create_embeddings_in_collection(
         meta = item.metadata or {}
 
         # For now: only support already-embedded numeric vectors.
-        if not isinstance(emb, list) or not all(isinstance(x, (int, float)) for x in emb):
-            raise HTTPException(
-                status_code=400,
-                detail="Only numeric vector embeddings are supported at this time",
-            )
+        # if not isinstance(emb, list) or not all(isinstance(x, (int, float)) for x in emb):
+        #     raise HTTPException(
+        #         status_code=400,
+        #         detail="Only numeric vector embeddings are supported at this time",
+        #     )
 
         if len(emb) != collection.dimensions:
-            raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
+            )
 
         vectors.append([float(x) for x in emb])
         metadata_list.append(meta)
+
+    logging.debug(f"Creating embeddings in collection.id: `{collection.id}`...")
 
     created = await dal.create_embeddings_bulk(
         collection=collection,
@@ -370,11 +376,10 @@ async def create_embeddings_in_collection(
         res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_embeddings_info))
         results.append(res)
 
-    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
-
-    return EmbeddingResponse(embeddings=embeddings_serialized)
+    return EmbeddingResponse(embeddings=results)
 
 
+# TODO: let's move /bulk endpoints to a new embeddings_bulk.py so we match the API tags better
 @embeddings_router.post(
     "/embeddings/bulk",
     response_model=EmbeddingResponseWithCollections,
@@ -441,10 +446,8 @@ async def get_embeddings_bulk_unknown_collections(
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
-    embeddings_serialized = [r.model_dump(exclude_none=True) for r in results]
-
     return EmbeddingResponseWithCollections(
-        embeddings=embeddings_serialized,
+        embeddings=results,
         collections=[collection_to_model(col) for col in collections.values()],
     )
 
@@ -497,21 +500,26 @@ async def get_embeddings_bulk_from_collection(
         vector_type=collection.vector_type,
     )
 
+    if embs:
+        logging.debug(
+            f"Type of emb.embedding with vector_type=`{collection.vector_type}` is `{type(embs[-1].embedding)}`"
+        )
+
     emb_by_id = {e.embedding_id: e for e in embs}
 
     binary_results: list[SingleEmbeddingResultBinary] = []
+
     # Preserve original order and input collection
     for input_index, emb_id in enumerate(embedding_uuids):
         emb = emb_by_id.get(emb_id)
         if not emb:
             continue
 
-        res = embedding_to_result(
+        res = embedding_to_binary_result(
             emb=emb,
             collection=collection,
             input_index=input_index,
             include_info=(not no_embeddings_info),
-            binary_embeddings=True,
             precision="float16" if collection.vector_type == "halfvec" else "float32",
         )
         binary_results.append(res)
