@@ -63,6 +63,35 @@ AUTHZ_SERVICE_NAME = starlette_config(
     default="gen3-ai-model-repo",
     cast=str,
 )
+STORAGE_PROVIDER = starlette_config(
+    "STORAGE_PROVIDER",
+    default="local",
+)
+
+LOCAL_STORAGE_PATH = starlette_config(
+    "LOCAL_STORAGE_PATH",
+    default="./data",
+)
+
+MINIO_ENDPOINT = starlette_config(
+    "MINIO_ENDPOINT",
+    default="localhost:9000",
+)
+
+MINIO_ACCESS_KEY = starlette_config(
+    "MINIO_ACCESS_KEY",
+    default="minioadmin",
+)
+
+MINIO_SECRET_KEY = starlette_config(
+    "MINIO_SECRET_KEY",
+    default="minioadmin",
+)
+
+MINIO_BUCKET = starlette_config(
+    "MINIO_BUCKET",
+    default="model-repo",
+)
 
 # common logger, don't change this
 
@@ -84,6 +113,12 @@ AUTHZ_SERVICE_RESOURCE = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_RESOURCE",
     default="/services/gen3-ai-model-repo",
     cast=str,
+)
+
+FILE_STREAM_CHUNK_SIZE = starlette_config(
+    "GEN3_AI_MODEL_REPO_FILE_STREAM_CHUNK_SIZE",
+    default="65536",
+    cast=int,
 )
 
 ##### Common Config - DO NOT EDIT #####

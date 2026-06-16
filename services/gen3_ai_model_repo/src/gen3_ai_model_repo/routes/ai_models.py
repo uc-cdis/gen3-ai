@@ -2,11 +2,13 @@ import hashlib
 from pathlib import Path
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
-from gen3_ai_model_repo.auth import validate_token
+from gen3_ai_model_repo.auth import verify_authorization
+from gen3_ai_model_repo.config import FILE_STREAM_CHUNK_SIZE
+from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
 from gen3_ai_model_repo.database.helper import (
     create_repository_metadata,
     delete_repository_metadata,
@@ -19,6 +21,12 @@ from gen3_ai_model_repo.database.helper import (
 )
 from gen3_ai_model_repo.database.helper import (
     repository_exists as db_repository_exists,
+)
+from gen3_ai_model_repo.file_utils import (
+    compute_hashes,
+    get_local_file,
+    list_repository_files,
+    read_file,
 )
 from gen3_ai_model_repo.metadata import (
     create_metadata,
@@ -38,12 +46,6 @@ from gen3_ai_model_repo.models.schemas import (
     UploadModelResponse,
 )
 from gen3_ai_model_repo.response import build_head_response
-from gen3_ai_model_repo.storage import (
-    compute_hashes,
-    get_local_file,
-    list_repository_files,
-    read_file,
-)
 from gen3_ai_model_repo.url import build_signed_url
 
 ai_models_router = APIRouter()
@@ -63,14 +65,49 @@ class UploadModelRequest(BaseModel):
     tags: list[str] = []
 
 
-@ai_models_router.post("/api/models/{namespace}/{repo}/upload", response_model=UploadModelResponse)
+@ai_models_router.post(
+    "/api/models/{namespace}/{repo}/upload",
+    response_model=UploadModelResponse,
+    summary="Upload a new model repository",
+    description=(
+        "Create a new model repository with metadata and track all files. "
+        "Computes hashes for all files in the repository and stores them in the database. "
+        "Requires authentication via authorization header."
+    ),
+    responses={
+        status.HTTP_200_OK: {"description": "Model successfully uploaded"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
+        status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Failed to upload model"},
+    },
+    tags=["Models"],
+)
 async def upload_model(
     namespace: str,
     repo: str,
     request: UploadModelRequest,
-    authorization: str | None = Header(default=None),
+    _: None = Depends(verify_authorization),
 ) -> UploadModelResponse:
-    validate_token(authorization)
+    """
+    Upload a new AI model repository to the service.
+
+    Creates a new repository with the specified namespace and name, stores metadata
+    in the database, and tracks all files in the repository directory. Computes SHA-256
+    and MD5 hashes for all files to enable efficient deduplication.
+
+    Args:
+        namespace: The namespace/organization for the model (e.g., 'uc-ctds').
+        repo: The repository name for the model (e.g., 'bge-large-en-v1.5-bio-mapping').
+        request: The upload request containing description and optional tags.
+        _: Authentication dependency (automatically validated by FastAPI).
+
+    Returns:
+        UploadModelResponse: Contains status, repository identifier, metadata file path,
+            and the full metadata model including namespace, description, tags, and timestamps.
+
+    Raises:
+        HTTPException: 401 if authorization is invalid, 500 if database operations fail.
+    """
 
     # Create metadata file and database record
     metadata_file = create_metadata(BASE_FILES_DIR, namespace, repo, request.description, request.tags)
@@ -123,26 +160,61 @@ async def upload_model(
     )
 
     return UploadModelResponse(
-        status="uploaded", repo=f"{namespace}/{repo}", metadata_file=str(metadata_file), metadata=metadata_model
+        status="uploaded",
+        repo=f"{namespace}/{repo}",
+        metadata_file=str(metadata_file),
+        metadata=metadata_model,
     )
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/tree/{rev}", response_model=list[TreeEntryModel])
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/tree/{rev}",
+    response_model=list[TreeEntryModel],
+    summary="List repository directory contents",
+    description="Return a flat list of entries for the repository. The output matches the structure documented by Hugging Face.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved directory listing"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository or path not found"},
+    },
+    tags=["Models"],
+)
 @ai_models_router.get(
     "/api/models/{namespace}/{repo}/tree/{rev}/{path:path}",
     response_model=list[TreeEntryModel],
+    summary="List repository path contents",
+    description="Return a flat list of entries for the specified path in the repository.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved path listing"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository or path not found"},
+    },
+    tags=["Models"],
 )
 async def list_repo_tree(
     namespace: str,
     repo: str,
     rev: str,
     path: str = "",
-    expand: bool = Query(False, description="return commit data & minimal security info"),
+    expand: bool = Query(False, description="If true, return commit data and minimal security info"),
 ) -> list[TreeEntryModel]:
     """
-    Return a flat list of entries for the directory *path* (or the file
-    itself).  The output matches the structure documented by Hugging Face
-    but contains only the essential fields.
+    List repository directory contents at a specific revision.
+
+    Returns a flat list of file and directory entries for the given path in the repository.
+    The output structure matches the Hugging Face Hub repository format but includes only
+    essential fields (type, OID, size).
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        rev: The revision/version to list (e.g., 'main', 'v1.0').
+        path: Optional path within the repository. Empty string lists the root directory.
+        expand: If True, include commit data and minimal security scanning information.
+
+    Returns:
+        List of TreeEntryModel objects containing file/directory type, OID, and size.
+
+    Raises:
+        HTTPException: 404 if the repository or path does not exist.
     """
     files = list_repository_files(BASE_FILES_DIR, namespace, repo)
 
@@ -151,14 +223,69 @@ async def list_repo_tree(
     return [TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files]
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/revision/{rev}", response_model=RevisionModel)
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/revision/{rev}",
+    response_model=RevisionModel,
+    summary="Get revision metadata",
+    description="Retrieve detailed metadata for a specific revision of a model repository.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved revision metadata"},
+        status.HTTP_404_NOT_FOUND: {"description": "Revision not found"},
+    },
+    tags=["Models"],
+)
 async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
+    """
+    Get detailed metadata for a specific model revision.
+
+    Retrieves the commit SHA, revision name, and associated tags for a specific
+    revision of the model repository.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        rev: The revision identifier or name (e.g., 'main', 'v1.0').
+
+    Returns:
+        RevisionModel: Contains revision ID, name, commit SHA, and tags.
+
+    Raises:
+        HTTPException: 404 if the revision does not exist.
+    """
     data = metadata_get_revision(namespace, repo, rev)
     return RevisionModel(**data)
 
 
-@ai_models_router.head("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
+@ai_models_router.head(
+    "/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    summary="Get file metadata without downloading",
+    description="Retrieve file metadata (size, hash, signed URL) without downloading the full file content.",
+    responses={
+        status.HTTP_200_OK: {"description": "File metadata retrieved successfully"},
+        status.HTTP_404_NOT_FOUND: {"description": "File not found"},
+    },
+    tags=["Models"],
+)
 async def head_file(namespace: str, repo: str, rev: str, path: str):
+    """
+    Get file metadata without downloading the file content.
+
+    Returns file metadata including size, content hashes (SHA-256 and MD5), and
+    a signed URL for downloading the file. Useful for checking file properties
+    without transferring large files.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        rev: The revision to fetch from (e.g., 'main').
+        path: The file path within the repository.
+
+    Returns:
+        Response: Headers include Content-Length, X-Commit-Hash, X-File-Etag, and Location.
+
+    Raises:
+        HTTPException: 404 if the file does not exist.
+    """
     path_parts = [namespace, repo]
     path_parts.extend(path.split("/"))
     local_path = get_local_file(BASE_FILES_DIR, path_parts)
@@ -175,8 +302,36 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     return build_head_response(commit_hash, etag, size, signed_url)
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}")
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    summary="Download model file with redirect",
+    description="Retrieve a model file from a specific revision. Returns a redirect to a signed URL for file download.",
+    responses={
+        status.HTTP_302_FOUND: {"description": "Redirect to signed URL for file download"},
+        status.HTTP_404_NOT_FOUND: {"description": "File not found"},
+    },
+    tags=["Models"],
+)
 async def get_file(namespace: str, repo: str, rev: str, path: str):
+    """
+    Download a model file from a specific revision.
+
+    Returns a redirect (HTTP 302) to a signed URL for downloading the requested file.
+    In production, this would perform authentication checks and generate a signed URL
+    to an S3 bucket. Currently, the signed URL redirects to a local file serving endpoint.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        rev: The revision to download from (e.g., 'main').
+        path: The file path within the repository to download.
+
+    Returns:
+        RedirectResponse: HTTP 302 redirect to the signed URL for file download.
+
+    Raises:
+        HTTPException: 404 if the file does not exist.
+    """
     print(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
     signed_url = urljoin(
         f"{DOMAIN}/signed-url/",
@@ -188,17 +343,32 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
 
 
-@ai_models_router.get("/health")
-async def health():
-    return Response()
-
-
-@ai_models_router.get("/signed-url/{path:path}")
+@ai_models_router.get(
+    "/signed-url/{path:path}",
+    summary="Stream file content",
+    description="Stream file content for download. This endpoint serves files in chunks with proper Content-Length header for large file support.",
+    responses={
+        status.HTTP_200_OK: {"description": "File content streamed successfully"},
+        status.HTTP_404_NOT_FOUND: {"description": "File not found"},
+    },
+    tags=["Files"],
+)
 async def signed_url(path: str):
     """
-    Return the file content as a streaming response.
-    This is necessary for large files and guarantees the
-    client sees a proper `Content-Length` header.
+    Stream file content for download.
+
+    Returns file content as a streaming response with proper Content-Length header.
+    Files are streamed in 64KB chunks to efficiently handle large files without
+    loading them entirely into memory.
+
+    Args:
+        path: The file path within the repository (e.g., 'namespace/repo/filename.bin').
+
+    Returns:
+        StreamingResponse: File content streamed in chunks with appropriate media type.
+
+    Raises:
+        HTTPException: 404 if the file does not exist.
     """
     local_path = get_local_file(BASE_FILES_DIR, path.split("/"))
     file_size = local_path.stat().st_size
@@ -206,7 +376,7 @@ async def signed_url(path: str):
     media_type = "application/json" if path.endswith(".json") else "application/octet-stream"
 
     # yields the file in chunks
-    def file_iterator(path: Path, chunk_size: int = 65536):
+    def file_iterator(path: Path, chunk_size: int = FILE_STREAM_CHUNK_SIZE):
         with path.open("rb") as file:
             while True:
                 chunk = file.read(chunk_size)
@@ -226,11 +396,34 @@ async def signed_url(path: str):
     )
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/info", response_model=RepositoryInfoModel)
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/info",
+    response_model=RepositoryInfoModel,
+    summary="Get model repository information",
+    description="Retrieve comprehensive information about a model repository including metadata, files, and revision info.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved model information"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository or metadata not found"},
+    },
+    tags=["Models"],
+)
 async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     """
-    Return model info response with metadata from database.
-    Files are listed from the repository directory.
+    Get comprehensive information about a model repository.
+
+    Returns detailed information including repository metadata, list of files,
+    revision information, security scan status, and aggregate file statistics.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+
+    Returns:
+        RepositoryInfoModel: Contains repository ID, SHA, ETag, total size, file list,
+            metadata, and security status information.
+
+    Raises:
+        HTTPException: 404 if the repository, metadata, or revision is not found.
     """
     # Check if repo exists in database
     repo_exists_in_db = await db_repository_exists(namespace, repo)
@@ -269,25 +462,35 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
         size=total_size,
         files=[RepositoryFileModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files_from_db],
         metadata=metadata,
-        security_status={
-            "status": "unscanned",
-            "jFrogScan": {"status": "unscanned"},
-            "protectAiScan": {"status": "unscanned"},
-            "avScan": {"status": "unscanned"},
-            "pickleImportScan": {"status": "unscanned"},
-            "virusTotalScan": {"status": "unscanned"},
-        },
+        security_status=DEFAULT_SECURITY_FILE_STATUS,
     )
 
 
-@ai_models_router.get("/api/models", response_model=list[RepositoryModel])
+@ai_models_router.get(
+    "/api/models",
+    response_model=list[RepositoryModel],
+    summary="List all model repositories",
+    description="Retrieve a list of all available model repositories with basic metadata.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved repository list"},
+    },
+    tags=["Models"],
+)
 async def list_models() -> list[RepositoryModel]:
-    """Retrieve all repositories from database."""
+    """
+    Retrieve all available model repositories.
+
+    Returns a list of all repositories stored in the database, including
+    basic information such as namespace, name, description, tags, and creation date.
+
+    Returns:
+        List of RepositoryModel objects containing repository information.
+    """
     repos = await list_all_repositories()
     return [
         RepositoryModel(
             id=f"{repo.namespace}/{repo.repo}",
-            description=repo.description,
+            description=repo.description or "",
             tags=repo.tags,
             created_at=repo.created_at,
         )
@@ -295,13 +498,39 @@ async def list_models() -> list[RepositoryModel]:
     ]
 
 
-@ai_models_router.delete("/api/models/{namespace}/{repo}", response_model=DeleteModelResponse)
-async def delete_model(
-    namespace: str, repo: str, authorization: str | None = Header(default=None)
-) -> DeleteModelResponse:
-    """Delete repository metadata from database and files from disk."""
-    validate_token(authorization)
+@ai_models_router.delete(
+    "/api/models/{namespace}/{repo}",
+    response_model=DeleteModelResponse,
+    summary="Delete a model repository",
+    description="Delete a model repository including its metadata from the database and files from disk.",
+    responses={
+        status.HTTP_200_OK: {"description": "Model successfully deleted"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
+        status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository not found"},
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Failed to delete repository"},
+    },
+    tags=["Models"],
+)
+async def delete_model(namespace: str, repo: str, _: None = Depends(verify_authorization)) -> DeleteModelResponse:
+    """
+    Delete a model repository.
 
+    Removes the repository from the database and deletes all associated files from disk.
+    Requires authentication. If file deletion fails, the operation continues but logs a warning.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        _: Authentication dependency (automatically validated by FastAPI).
+
+    Returns:
+        DeleteModelResponse: Contains status and repository identifier.
+
+    Raises:
+        HTTPException: 401 if authorization is invalid, 404 if repository not found,
+            500 if database deletion fails.
+    """
     # Check if repository exists
     repo_exists_check = await db_repository_exists(namespace, repo)
     if not repo_exists_check:
@@ -310,7 +539,10 @@ async def delete_model(
     # Delete from database
     deleted_from_db = await delete_repository_metadata(namespace, repo)
     if not deleted_from_db:
-        raise HTTPException(status_code=500, detail=f"Failed to delete repository {namespace}/{repo} from database")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete repository {namespace}/{repo} from database",
+        )
 
     # Delete files from disk if they exist
     repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
@@ -324,12 +556,40 @@ async def delete_model(
     return DeleteModelResponse(status="deleted", repo=f"{namespace}/{repo}")
 
 
-@ai_models_router.get("/api/models/{namespace}/{repo}/revisions", response_model=RevisionListResponseModel)
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/revisions",
+    response_model=RevisionListResponseModel,
+    summary="List model revisions",
+    description="Retrieve all revisions of a model repository from the database.",
+    responses={
+        status.HTTP_200_OK: {"description": "Successfully retrieved revision list"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
+        status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository not found or no revisions exist"},
+    },
+    tags=["Models"],
+)
 async def list_model_revisions(
-    namespace: str, repo: str, authorization: str | None = Header(default=None)
+    namespace: str, repo: str, _: None = Depends(verify_authorization)
 ) -> RevisionListResponseModel:
-    """List model revisions from database."""
-    validate_token(authorization)
+    """
+    List all revisions of a model repository.
+
+    Retrieves the complete list of revisions (versions) for a repository,
+    including revision names, commit SHAs, and other metadata.
+
+    Args:
+        namespace: The namespace/organization for the model.
+        repo: The repository name for the model.
+        _: Authentication dependency (automatically validated by FastAPI).
+
+    Returns:
+        RevisionListResponseModel: Contains repository identifier and list of revisions.
+
+    Raises:
+        HTTPException: 401 if authorization is invalid, 404 if repository not found
+            or if no revisions exist.
+    """
 
     # Verify repository exists in database
     repo_exists_check = await db_repository_exists(namespace, repo)
