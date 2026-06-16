@@ -71,10 +71,11 @@ def embedding_to_binary_result(
     Convert a DB Embedding dataclass into an API embedding result.
 
     Args:
-        emb: Dataclass representing an embeddings table row.
-        collection: Optional Collection dataclass for the embedding.
-        include_info: easily control `no_embeddings_info`.
-        input_index: Position of this embedding in the original request/input.
+        emb: Dataclass representing an embeddings table row
+        collection: Optional Collection dataclass for the embedding
+        include_info: whether or not to include extra info per embedding
+        input_index: Position of this embedding in the original request/input
+        precision: string to represent prevision of the embedding for binary response
 
     Returns:
         SingleEmbeddingResultBinary object
@@ -119,7 +120,7 @@ def embedding_to_result(
     Args:
         emb: Dataclass representing an embeddings table row.
         collection: Optional Collection dataclass for the embedding.
-        include_info: easily control `no_embeddings_info`.
+        include_info: whether or not to include extra info per embedding
         input_index: Position of this embedding in the original request/input.
 
     Returns:

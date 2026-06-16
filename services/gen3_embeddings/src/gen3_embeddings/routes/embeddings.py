@@ -23,7 +23,7 @@ from gen3_embeddings.models.schemas import (
     CreateEmbeddingsBody,
     EmbeddingResponse,
     EmbeddingResponseBinary,
-    EmbeddingResponseWithCollections,
+    EmbeddingResponseBinaryWithCollections,
     PaginatedEmbeddingResponse,
     SingleEmbeddingResult,
     SingleEmbeddingResultBinary,
@@ -211,7 +211,7 @@ async def delete_embedding(
 async def list_embeddings_in_collection(
     request: Request,
     collection_name: str,
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    no_include_info: bool = Query(False, alias="no_include_info"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
     dal: DataAccessLayer = Depends(get_data_access_layer),
@@ -222,7 +222,7 @@ async def list_embeddings_in_collection(
     Args:
         request: The request object.
         collection_name: Name of the collection.
-        no_embeddings_info: If True, omit the 'info' block in each embedding result.
+        no_include_info: If True, omit the 'info' block in each embedding result.
         page: Page number for pagination (1-based).
         page_size: Number of items per page.
         dal: Data access layer dependency.
@@ -248,7 +248,7 @@ async def list_embeddings_in_collection(
     results: list[SingleEmbeddingResult] = []
 
     for emb in embs:
-        res = embedding_to_result(emb=emb, collection=collection, include_info=(not no_embeddings_info))
+        res = embedding_to_result(emb=emb, collection=collection, include_info=(not no_include_info))
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
@@ -281,7 +281,7 @@ async def create_embeddings_in_collection(
     collection_name: str,
     body: CreateEmbeddingsBody,
     ai_model: str | None = Query(None, alias="ai_model"),
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    no_include_info: bool = Query(False, alias="no_include_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
@@ -303,7 +303,7 @@ async def create_embeddings_in_collection(
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
-        no_embeddings_info: If True, omit the 'info' block in each embedding result.
+        no_include_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
 
     Returns:
@@ -346,19 +346,13 @@ async def create_embeddings_in_collection(
         emb = item.embedding
         meta = item.metadata or {}
 
-        # For now: only support already-embedded numeric vectors.
-        # if not isinstance(emb, list) or not all(isinstance(x, (int, float)) for x in emb):
-        #     raise HTTPException(
-        #         status_code=400,
-        #         detail="Only numeric vector embeddings are supported at this time",
-        #     )
-
         if len(emb) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
                 detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
             )
 
+        # TODO: use numpy float16 instead
         vectors.append([float(x) for x in emb])
         metadata_list.append(meta)
 
@@ -373,16 +367,15 @@ async def create_embeddings_in_collection(
 
     results: list[SingleEmbeddingResult] = []
     for i, emb in enumerate(created):
-        res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_embeddings_info))
+        res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_include_info))
         results.append(res)
 
     return EmbeddingResponse(embeddings=results)
 
 
-# TODO: let's move /bulk endpoints to a new embeddings_bulk.py so we match the API tags better
+# TODO: let's move /bulk endpoints to a new embeddings_bulk.py so we match the API organization better
 @embeddings_router.post(
     "/embeddings/bulk",
-    response_model=EmbeddingResponseWithCollections,
     tags=["Embeddings (Bulk Read)"],
     summary="Read select embeddings from unknown collections",
 )
@@ -393,20 +386,20 @@ async def create_embeddings_in_collection(
 async def get_embeddings_bulk_unknown_collections(
     request: Request,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    include_info: bool = Query(False, alias="include_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-):
+) -> EmbeddingResponseBinaryWithCollections:
     """
     Read a selection of embeddings by UUID across any collection.
 
     Args:
-        request: The request object.
-        embedding_uuids: List of embedding UUIDs to fetch.
-        no_embeddings_info: If True, omit the 'info' block for each embedding.
-        dal: Data access layer dependency.
+        request (Request): The request object.
+        embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
+        include_info (bool): If True, include the 'info' block for each embedding.
+        dal (DataAccessLayer): Data access layer dependency.
 
     Returns:
-        EmbeddingResponseWithCollections including collection metadata
+        EmbeddingResponseBinaryWithCollections including collection metadata
         for each embedding.
     """
 
@@ -415,7 +408,7 @@ async def get_embeddings_bulk_unknown_collections(
         vector_type=None,
     )
     if not embs:
-        return EmbeddingResponseWithCollections(embeddings=[], collections=[])
+        return EmbeddingResponseBinaryWithCollections(embeddings=[], collections=[])
 
     emb_by_id = {e.embedding_id: e for e in embs}
 
@@ -427,7 +420,7 @@ async def get_embeddings_bulk_unknown_collections(
     for col in col_list:
         collections[col.id] = col
 
-    results: list[SingleEmbeddingResult] = []
+    results: list[SingleEmbeddingResultBinary] = []
     # Preserve the original order and input collection
     for input_index, emb_id in enumerate(embedding_uuids):
         emb = emb_by_id.get(emb_id)
@@ -437,16 +430,16 @@ async def get_embeddings_bulk_unknown_collections(
         if not col:
             continue
 
-        res = embedding_to_result(
+        res = embedding_to_binary_result(
             emb=emb,
             collection=col,
             input_index=input_index,
-            include_info=(not no_embeddings_info),
+            include_info=include_info,
+            precision="float16" if col.vector_type == "halfvec" else "float32",
         )
-        if isinstance(res, SingleEmbeddingResult):
-            results.append(res)
+        results.append(res)
 
-    return EmbeddingResponseWithCollections(
+    return EmbeddingResponseBinaryWithCollections(
         embeddings=results,
         collections=[collection_to_model(col) for col in collections.values()],
     )
@@ -467,21 +460,20 @@ async def get_embeddings_bulk_from_collection(
     request: Request,
     collection_name: str,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    # TODO: make this True by default - e.g. query param to FORCE to include
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    include_info: bool = Query(False, alias="include_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ) -> EmbeddingResponseBinary:
     """
-    TODO: post here but actually reading, how to hanle aurhz here?
+    TODO: post here but actually reading, how to hanle authz here?
 
     Read a selection of embeddings by UUID from a specific collection.
 
     Args:
-        request: The request object.
-        collection_name: Name of the collection.
-        embedding_uuids: List of embedding UUIDs to fetch.
-        no_embeddings_info: If True, omit the 'info' block for each embedding.
-        dal: Data access layer dependency.
+        request (Request): The request object.
+        collection_name (str): Name of the collection to read from.
+        embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
+        include_info (bool): If True, include the 'info' block for each embedding.
+        dal (DataAccessLayer): Data access layer dependency.
 
     Returns:
         EmbeddingResponse containing the embeddings found in the specified collection.
@@ -519,7 +511,7 @@ async def get_embeddings_bulk_from_collection(
             emb=emb,
             collection=collection,
             input_index=input_index,
-            include_info=(not no_embeddings_info),
+            include_info=include_info,
             precision="float16" if collection.vector_type == "halfvec" else "float32",
         )
         binary_results.append(res)

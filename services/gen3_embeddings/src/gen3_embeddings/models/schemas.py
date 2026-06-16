@@ -70,13 +70,16 @@ class SingleEmbeddingResultBinary(BaseModel):
     embedding_id: UUID
     info: EmbeddingInfo | None = None
 
-    model_config = {
-        "ser_json_bytes": "base64",
-    }
+    model_config = ConfigDict(ser_json_bytes="base64")
 
 
 class EmbeddingResponseWithCollections(BaseModel):
     embeddings: list[SingleEmbeddingResult]
+    collections: list[CollectionModel] | None = None
+
+
+class EmbeddingResponseBinaryWithCollections(BaseModel):
+    embeddings: list[SingleEmbeddingResultBinary]
     collections: list[CollectionModel] | None = None
 
 
