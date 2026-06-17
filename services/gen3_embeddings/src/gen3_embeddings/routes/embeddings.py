@@ -78,7 +78,7 @@ async def get_embedding_from_collection(
     if not emb:
         raise HTTPException(status_code=404, detail="Embedding not found")
 
-    return embedding_to_result(emb=emb, collection=collection, include_info=True)
+    return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
 @embeddings_router.put(
@@ -146,7 +146,7 @@ async def update_embedding_in_collection(
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
 
-    return embedding_to_result(emb=emb, collection=collection, include_info=True)
+    return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
 @embeddings_router.delete(
@@ -211,7 +211,7 @@ async def delete_embedding(
 async def list_embeddings_in_collection(
     request: Request,
     collection_name: str,
-    no_include_info: bool = Query(False, alias="no_include_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
     dal: DataAccessLayer = Depends(get_data_access_layer),
@@ -222,7 +222,7 @@ async def list_embeddings_in_collection(
     Args:
         request: The request object.
         collection_name: Name of the collection.
-        no_include_info: If True, omit the 'info' block in each embedding result.
+        exclude_info: If True, omit the 'info' block in each embedding result.
         page: Page number for pagination (1-based).
         page_size: Number of items per page.
         dal: Data access layer dependency.
@@ -248,7 +248,7 @@ async def list_embeddings_in_collection(
     results: list[SingleEmbeddingResult] = []
 
     for emb in embs:
-        res = embedding_to_result(emb=emb, collection=collection, include_info=(not no_include_info))
+        res = embedding_to_result(emb=emb, collection=collection, exclude_info=exclude_info)
         if isinstance(res, SingleEmbeddingResult):
             results.append(res)
 
@@ -281,7 +281,7 @@ async def create_embeddings_in_collection(
     collection_name: str,
     body: CreateEmbeddingsBody,
     ai_model: str | None = Query(None, alias="ai_model"),
-    no_include_info: bool = Query(False, alias="no_include_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
 ):
     """
@@ -303,7 +303,7 @@ async def create_embeddings_in_collection(
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
-        no_include_info: If True, omit the 'info' block in each embedding result.
+        exclude_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
 
     Returns:
@@ -367,7 +367,7 @@ async def create_embeddings_in_collection(
 
     results: list[SingleEmbeddingResult] = []
     for i, emb in enumerate(created):
-        res = embedding_to_result(emb=emb, collection=collection, input_index=i, include_info=(not no_include_info))
+        res = embedding_to_result(emb=emb, collection=collection, input_index=i, exclude_info=exclude_info)
         results.append(res)
 
     return EmbeddingResponse(embeddings=results)
@@ -386,7 +386,7 @@ async def create_embeddings_in_collection(
 async def get_embeddings_bulk_unknown_collections(
     request: Request,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    include_info: bool = Query(False, alias="include_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ) -> EmbeddingResponseBinaryWithCollections:
     """
@@ -395,7 +395,7 @@ async def get_embeddings_bulk_unknown_collections(
     Args:
         request (Request): The request object.
         embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
-        include_info (bool): If True, include the 'info' block for each embedding.
+        exclude_info (bool): If True, exclude the 'info' block for each embedding.
         dal (DataAccessLayer): Data access layer dependency.
 
     Returns:
@@ -434,7 +434,7 @@ async def get_embeddings_bulk_unknown_collections(
             emb=emb,
             collection=col,
             input_index=input_index,
-            include_info=include_info,
+            exclude_info=exclude_info,
             precision="float16" if col.vector_type == "halfvec" else "float32",
         )
         results.append(res)
@@ -460,7 +460,7 @@ async def get_embeddings_bulk_from_collection(
     request: Request,
     collection_name: str,
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    include_info: bool = Query(False, alias="include_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ) -> EmbeddingResponseBinary:
     """
@@ -472,7 +472,7 @@ async def get_embeddings_bulk_from_collection(
         request (Request): The request object.
         collection_name (str): Name of the collection to read from.
         embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
-        include_info (bool): If True, include the 'info' block for each embedding.
+        exclude_info (bool): If True, exclude the 'info' block for each embedding.
         dal (DataAccessLayer): Data access layer dependency.
 
     Returns:
@@ -511,7 +511,7 @@ async def get_embeddings_bulk_from_collection(
             emb=emb,
             collection=collection,
             input_index=input_index,
-            include_info=include_info,
+            exclude_info=exclude_info,
             precision="float16" if collection.vector_type == "halfvec" else "float32",
         )
         binary_results.append(res)

@@ -63,7 +63,7 @@ def collection_to_model(col: Collection) -> CollectionModel:
 def embedding_to_binary_result(
     emb: Embedding,
     collection: Collection | None,
-    include_info: bool = True,
+    exclude_info: bool = False,
     input_index: int | None = None,
     precision: str = "float32",
 ) -> SingleEmbeddingResultBinary:
@@ -73,7 +73,7 @@ def embedding_to_binary_result(
     Args:
         emb: Dataclass representing an embeddings table row
         collection: Optional Collection dataclass for the embedding
-        include_info: whether or not to include extra info per embedding
+        exclude_info: whether or not to exclude extra info per embedding
         input_index: Position of this embedding in the original request/input
         precision: string to represent prevision of the embedding for binary response
 
@@ -81,7 +81,7 @@ def embedding_to_binary_result(
         SingleEmbeddingResultBinary object
     """
     info: EmbeddingInfo | None = None
-    if include_info:
+    if not exclude_info:
         collection_name = None
         if collection:
             collection_name = collection.collection_name
@@ -111,7 +111,7 @@ def embedding_to_binary_result(
 def embedding_to_result(
     emb: Embedding,
     collection: Collection | None,
-    include_info: bool = True,
+    exclude_info: bool = False,
     input_index: int | None = None,
 ) -> SingleEmbeddingResult:
     """
@@ -120,14 +120,14 @@ def embedding_to_result(
     Args:
         emb: Dataclass representing an embeddings table row.
         collection: Optional Collection dataclass for the embedding.
-        include_info: whether or not to include extra info per embedding
+        exclude_info: whether or not to exclude extra info per embedding
         input_index: Position of this embedding in the original request/input.
 
     Returns:
         SingleEmbeddingResult object
     """
     info: EmbeddingInfo | None = None
-    if include_info:
+    if not exclude_info:
         collection_name = None
         if collection:
             collection_name = collection.collection_name

@@ -33,7 +33,7 @@ async def search_in_collection(
     body: SearchRequestBody,
     collection_name: str,
     ai_model: str | None = Query(None, alias="ai_model"),
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
@@ -47,7 +47,7 @@ async def search_in_collection(
         body: SearchRequestBody containing the query vector and parameters.
         collection_name: Name of the collection to search.
         ai_model: Optional model name; not used in this minimal implementation.
-        no_embeddings_info: If True, omit the 'info' block in each embedding result.
+        exclude_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
 
     Returns:
@@ -85,7 +85,7 @@ async def search_in_collection(
     for row in rows:
         emb = Embedding.from_record(row)
         metric_value = row["value"]
-        emb_res = embedding_to_result(emb=emb, collection=collection, include_info=(not no_embeddings_info))
+        emb_res = embedding_to_result(emb=emb, collection=collection, exclude_info=exclude_info)
         if isinstance(emb_res, SingleEmbeddingResult):
             results.append(
                 SingleSearchResult(
@@ -118,7 +118,7 @@ async def search_across_collections(
     collections: str | None = Query(None, alias="collections"),
     ai_model: str | None = Query(None, alias="ai_model"),
     vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
-    no_embeddings_info: bool = Query(False, alias="no_embeddings_info"),
+    exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
 ):
     """
@@ -132,7 +132,7 @@ async def search_across_collections(
         collections: Optional comma-separated list of collection names to restrict the search.
         ai_model: Optional model name; not used in this minimal implementation.
         vector_type: The type of vector (vector or halfvec) to search against.
-        no_embeddings_info: If True, omit the 'info' block in each embedding result.
+        exclude_info: If True, omit the 'info' block in each embedding result.
         dal: Data access layer dependency.
 
     Returns:
@@ -189,7 +189,7 @@ async def search_across_collections(
         hit_collection_ids.add(col.id)
 
         metric_value = row["value"]
-        emb_res = embedding_to_result(emb, collection=col, include_info=(not no_embeddings_info))
+        emb_res = embedding_to_result(emb, collection=col, exclude_info=exclude_info)
         if isinstance(emb_res, SingleEmbeddingResult):
             results.append(
                 SingleSearchResult(
