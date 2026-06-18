@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import parse_and_auth_request
-from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
 from gen3_embeddings.database.db import DataAccessLayer, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model
 from gen3_embeddings.models.schemas import (
@@ -43,6 +43,7 @@ async def list_collections(
     offset = (page - 1) * page_size
     limit = page_size
 
+    logging.debug(f"Listing collections, offset={offset}, limit={limit}")
     collections = await dal.list_collections(offset=offset, limit=limit)
 
     next_page = page + 1 if len(collections) == page_size else None
@@ -83,6 +84,7 @@ async def create_collection(
     Returns:
         CollectionModel for the created collection.
     """
+    logging.debug(f"Creating collection: {body}...")
     col = await dal.create_collection(
         collection_name=body.collection_name,
         description=body.description,
@@ -118,6 +120,7 @@ async def get_collection(collection_name: str, dal: DataAccessLayer = Depends(ge
     Raises:
         HTTPException: 404 if collection is not found.
     """
+    logging.debug(f"Getting collection: {collection_name}...")
     col = await dal.get_collection_by_name(collection_name)
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -154,7 +157,7 @@ async def update_collection(
     Raises:
         HTTPException: 404 if collection is not found.
     """
-
+    logging.debug(f"Updating collection: {collection_name} with description={body.description}...")
     col = await dal.update_collection(collection_name=collection_name, description=body.description)
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -189,6 +192,7 @@ async def delete_collection(collection_name: str, dal: DataAccessLayer = Depends
         HTTPException: 404 if collection is not found.
     """
     success = await dal.delete_collection(collection_name)
+    logging.info(f"Deleted collection: {collection_name}.")
     if not success:
         raise HTTPException(status_code=404, detail="Collection not found")
     return None

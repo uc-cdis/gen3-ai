@@ -5,6 +5,7 @@ from gen3_embeddings.models.schemas import (
     CollectionModel,
     EmbeddingInfo,
     SingleEmbeddingResult,
+    SingleEmbeddingResultBinary,
 )
 
 
@@ -59,10 +60,58 @@ def collection_to_model(col: Collection) -> CollectionModel:
     )
 
 
+def embedding_to_binary_result(
+    emb: Embedding,
+    collection: Collection | None,
+    exclude_info: bool = False,
+    input_index: int | None = None,
+    precision: str = "float32",
+) -> SingleEmbeddingResultBinary:
+    """
+    Convert a DB Embedding dataclass into an API embedding result.
+
+    Args:
+        emb: Dataclass representing an embeddings table row
+        collection: Optional Collection dataclass for the embedding
+        exclude_info: whether or not to exclude extra info per embedding
+        input_index: Position of this embedding in the original request/input
+        precision: string to represent prevision of the embedding for binary response
+
+    Returns:
+        SingleEmbeddingResultBinary object
+    """
+    info: EmbeddingInfo | None = None
+    if not exclude_info:
+        collection_name = None
+        if collection:
+            collection_name = collection.collection_name
+        info = EmbeddingInfo(
+            collection_id=emb.collection_id,
+            authz=emb.authz,
+            self=build_embedding_self_url(collection_name, emb.embedding_id),
+            metadata=emb.metadata,
+        )
+
+    if hasattr(emb.embedding, "to_binary"):
+        # works for both Vector and HalfVector classes
+        emb_bytes = emb.embedding.to_binary()
+    else:
+        # works for the numpy arrays
+        emb_bytes = emb.embedding.tobytes()
+
+    return SingleEmbeddingResultBinary(
+        vector_base64=emb_bytes,
+        precision=precision,
+        embedding_id=emb.embedding_id,
+        input_index=input_index,
+        info=info,
+    )
+
+
 def embedding_to_result(
     emb: Embedding,
     collection: Collection | None,
-    include_info: bool = True,
+    exclude_info: bool = False,
     input_index: int | None = None,
 ) -> SingleEmbeddingResult:
     """
@@ -71,14 +120,14 @@ def embedding_to_result(
     Args:
         emb: Dataclass representing an embeddings table row.
         collection: Optional Collection dataclass for the embedding.
-        include_info: easily control `no_embeddings_info`.
+        exclude_info: whether or not to exclude extra info per embedding
         input_index: Position of this embedding in the original request/input.
 
     Returns:
         SingleEmbeddingResult object
     """
     info: EmbeddingInfo | None = None
-    if include_info:
+    if not exclude_info:
         collection_name = None
         if collection:
             collection_name = collection.collection_name

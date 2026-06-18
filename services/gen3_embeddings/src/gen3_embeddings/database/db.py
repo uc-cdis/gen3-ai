@@ -74,9 +74,8 @@ What do we do in this file?
       and filters collection-level queries accordingly where needed
 """
 
-import ast
 import json
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Self
 from uuid import UUID
@@ -84,6 +83,8 @@ from uuid import UUID
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException, Request
+from pgvector import HalfVector, Vector
+from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
 from gen3_embeddings.auth import get_allowed_authz_for_request, get_allowed_authz_for_request_with_method
@@ -94,9 +95,26 @@ _pool: asyncpg.Pool | None = None
 
 
 async def get_pool():
+    """
+    Gets the pool of connections.
+
+    We have a special initialization to support pgvector columns efficiently.
+
+    See https://github.com/pgvector/pgvector-python
+
+    The `register_vector` adds a custom codec for the `vector` and `halfvec` column types.
+
+    This ensures that when we read from/write to pgvector, it happens
+    at the binary level rather than as a string for maximum efficiency.
+
+    Without this, asyncpg defaults to treating it like a string - which is incredibly
+    inefficient b/c that's not how it's stored.
+    """
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(str(config.DB_CONNECTION_STRING), min_size=10, max_size=10)
+        _pool = await asyncpg.create_pool(
+            str(config.DB_CONNECTION_STRING), min_size=10, max_size=10, init=register_vector
+        )
     return _pool
 
 
@@ -121,7 +139,7 @@ class Collection:
     description: str | None
     ai_model_name: str | None
     dimensions: int
-    vector_type: str
+    vector_type: VectorType
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -135,7 +153,7 @@ class Collection:
 class Embedding:
     collection_id: int
     embedding_id: UUID
-    embedding: list[float]
+    embedding: Vector | HalfVector
     authz: list[str]
     metadata: dict | None
     created_at: datetime | None
@@ -147,28 +165,17 @@ class Embedding:
         Build an Embedding dataclass from an asyncpg.Record.
 
         This normalizes:
-        - embedding: string → list[float]
-        - metadata:  string → dict (JSON)
+        - metadata:  string -> dict (JSON)
         """
-        data = dict(row)
-
-        # Keep only keys that match Embedding fields
-        valid_field_names = {f.name for f in fields(cls)}
-        data = {k: v for k, v in data.items() if k in valid_field_names}
-
-        if isinstance(data.get("embedding"), str):
-            # vec_str is like "[0.1, 0.2, 0.3]", convert it to vector
-            data["embedding"] = [float(x) for x in ast.literal_eval(data["embedding"])]
-
-        # metadata: convert string → dict if needed
-        if isinstance(data.get("metadata"), str):
-            try:
-                data["metadata"] = json.loads(data["metadata"])
-            except Exception:
-                # fallback: keep it as None or an empty dict
-                data["metadata"] = None
-
-        return cls(**data)
+        return cls(
+            collection_id=row["collection_id"],
+            embedding_id=row["embedding_id"],
+            embedding=row["embedding"],
+            authz=row["authz"],
+            metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
 
 class DataAccessLayer:
@@ -589,6 +596,7 @@ class DataAccessLayer:
         self,
         embedding_ids: list[UUID],
         vector_type: VectorType | None,
+        collection_id: int | None = None,
     ) -> list[Embedding]:
         """
         Fetch embeddings by IDs from the appropriate table(s).
@@ -605,14 +613,25 @@ class DataAccessLayer:
 
             if vector_type:
                 table, _ = get_embeddings_table_and_cast(vector_type)
-                stmt = await conn.prepare(f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])")
+                raw_stmt = f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])"
+
+                if collection_id:
+                    raw_stmt += f" AND collection_id = {collection_id}"
+
+                stmt = await conn.prepare(raw_stmt)
                 rows = await stmt.fetch(embedding_ids)
                 results.extend(rows_to_embeddings(rows))
             else:
                 # query both vector and halfvec tables
                 for vt in (VectorType.vector, VectorType.halfvec):
                     table, _ = get_embeddings_table_and_cast(vt)
-                    stmt = await conn.prepare(f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])")
+                    raw_stmt = f"SELECT * FROM {table} WHERE embedding_id = ANY($1::uuid[])"
+
+                    if collection_id:
+                        raw_stmt += f" AND collection_id = {collection_id}"
+
+                    stmt = await conn.prepare(raw_stmt)
+
                     rows = await stmt.fetch(embedding_ids)
                     results.extend(rows_to_embeddings(rows))
 
