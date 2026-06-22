@@ -23,6 +23,9 @@ repos:
   - repo: local
     hooks:
     -   id: update_versions
+        # allow an old version with in-line comment: # allow-old-version
+        # for example if the latest version is broken, you can temporarily add that
+        # so CI will still pass. The check ignores lines with that comment
         name: update tool/workflow versions
         entry: uv run just update_versions
         language: python
