@@ -29,6 +29,8 @@ jobs:
     with:
       UV_VERSION: '0.11.21'
       JUST_VERSION: '1.53.0'
+      # Note: skipping updating versions b/c workflows can't edit workflow files easily
+      COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
 
   security:

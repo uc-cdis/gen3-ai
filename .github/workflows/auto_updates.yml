@@ -37,7 +37,7 @@ jobs:
               # positive secret from the docs generation,
               # this workflow will still fail and require human intervention
               git add .secrets.baseline
-            pr_title: "chore(docs-and-tools): update API documentation and tools in workflows"
+            pr_title: "chore(docs-and-tools): update API documentation and tools"
           - task: lock
             command: just lock
             git_add_files: |
@@ -103,7 +103,8 @@ jobs:
           # does the formatting. Also we haven't created a branch yet so that will fail too.
           # So exit successfully here no matter what, and if there
           # is a real issue, it will be captured by the resulting PR automation checks
-          pre-commit run -a || true
+          # Note: skipping updating versions b/c workflows can't edit workflow files easily
+          SKIP=update_versions pre-commit run -a || true
 
       - name: Configure Git Credentials
         run: |
