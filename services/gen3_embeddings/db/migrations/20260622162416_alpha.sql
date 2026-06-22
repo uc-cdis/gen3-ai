@@ -1,3 +1,4 @@
+-- migrate:up
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS collections (
@@ -111,3 +112,11 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- migrate:down
+
+DROP TABLE IF EXISTS collections CASCADE;
+DROP TABLE IF EXISTS embeddings_vector CASCADE;
+DROP TABLE IF EXISTS embeddings_halfvec CASCADE;
+
+DROP EXTENSION IF EXISTS vector;

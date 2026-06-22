@@ -7,7 +7,7 @@ default:
 _check_dependencies:
     @./scripts/check_dependencies.bash
 
-setup: _check_dependencies
+setup:
   #!/usr/bin/env bash
   set -euo pipefail
 
@@ -33,6 +33,17 @@ setup: _check_dependencies
       exit 1
   fi
 
+  print_header "just setup:" "verifying" "dbmate (db migrations tool)" "installation..."
+  if command -v dbmate >/dev/null 2>&1; then
+      echo "dbmate (db migrations tool) is installed."
+      echo "  version: $(dbmate --version)"
+  else
+      echo "${RED}** ERROR: dbmate (db migrations tool) not found in \$PATH. **${RESET}"
+      echo "${RED}** Cannot migrate database. Please install dbmate and rerun. **${RESET}"
+      echo "${RED}** See: https://github.com/amacneil/dbmate#installation **${RESET}"
+      exit 1
+  fi
+
   print_header "just setup:" "verifying" "pre-commit" "installation..."
   if command -v pre-commit >/dev/null 2>&1; then
       echo "pre-commit is installed."
@@ -54,7 +65,6 @@ setup: _check_dependencies
 
   echo "pre-commit git hook is installed."
 
-# setup_db is not working right now
 setup_db $SERVICE="all": _check_dependencies
   #!/usr/bin/env bash
   set -euo pipefail
@@ -78,66 +88,129 @@ setup_db $SERVICE="all": _check_dependencies
 
     print_header "just setup_db:" "setting up PostgreSQL db for" "$service_name" "service..."
 
-    # TODO: Make a utility for running this outside the justfile
     if [ ! -f "${dir}/.env" ]; then
       echo "${RED}** WARNING: .env file not found in '${dir}'. Will rely on environment variables. **${RESET}"
     else
-      echo "Found .env file. Using it to set up database."
+      echo "Found .env file: ${dir}/.env - Using it to set up database."
       set -a
         source "${dir}/.env"
       set +a
     fi
 
-    if [[ -z ${PGDATABASE:-} ]]; then
-      echo "PGDATABASE not set, using ${service_name}..."
-      export PGDATABASE="${service_name}"
-    fi
+    set_postgres_defaults
 
     psql \
       -d postgres \
       -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
       -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" \
       2>/dev/null || echo "Database already exists."
+  }
+
+  if [ "$SERVICE" == "all" ]; then
+    for dir in services/*; do
+      if [[ -n "${dir#services/}" ]]; then
+        run_for_service "${dir#services/}"
+      fi
+    done
+  else
+    run_for_service "$SERVICE"
+  fi
+
+db_load $SERVICE="all": _check_dependencies
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
+  just _run_dbmate ${SERVICE} load
+
+db_migrate $SERVICE="all": _check_dependencies
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
+  just _run_dbmate ${SERVICE} migrate
+
+db_rollback $SERVICE="all": _check_dependencies
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
+  just _run_dbmate ${SERVICE} down
+
+_run_dbmate $SERVICE $ACTION:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # this includes some helpers for colored line printing
+  source scripts/.justfile_helpers.bash
+
+  run_for_service() {
+    local service_name="$1"
+    local dir="services/$service_name"
+
+    if [ ! -d "$dir" ]; then
+      echo "${RED}** ERROR: Service directory '$dir' does not exist. **${RESET}"
+      exit 1
+    fi
+
+    if [ "$service_name" == "gen3_inference" ]; then
+      print_header "just migrate_db:" "No db needed for" "$service_name" "service. Nothing to do."
+      return
+    fi
+
+    just setup_db $service_name
+
+    print_header "just migrate_db:" "migrating db for" "$service_name" "service..."
+
+    if [ ! -f "${dir}/.env" ]; then
+      echo "${RED}** WARNING: .env file not found in '${dir}'. Will rely on environment variables. **${RESET}"
+    else
+      echo "Found .env file: ${dir}/.env - Using it to set up database."
+      set -a
+        source "${dir}/.env"
+      set +a
+    fi
+
+    set_postgres_defaults
 
     # run migrations if they exist
-    MIGRATIONS_DIR="${dir}/db_migrations"
+    MIGRATIONS_DIR="${dir}/db/migrations"
     if [ -d "$MIGRATIONS_DIR" ]; then
-      print_header "just setup_db:" "running migrations for" "$service_name" "service" "..."
-
       # defaults for app user if not set
       if [ "$service_name" == "gen3_embeddings" ]; then
         : "${DB_APP_USER:=app_user}"
         : "${DB_APP_USER_PASSWORD:=app_user_password}"
+
+        DB_APP_USER="${DB_APP_USER}" DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD}" \
+          dbmate -u "${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable" \
+          -s "${dir}/db/schema.sql" \
+          -d "${MIGRATIONS_DIR}" --wait $ACTION
+
+        DB_APP_USER="${DB_APP_USER}" DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD}" \
+          dbmate -u "${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable" \
+          -s "${dir}/db/schema.sql" \
+          -d "${MIGRATIONS_DIR}" --wait status
+      else
+        dbmate -u "${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable" \
+          -s "${dir}/db/schema.sql" \
+        -d "${MIGRATIONS_DIR}" --wait $ACTION
+
+        dbmate -u "${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable" \
+          -s "${dir}/db/schema.sql" \
+        -d "${MIGRATIONS_DIR}" --wait status
       fi
 
-      # Get all .sql files, sort them numerically, and iterate
-      for migration_file in $(find "$MIGRATIONS_DIR" -name "*.sql" | sort -V); do
-        echo "Applying migration: $migration_file"
-
-        # Run the migration
-        if [ "$service_name" == "gen3_embeddings" ]; then
-          # pass app user vars into psql
-          psql \
-            --set ON_ERROR_STOP=1 \
-            --set DB_APP_USER="${DB_APP_USER}" \
-            --set DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD}" \
-            -d "${PGDATABASE}" \
-            -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
-            -f "$migration_file"
-        else
-          psql \
-            --set ON_ERROR_STOP=1 \
-            -d "${PGDATABASE}" \
-            -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
-            -f "$migration_file"
-        fi
-
-        # Check if psql failed
-        if [ $? -ne 0 ]; then
-          echo "${RED}** ERROR: Migration $migration_file failed. Perhaps it was already ran. **${RESET}"
-          exit 1
-        fi
-      done
+      # Check if failed
+      if [ $? -ne 0 ]; then
+        echo "${RED}** ERROR: Migration failed! **${RESET}"
+        exit 1
+      fi
 
       echo "${GREEN}Migrations applied successfully.${RESET}"
     fi
@@ -377,7 +450,8 @@ lint $SERVICE="all" $EXTRA_ARG="": _check_dependencies
     exit $overall_exit
   fi
 
-update_versions: _check_dependencies  # allow an old version with in-line comment: # allow-old-version
+# allow an old version with in-line comment: # allow-old-version
+update_versions: _check_dependencies
     #!/usr/bin/env bash
     source scripts/.justfile_helpers.bash
 

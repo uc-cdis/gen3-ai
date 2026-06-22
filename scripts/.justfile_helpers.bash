@@ -115,3 +115,25 @@ report_error_if_failed() {
 
 # remove any VIRTUAL_ENV to remove uv warnings about envs that aren't this one
 unset VIRTUAL_ENV
+
+set_postgres_defaults() {
+  if [[ -z ${PGDATABASE:-} ]]; then
+    echo "PGDATABASE not set, using ${service_name}..."
+    export PGDATABASE="${service_name}"
+  fi
+
+  if [[ -z ${PGPORT:-} ]]; then
+    echo "PGPORT not set, using 5432..."
+    export PGPORT="5432"
+  fi
+
+  if [[ -z ${PGHOST:-} ]]; then
+    echo "PGHOST not set, using localhost..."
+    export PGHOST="localhost"
+  fi
+
+  if [[ -z ${PGUSER:-} ]]; then
+    echo "PGUSER not set, using postgres..."
+    export PGUSER="postgres"
+  fi
+}
