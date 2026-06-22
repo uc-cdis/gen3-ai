@@ -14,6 +14,9 @@ ENV UV_NO_MANAGED_PYTHON=true \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uvx /bin/uvx
 
+# Copy dbmate binary from upstream image
+COPY --from=ghcr.io/amacneil/dbmate:latest /usr/local/bin/dbmate /usr/local/bin/dbmate
+
 # OpenTelemetry environment variables
 ENV OTEL_SERVICE_NAME=${SERVICE_NAME} \
     OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.monitoring:4318 \
