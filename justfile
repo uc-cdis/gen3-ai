@@ -340,7 +340,7 @@ lint $SERVICE="all" $EXTRA_ARG="": _check_dependencies
     exit $overall_exit
   fi
 
-update_versions: _check_dependencies
+update_versions: _check_dependencies  # allow an old version with in-line comment: # allow-old-version
     #!/usr/bin/env bash
     source scripts/.justfile_helpers.bash
 
@@ -366,15 +366,23 @@ update_versions: _check_dependencies
 
     # update versions in all CI files in .github/workflows/
     for file in .github/workflows/*.yml; do
-        echo "Updating $file..."
+        echo "Processing $file..."
 
-        # Update UV_VERSION
-        tmp=$(mktemp)
-        sed -E "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
+        # UV_VERSION
+        if grep -E "UV_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
+            echo "--> WARNING: Skipping UV_VERSION in $file (# allow-old-version detected)"
+        else
+            tmp=$(mktemp)
+            sed -E "s/(UV_VERSION:[[:space:]]*')[^']*'/\\1${UV_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
+        fi
 
-        # Update JUST_VERSION
-        tmp=$(mktemp)
-        sed -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
+        #JUST_VERSION
+        if grep -E "JUST_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
+            echo "--> WARNING: Skipping JUST_VERSION in $file (# allow-old-version detected)"
+        else
+            tmp=$(mktemp)
+            sed -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file" > "$tmp" && mv "$tmp" "$file"
+        fi
     done
 
     echo "up to date!"
