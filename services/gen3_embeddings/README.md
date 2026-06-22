@@ -836,7 +836,6 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 - sanitize collection name
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
-- set app user
 - output page_size value use the actual output size or the defined page size?
 - delete functions need some work
 - the unauthorized error got 500

@@ -670,14 +670,14 @@ class DataAccessLayer:
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         # $1: collection_id, $2: vector, $3: top_k
-        params: list[Any] = [collection.id, json.dumps(query_vector), top_k]
+        params: list[Any] = [collection.id, query_vector, top_k]
 
         sql, extra_params = build_search_sql(
             table=table,
             distance_metric=distance_metric,
             single_collection=True,
             collection_ids_param="$1::bigint",
-            vector_param=f"$2{cast}",  # e.g. $2::vector or $2::halfvec
+            vector_param=f"$2{cast}",
             top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
@@ -734,7 +734,7 @@ class DataAccessLayer:
         collection_ids = [col.id for col in filtered_collections]
 
         # $1: collection_ids, $2: vector, $3: top_k
-        params: list[Any] = [collection_ids, json.dumps(query_vector), top_k]
+        params: list[Any] = [collection_ids, query_vector, top_k]
 
         sql, extra_params = build_search_sql(
             table=table,
