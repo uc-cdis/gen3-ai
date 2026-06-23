@@ -445,7 +445,14 @@ class DataAccessLayer:
                 RETURNING embedding_id, created_at, updated_at;
                 """
             )
-            rows = await stmt.fetch(json_payload)
+            try:
+                rows = await stmt.fetch(json_payload)
+            except UniqueViolationError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="One or more embeddings already exist in this collection. "
+                    "No embeddings were created. Use PUT to force update existing embeddings.",
+                ) from exc
 
             results = [
                 Embedding(
@@ -477,6 +484,76 @@ class DataAccessLayer:
             )
             row = await stmt.fetchrow(collection.id, embedding_id)
             return Embedding.from_record(row) if row else None
+
+        return await self._with_rls(_query)
+
+    async def upsert_embeddings_bulk(
+        self,
+        collection: Collection,
+        embeddings: list[list[float]],
+        authz: list[str],
+        metadata_list: list[dict] | None,
+    ) -> list[Embedding]:
+        """
+        Bulk upsert multiple embeddings in the given collection.
+
+        - If an embedding (same collection_id + vector) does not exist, it is inserted.
+        - If it exists, it is updated (metadata/authz).
+        - Entire operation is transactional (all or nothing).
+        """
+        if metadata_list is None:
+            metadata_list = [{} for _ in embeddings]
+        elif len(metadata_list) != len(embeddings):
+            raise HTTPException(
+                status_code=400,
+                detail="metadata_list length must match embeddings length",
+            )
+
+        table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
+        async def _query(conn):
+            payload_data = [
+                {
+                    "collection_id": collection.id,
+                    "embedding": json.dumps(emb_vec),
+                    "authz": authz,
+                    "metadata": metadata or {},
+                }
+                for emb_vec, metadata in zip(embeddings, metadata_list)
+            ]
+
+            json_payload = json.dumps(payload_data)
+
+            # Important: ON CONFLICT on (collection_id, embedding)
+            # Update authz and metadata, plus updated_at.
+            # RLS WITH CHECK enforces that the user has permission to modify rows.
+            stmt = await conn.prepare(
+                f"""
+                INSERT INTO {table} (collection_id, embedding, authz, metadata)
+                SELECT
+                    raw.collection_id,
+                    raw.embedding{cast},
+                    raw.authz,
+                    raw.metadata
+                FROM jsonb_to_recordset($1::jsonb) AS raw(
+                    collection_id bigint,
+                    embedding text,
+                    authz text[],
+                    metadata jsonb
+                )
+                ON CONFLICT (collection_id, embedding)
+                DO UPDATE SET
+                    authz = EXCLUDED.authz,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = NOW()
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
+                """
+            )
+            # If RLS denies insert or update, this will raise an error
+            rows = await stmt.fetch(json_payload)
+
+            results = [Embedding.from_record(row) for row in rows]
+            return results
 
         return await self._with_rls(_query)
 
@@ -670,14 +747,14 @@ class DataAccessLayer:
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         # $1: collection_id, $2: vector, $3: top_k
-        params: list[Any] = [collection.id, json.dumps(query_vector), top_k]
+        params: list[Any] = [collection.id, query_vector, top_k]
 
         sql, extra_params = build_search_sql(
             table=table,
             distance_metric=distance_metric,
             single_collection=True,
             collection_ids_param="$1::bigint",
-            vector_param=f"$2{cast}",  # e.g. $2::vector or $2::halfvec
+            vector_param=f"$2{cast}",
             top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
@@ -734,7 +811,7 @@ class DataAccessLayer:
         collection_ids = [col.id for col in filtered_collections]
 
         # $1: collection_ids, $2: vector, $3: top_k
-        params: list[Any] = [collection_ids, json.dumps(query_vector), top_k]
+        params: list[Any] = [collection_ids, query_vector, top_k]
 
         sql, extra_params = build_search_sql(
             table=table,
