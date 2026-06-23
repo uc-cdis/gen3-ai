@@ -119,6 +119,14 @@ ON embeddings_halfvec USING gin (authz);
 ALTER TABLE embeddings_vector ENABLE ROW LEVEL SECURITY;
 ALTER TABLE embeddings_halfvec ENABLE ROW LEVEL SECURITY;
 
+-- Enforce no duplicate embeddings in the same collection for vector type
+ALTER TABLE embeddings_vector
+    ADD CONSTRAINT embeddings_vector_uniq_collection_vector
+    UNIQUE (collection_id, embedding);
+ALTER TABLE embeddings_halfvec
+    ADD CONSTRAINT embeddings_halfvec_uniq_collection_vector
+    UNIQUE (collection_id, embedding);
+
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL
 -- allowed_authz to the user's allowed authz resources from arborist
