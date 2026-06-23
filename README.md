@@ -45,7 +45,8 @@ See the [interactable documentation](./docs/api.html) or [the OpenAPI specificat
     - Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
 * `justfile`
     - Simplified setup, building, running
-    - `just setup`, `just setup_db`, `just install`, `just test`, `just run gen3_embeddings`, `just build`
+    - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint` `just run gen3_embeddings`, `just build`
+    - For all commands and descriptions, simply run `just` in this repo
 
 Services (and libraries) have folder structure:
 
@@ -69,7 +70,7 @@ just setup
 
 You may recieve some errors about missing tools. Install them, then rerun until it passes.
 
-You also need **config****** in a `.env` per service.**
+You also need **config******* in a `.env` per service.**
 
 To get started, we need database info:
 
@@ -104,11 +105,15 @@ set as an env var.
 Once you have the above `.env`'s, you can:
 
 ```bash
-just setup_db
+just db_setup
 just db_load
 just install
 just test
 ```
+
+> TIP: `just {{command}}` commands run in parallel for the services by default, which can make the output hard to debug.
+> if you want a colorized and more readable output (at the expense of speed), you can force sequential
+> execution with `just s {{command}}`
 
 If you want to run a service locally:
 

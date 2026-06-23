@@ -17,8 +17,8 @@ fi
 print_header() {
   local command=$1
   local message_left=$2
-  local service=$3
-  local message_right=$4
+  local service=${3:-}
+  local message_right=${4:-}
   local type=${5:-default}
 
   local color
