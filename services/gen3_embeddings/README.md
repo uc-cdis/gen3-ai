@@ -838,8 +838,5 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 - add support for index
 - output page_size value use the actual output size or the defined page size?
 - delete functions need some work
-- the unauthorized error got 500
 - move get_allowed_authz_for_request logic out of db.py
-- Creating a duplicate collections should 409 instead of 400 imo. Right now if I try to recreate the same one I get a 400
-- when attempting to create a collection that I do not have the authorization to create, I would expect a 401. right now getting a 400 bad request
 - The type used is in the response, so if the user doesn't supply vector_type, we should default based on the dimensions, if they provide vector_type=vector AND try to exceed, then error, yes. but if they don't provide, we should just pick vector or halfvec based on the dimensions size

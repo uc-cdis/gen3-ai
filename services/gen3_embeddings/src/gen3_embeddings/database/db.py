@@ -243,7 +243,7 @@ class DataAccessLayer:
 
         if collection_name not in allowed_names:
             raise HTTPException(
-                status_code=400, detail=f"Not authorized to create collection with name {collection_name}"
+                status_code=401, detail=f"Not authorized to create collection with name {collection_name}"
             )
 
         async with self.pool.acquire() as conn:
@@ -259,7 +259,7 @@ class DataAccessLayer:
             except UniqueViolationError:
                 # collection_name already exists
                 raise HTTPException(
-                    status_code=400,
+                    status_code=409,
                     detail=f"Collection '{collection_name}' already exists",
                 )
             if not row:

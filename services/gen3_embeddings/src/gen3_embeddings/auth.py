@@ -5,9 +5,9 @@ from authutils.token.fastapi import access_token
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from gen3authz.client.arborist.async_client import ArboristClient
+from gen3authz.client.arborist.errors import ArboristError
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED as HTTP_401_UNAUTHENTICATED
-from starlette.status import HTTP_403_FORBIDDEN
+from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_500_INTERNAL_SERVER_ERROR
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
@@ -46,7 +46,7 @@ async def authorize_request(
 
     # either this was provided or we've tried to get it from the Bearer header
     if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHENTICATED)
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
     # try to get the ID so the debug log has more information
     try:
@@ -57,12 +57,28 @@ async def authorize_request(
 
     arborist_client = _get_arborist_client(request)
 
-    is_authorized = await arborist_client.auth_request(
-        token.credentials,
-        service=config.AUTHZ_SERVICE_NAME,
-        methods=authz_access_method,
-        resources=authz_resources,
-    )
+    try:
+        is_authorized = await arborist_client.auth_request(
+            token.credentials,
+            service=config.AUTHZ_SERVICE_NAME,
+            methods=authz_access_method,
+            resources=authz_resources,
+        )
+    except ArboristError as exc:
+        logging.error(
+            f"ArboristError during auth_request: {exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="Could not verify, parse, and/or validate the provided access token.",
+        ) from exc
+    except Exception as exc:
+        logging.error(exc.detail if hasattr(exc, "detail") else exc, exc_info=True)
+        raise HTTPException(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authorization service error while checking access policies.",
+        ) from exc
 
     if not is_authorized:
         logging.info(f"user `{user_id}` does not have `{authz_access_method}` access on `{authz_resources}`")
@@ -93,7 +109,7 @@ async def get_user_id(token: HTTPAuthorizationCredentials | None = None, request
 
     token_claims = await _get_token_claims(token, request)
     if "sub" not in token_claims:
-        raise HTTPException(status_code=HTTP_401_UNAUTHENTICATED)
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
     return token_claims["sub"]
 
@@ -126,13 +142,32 @@ async def get_user_authz_mapping(
 
     # either this was provided or we've tried to get it from the Bearer header
     if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHENTICATED)
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
     logging.debug("Got user's token. Using it to get authz mapping...")
 
     arborist_client = _get_arborist_client(request)
 
-    authz_mapping = await arborist_client.auth_mapping(jwt=token.credentials)
+    try:
+        authz_mapping = await arborist_client.auth_mapping(jwt=token.credentials)
+    except ArboristError as exc:
+        logging.error(
+            f"ArboristError while retrieving authz mapping: {exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="Could not verify, parse, and/or validate the provided access token.",
+        ) from exc
+    except Exception as exc:
+        logging.error(
+            f"Unexpected error while retrieving authz mapping from Arborist: {exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authorization service error while retrieving access policies.",
+        ) from exc
 
     logging.debug(f"Got user's authz mapping: {authz_mapping}")
 
@@ -162,7 +197,7 @@ async def _get_token_claims(
     token = await _get_token(token, request)
     # either this was provided or we've tried to get it from the Bearer header
     if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHENTICATED)
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
     # Audience is not used within Gen3 AuthN/Z service to individually represent Gen3 services
     # So don't bother setting it, b/c it doesn't add any additional security. Services
@@ -179,7 +214,7 @@ async def _get_token_claims(
     except Exception as exc:
         logging.error(exc.detail if hasattr(exc, "detail") else exc, exc_info=True)
         raise HTTPException(
-            HTTP_401_UNAUTHENTICATED,
+            HTTP_401_UNAUTHORIZED,
             "Could not verify, parse, and/or validate the provided access token.",
         ) from exc
 
