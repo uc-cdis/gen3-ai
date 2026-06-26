@@ -203,6 +203,51 @@ async def list_all_repositories() -> list[RepositoryMetadataModel]:
     ]
 
 
+async def get_repository(
+    namespace: str,
+    repo_name: str,
+) -> RepositoryMetadataModel | None:
+    return await get_repository_metadata(namespace, repo_name)
+
+
+async def list_repositories(
+    namespace: str | None = None,
+    tags: list[str] | None = None,
+    search: str | None = None,
+) -> list[RepositoryMetadataModel]:
+    pool = await get_db_pool()
+    clauses = []
+    values: list[object] = []
+    if namespace:
+        values.append(namespace)
+        clauses.append(f"namespace = ${len(values)}")
+    if tags:
+        values.append(tags)
+        clauses.append(f"tags && ${len(values)}")
+    if search:
+        values.append(f"%{search}%")
+        clauses.append(f"(repo_name ILIKE ${len(values)} OR description ILIKE ${len(values)})")
+    sql = """
+        SELECT namespace, repo_name, description, tags, created_at
+        FROM model_repositories
+    """
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY created_at DESC;"
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql, *values)
+    return [
+        RepositoryMetadataModel(
+            namespace=row["namespace"],
+            repo=row["repo_name"],
+            description=row["description"],
+            tags=row["tags"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
 async def update_repository_metadata(
     namespace: str,
     repo_name: str,

@@ -61,3 +61,39 @@ class TreeEntryModel(BaseModel):
 class DeleteModelResponse(BaseModel):
     status: str
     repo: str
+
+
+class RevisionCreateRequest(BaseModel):
+    revision_name: str = "main"
+    revision_identifier: str | None = None
+    etag: str | None = None
+
+
+class RevisionDeleteResponse(BaseModel):
+    status: str
+    repo: str
+    revision: str
+
+
+class UploadUrlRequest(BaseModel):
+    revision_name: str = "main"
+    file_name: str
+
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    object_key: str
+
+
+class FileMetadataModel(BaseModel):
+    file_id: str
+    path: str
+    size: int
+    sha: str | None = None
+    etag: str | None = None
+    s3_key: str
+
+
+class FileListResponseModel(BaseModel):
+    repo: str
+    files: list[FileMetadataModel]

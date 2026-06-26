@@ -246,18 +246,24 @@ url = s3_client.generate_presigned_url(
 
 ## Testing
 
-Run the comprehensive unit test suite:
+Run tests with uv (Python 3.13 environment):
 
 ```bash
-# Run all tests
-pytest tests/
+# Run unit tests (exclude MinIO integration-style module)
+uv run --with pytest --with pytest-asyncio pytest -q tests --ignore tests/test_minio.py
 
-# Run with coverage report
-pytest --cov=gen3_ai_model_repo tests/
+# Run with coverage
+uv run --with pytest --with pytest-asyncio --with pytest-cov \
+    pytest --cov=gen3_ai_model_repo tests --ignore tests/test_minio.py
 
-# Run specific test file
-pytest tests/test_ai_models.py
+# Run a specific test file
+uv run --with pytest --with pytest-asyncio pytest -q tests/test_routes.py
 
+
+MinIO note:
+
+- tests/test_minio.py performs a live upload to MinIO at localhost:9000 during module import.
+- Keep MinIO running before including that file in test runs, or exclude it with --ignore tests/test_minio.py for unit-only runs.
 # Run with verbose output
 pytest -v tests/
 ```
@@ -429,4 +435,3 @@ See LICENSE file in the repository root.
 - **gen3_embeddings**: Vector embedding generation service
 - **gen3_inference**: LLM inference service using uploaded models
 - **common**: Shared utilities and authentication
-s

@@ -14,6 +14,11 @@ MODEL_REPO_TOKEN = starlette_config(
     default="mock-token-123456",
     cast=str,
 )
+MODEL_STORAGE_PATH = starlette_config(
+    "MODEL_STORAGE_PATH",
+    default="./testfiles",
+)
+
 
 DB_DRIVER = starlette_config(
     "DB_DRIVER",
@@ -65,7 +70,7 @@ AUTHZ_SERVICE_NAME = starlette_config(
 )
 STORAGE_PROVIDER = starlette_config(
     "STORAGE_PROVIDER",
-    default="local",
+    default="minio",
 )
 
 LOCAL_STORAGE_PATH = starlette_config(

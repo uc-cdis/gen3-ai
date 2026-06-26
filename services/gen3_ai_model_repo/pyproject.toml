@@ -6,6 +6,8 @@ dependencies = [
     "common",
     "asyncpg",
     "huggingface-hub>=1.14.0",
+    "minio>=7.2.20",
+    "python-multipart>=0.0.9",
 ]
 requires-python = "~=3.13.0"
 

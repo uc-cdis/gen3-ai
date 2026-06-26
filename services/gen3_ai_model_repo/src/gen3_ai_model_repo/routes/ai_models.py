@@ -1,170 +1,327 @@
 import hashlib
-from pathlib import Path
-from urllib.parse import urljoin
+import os
+import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from gen3_ai_model_repo.auth import verify_authorization
-from gen3_ai_model_repo.config import FILE_STREAM_CHUNK_SIZE
+from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
 from gen3_ai_model_repo.database.helper import (
     create_repository_metadata,
+    create_revision,
+    delete_file,
+    delete_files_for_revision,
     delete_repository_metadata,
+    delete_revision,
+    get_file_record,
     get_or_create_revision,
     get_repository_metadata,
-    list_all_repositories,
     list_files_in_revision,
+    list_repositories,
     list_revisions,
     track_file,
 )
 from gen3_ai_model_repo.database.helper import (
+    get_revision as db_get_revision,
+)
+from gen3_ai_model_repo.database.helper import (
     repository_exists as db_repository_exists,
 )
-from gen3_ai_model_repo.file_utils import (
-    compute_hashes,
-    get_local_file,
-    list_repository_files,
-    read_file,
-)
-from gen3_ai_model_repo.metadata import (
-    create_metadata,
-    delete_repository,
-)
-from gen3_ai_model_repo.metadata import (
-    get_revision as metadata_get_revision,
-)
+from gen3_ai_model_repo.database.revisions import get_revision_identifier_column
 from gen3_ai_model_repo.models.schemas import (
     DeleteModelResponse,
+    FileListResponseModel,
+    FileMetadataModel,
     RepositoryFileModel,
     RepositoryInfoModel,
+    RepositoryMetadataModel,
     RepositoryModel,
+    RevisionCreateRequest,
+    RevisionDeleteResponse,
     RevisionListResponseModel,
     RevisionModel,
     TreeEntryModel,
-    UploadModelResponse,
+    UploadUrlRequest,
+    UploadUrlResponse,
 )
 from gen3_ai_model_repo.response import build_head_response
-from gen3_ai_model_repo.url import build_signed_url
+from gen3_ai_model_repo.storage import get_storage_provider
 
 ai_models_router = APIRouter()
 
 
-# note that the folder structure in BASE_FILES_DIR must be:
-#   BASE_FILES_DIR / {namespace} / {repo}
-#   ex: /testfiles/uc-ctds/bge-large-en-v1.5-bio-mapping
-BASE_FILES_DIR = Path(__file__).parent / "testfiles"
+class RepositoryCreateRequest(BaseModel):
+    """
+    Request payload for creating a repository.
 
+    Attributes:
+        description: Optional human-readable repository description.
+        tags: Optional list of tags used for filtering and discovery.
+    """
 
-DOMAIN = "http://127.0.0.1:4141"
-
-
-class UploadModelRequest(BaseModel):
-    description: str
+    description: str | None = None
     tags: list[str] = []
 
 
-@ai_models_router.post(
-    "/api/models/{namespace}/{repo}/upload",
-    response_model=UploadModelResponse,
-    summary="Upload a new model repository",
-    description=(
-        "Create a new model repository with metadata and track all files. "
-        "Computes hashes for all files in the repository and stores them in the database. "
-        "Requires authentication via authorization header."
-    ),
-    responses={
-        status.HTTP_200_OK: {"description": "Model successfully uploaded"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
-        status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Failed to upload model"},
-    },
-    tags=["Models"],
-)
+class MultipartUploadResponse(BaseModel):
+    """
+    Response payload for multipart model uploads.
+
+    Attributes:
+        status: Upload status string.
+        repo: Repository identifier in namespace/repo form.
+        revision: Revision name associated with the upload.
+        files: Number of uploaded files.
+        total_size: Total uploaded size in bytes.
+    """
+
+    status: str
+    repo: str
+    revision: str
+    files: int
+    total_size: int
+
+
+async def repository_has_current_revision(conn) -> bool:
+    """
+    Check whether the model_repositories table has a current_revision column.
+
+    Args:
+        conn: Active database connection.
+
+    Returns:
+        True if the current_revision column exists, otherwise False.
+    """
+
+    return bool(
+        await conn.fetchval(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'model_repositories'
+              AND column_name = 'current_revision';
+            """
+        )
+    )
+
+
+async def model_files_optional_columns(conn) -> tuple[bool, bool]:
+    """
+    Detect optional columns in the model_files table.
+
+    Args:
+        conn: Active database connection.
+
+    Returns:
+        Tuple[bool, bool]: Flags for s3_key and file_type column presence.
+    """
+
+    rows = await conn.fetch(
+        """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'model_files'
+                    AND column_name IN ('s3_key', 'file_type');
+                """
+    )
+    column_names = {row["column_name"] for row in rows}
+    return "s3_key" in column_names, "file_type" in column_names
+
+
+@ai_models_router.post("/api/models/{namespace}/{repo}/upload", response_model=MultipartUploadResponse, tags=["Models"])
 async def upload_model(
     namespace: str,
     repo: str,
-    request: UploadModelRequest,
+    revision_name: str = Form("main"),
+    files: list[UploadFile] = File(...),
     _: None = Depends(verify_authorization),
-) -> UploadModelResponse:
+) -> MultipartUploadResponse:
     """
-    Upload a new AI model repository to the service.
+    Upload one or more files and create a repository revision.
 
-    Creates a new repository with the specified namespace and name, stores metadata
-    in the database, and tracks all files in the repository directory. Computes SHA-256
-    and MD5 hashes for all files to enable efficient deduplication.
+    This endpoint creates the repository and revision records when needed,
+    uploads files to the configured storage provider, and tracks metadata in the
+    database inside a transaction.
 
     Args:
-        namespace: The namespace/organization for the model (e.g., 'uc-ctds').
-        repo: The repository name for the model (e.g., 'bge-large-en-v1.5-bio-mapping').
-        request: The upload request containing description and optional tags.
-        _: Authentication dependency (automatically validated by FastAPI).
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        revision_name: Revision name to create or update.
+        files: Uploaded files included in the multipart request.
+        _: Authorization dependency validated by FastAPI.
 
     Returns:
-        UploadModelResponse: Contains status, repository identifier, metadata file path,
-            and the full metadata model including namespace, description, tags, and timestamps.
+        MultipartUploadResponse with upload summary details.
 
     Raises:
-        HTTPException: 401 if authorization is invalid, 500 if database operations fail.
+        HTTPException: 409 if repository already exists, 422 for invalid uploads.
     """
 
-    # Create metadata file and database record
-    metadata_file = create_metadata(BASE_FILES_DIR, namespace, repo, request.description, request.tags)
-    metadata_model = await create_repository_metadata(
-        namespace=namespace,
-        repo_name=repo,
-        description=request.description,
-        tags=request.tags,
-    )
+    if not files:
+        raise HTTPException(status_code=422, detail="At least one file is required")
 
-    # Compute hashes for all files in the repository
-    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
-    all_hashes = []
+    provider = get_storage_provider()
+    pool = await __import__("gen3_ai_model_repo.database.db", fromlist=["get_db_pool"]).get_db_pool()
+    uploaded_objects: list[str] = []
     total_size = 0
 
-    if repo_path.exists():
-        for file_path in repo_path.rglob("*"):
-            if file_path.is_file():
-                content = read_file(file_path)
-                commit_hash, etag = compute_hashes(content)
-                relative_path = str(file_path.relative_to(repo_path))
-                all_hashes.append(commit_hash)
-                total_size += len(content)
+    async with pool.acquire() as conn:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            identifier_column = await get_revision_identifier_column(conn)
+            has_current_revision = await repository_has_current_revision(conn)
+            has_s3_key, has_file_type = await model_files_optional_columns(conn)
+            exists = await conn.fetchval(
+                "SELECT 1 FROM model_repositories WHERE namespace=$1 AND repo_name=$2",
+                namespace,
+                repo,
+            )
+            if exists:
+                raise HTTPException(status_code=409, detail=f"Repository {namespace}/{repo} already exists")
 
-                # Track file in database
-                await track_file(
-                    namespace=namespace,
-                    repo_name=repo,
-                    revision_name="main",
-                    file_path=relative_path,
-                    file_size=len(content),
-                    content_sha=commit_hash,
-                    content_etag=etag,
+            if has_current_revision:
+                await conn.execute(
+                    "INSERT INTO model_repositories (namespace, repo_name, description, tags, current_revision) VALUES ($1,$2,$3,$4,$5)",
+                    namespace,
+                    repo,
+                    None,
+                    [],
+                    revision_name,
                 )
+            else:
+                await conn.execute(
+                    "INSERT INTO model_repositories (namespace, repo_name, description, tags) VALUES ($1,$2,$3,$4)",
+                    namespace,
+                    repo,
+                    None,
+                    [],
+                )
+            repo_id = await conn.fetchval(
+                "SELECT id FROM model_repositories WHERE namespace=$1 AND repo_name=$2",
+                namespace,
+                repo,
+            )
+            # Legacy databases may enforce NOT NULL on commit_sha/revision identifier.
+            # Seed with a deterministic placeholder and overwrite with final hash after upload.
+            initial_revision_hash = hashlib.sha256(f"{namespace}/{repo}:{revision_name}".encode()).hexdigest()
+            await conn.execute(
+                f"INSERT INTO model_revisions (repository_id, revision_name, {identifier_column}, etag) VALUES ($1,$2,$3,$4)",
+                repo_id,
+                revision_name,
+                initial_revision_hash,
+                initial_revision_hash[:32],
+            )
+            revision_id = await conn.fetchval(
+                "SELECT id FROM model_revisions WHERE repository_id=$1 AND revision_name=$2",
+                repo_id,
+                revision_name,
+            )
 
-    # Create a combined commit hash from all files
-    if all_hashes:
-        combined = "".join(all_hashes)
-        main_commit_sha = hashlib.sha256(combined.encode()).hexdigest()
-    else:
-        main_commit_sha = hashlib.sha256(b"").hexdigest()
+            file_columns = ["revision_id", "file_path", "file_size", "content_sha", "content_etag"]
+            if has_s3_key:
+                file_columns.append("s3_key")
+            if has_file_type:
+                file_columns.append("file_type")
+            file_insert_sql = (
+                f"INSERT INTO model_files ({', '.join(file_columns)}) "
+                f"VALUES ({', '.join(f'${idx}' for idx in range(1, len(file_columns) + 1))})"
+            )
 
-    # Create the main revision
-    await get_or_create_revision(
-        namespace=namespace,
-        repo_name=repo,
-        revision_name="main",
-        commit_sha=main_commit_sha,
-        etag=None,
-    )
+            digest = hashlib.sha256()
+            for upload in files:
+                if not upload.filename:
+                    raise HTTPException(status_code=422, detail="Each uploaded file must have a filename")
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp_path = tmp.name
+                    while chunk := await upload.read(1024 * 1024):
+                        tmp.write(chunk)
+                        digest.update(chunk)
+                        total_size += len(chunk)
+                object_key = f"{namespace}/{repo}/{revision_name}/{upload.filename}"
+                await provider.upload_file(tmp_path, object_key)
+                os.unlink(tmp_path)
+                meta = await provider.get_file_metadata(object_key)
+                sha = digest.hexdigest()
+                etag = meta.get("etag") or sha[:32]
+                file_values: list[object] = [
+                    revision_id,
+                    upload.filename,
+                    int(meta["size"]),
+                    sha,
+                    etag,
+                ]
+                if has_s3_key:
+                    file_values.append(object_key)
+                if has_file_type:
+                    file_values.append(upload.content_type)
+                await conn.execute(file_insert_sql, *file_values)
+                uploaded_objects.append(object_key)
 
-    return UploadModelResponse(
+            revision_hash = hashlib.sha256("".join(sorted(upload.filename for upload in files)).encode()).hexdigest()
+            await conn.execute(
+                f"UPDATE model_revisions SET {identifier_column}=$1, etag=$2 WHERE id=$3",
+                revision_hash,
+                revision_hash[:32],
+                revision_id,
+            )
+            if has_current_revision:
+                await conn.execute(
+                    "UPDATE model_repositories SET current_revision=$1 WHERE id=$2",
+                    revision_name,
+                    repo_id,
+                )
+            await tx.commit()
+        except Exception:
+            await tx.rollback()
+            for object_key in uploaded_objects:
+                try:
+                    await provider.delete_file(object_key)
+                except Exception:
+                    pass
+            raise
+
+    return MultipartUploadResponse(
         status="uploaded",
         repo=f"{namespace}/{repo}",
-        metadata_file=str(metadata_file),
-        metadata=metadata_model,
+        revision=revision_name,
+        files=len(files),
+        total_size=total_size,
     )
+
+
+@ai_models_router.post(
+    "/api/models/{namespace}/{repo}/revisions", response_model=RevisionModel, summary="Create revision", tags=["Models"]
+)
+async def create_model_revision(
+    namespace: str,
+    repo: str,
+    request: RevisionCreateRequest,
+    _: None = Depends(verify_authorization),
+) -> RevisionModel:
+    """
+    Create a revision for an existing repository.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        request: Revision creation payload.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        RevisionModel containing created revision metadata.
+
+    Raises:
+        HTTPException: 404 if the repository does not exist.
+    """
+
+    revision = await create_revision(namespace, repo, request.revision_name, request.revision_identifier, request.etag)
+    if not revision:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return RevisionModel(**{"id": str(revision["id"]), "revision": revision["revision"], "sha": revision["sha"] or ""})
 
 
 @ai_models_router.get(
@@ -216,10 +373,23 @@ async def list_repo_tree(
     Raises:
         HTTPException: 404 if the repository or path does not exist.
     """
-    files = list_repository_files(BASE_FILES_DIR, namespace, repo)
+    if rev != "main":
+        raise HTTPException(
+            status_code=400,
+            detail="Only 'main' revision is currently supported",
+        )
+
+    files = await list_files_in_revision(
+        namespace=namespace,
+        repo_name=repo,
+        revision_name=rev,
+    )
 
     if not files:
         raise HTTPException(status_code=404, detail="Repository or path not found")
+    if path:
+        files = [f for f in files if f["path"].startswith(path)]
+
     return [TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files]
 
 
@@ -252,8 +422,38 @@ async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
     Raises:
         HTTPException: 404 if the revision does not exist.
     """
-    data = metadata_get_revision(namespace, repo, rev)
-    return RevisionModel(**data)
+    data = await db_get_revision(namespace, repo, rev)
+    if not data:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
+
+
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/revisions/{revision}",
+    response_model=RevisionModel,
+    summary="Get revision metadata",
+    tags=["Models"],
+)
+async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionModel:
+    """
+    Retrieve revision metadata by revision name.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        revision: Revision name to retrieve.
+
+    Returns:
+        RevisionModel containing revision metadata.
+
+    Raises:
+        HTTPException: 404 if the revision does not exist.
+    """
+
+    data = await db_get_revision(namespace, repo, revision)
+    if not data:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
 
 
 @ai_models_router.head(
@@ -286,18 +486,25 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     Raises:
         HTTPException: 404 if the file does not exist.
     """
-    path_parts = [namespace, repo]
-    path_parts.extend(path.split("/"))
-    local_path = get_local_file(BASE_FILES_DIR, path_parts)
-    content = read_file(local_path)
+    file_record = await get_file_record(
+        namespace=namespace,
+        repo_name=repo,
+        revision_name=rev,
+        file_path=path,
+    )
 
-    size = len(content)
-    commit_hash, etag = compute_hashes(content)
+    if not file_record:
+        raise HTTPException(
+            status_code=404,
+            detail="File not found",
+        )
 
-    # also mock the redirected signed URL locally via this same
-    # web service. this will stream the file contents as if it
-    # was a signed URL
-    signed_url = build_signed_url(namespace, repo, rev, path)
+    size = file_record["size"]
+    commit_hash = file_record["sha"]
+    etag = file_record["etag"]
+
+    provider = get_storage_provider()
+    signed_url = await provider.generate_signed_url(file_record["s3_key"])
 
     return build_head_response(commit_hash, etag, size, signed_url)
 
@@ -332,15 +539,239 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
     Raises:
         HTTPException: 404 if the file does not exist.
     """
-    print(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
-    signed_url = urljoin(
-        f"{DOMAIN}/signed-url/",
-        f"{namespace}/{repo}/{path}",
+    logging.info(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
+    file_record = await get_file_record(
+        namespace=namespace,
+        repo_name=repo,
+        revision_name=rev,
+        file_path=path,
     )
-    # this redirect is how our service would work. we'd do auth checks, find
-    # the file in s3, create a signed URL and return
-    print(f"Redirecting to signed URL: {signed_url}")
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    provider = get_storage_provider()
+    signed_url = await provider.generate_signed_url(file_record["s3_key"])
+    logging.info(f"Redirecting to signed URL: {signed_url}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
+
+
+@ai_models_router.get("/api/models/{namespace}/{repo}/files", response_model=FileListResponseModel, tags=["Models"])
+async def list_model_files(namespace: str, repo: str, revision: str = "main") -> FileListResponseModel:
+    """
+    List tracked files for a repository revision.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        revision: Revision name to list files from.
+
+    Returns:
+        FileListResponseModel containing file metadata entries.
+    """
+
+    files = await list_files_in_revision(namespace, repo, revision)
+    return FileListResponseModel(
+        repo=f"{namespace}/{repo}",
+        files=[
+            FileMetadataModel(
+                file_id=f"{namespace}:{repo}:{revision}:{f['path']}",
+                path=f["path"],
+                size=f["size"],
+                sha=f["oid"],
+                etag=f["etag"],
+                s3_key=f"{namespace}/{repo}/{revision}/{f['path']}",
+            )
+            for f in files
+        ],
+    )
+
+
+@ai_models_router.get(
+    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=FileMetadataModel, tags=["Models"]
+)
+async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadataModel:
+    """
+    Retrieve file metadata from a repository using a file identifier.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        file_id: Encoded file identifier or plain file path.
+
+    Returns:
+        FileMetadataModel with tracked file details.
+
+    Raises:
+        HTTPException: 404 if the file cannot be found.
+    """
+
+    parts = file_id.split(":", 3)
+    if len(parts) == 4:
+        _, _, revision, path = parts
+    else:
+        revision, path = "main", file_id
+    record = await get_file_record(namespace, repo, revision, path)
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileMetadataModel(
+        file_id=file_id,
+        path=record["path"],
+        size=record["size"],
+        sha=record["sha"],
+        etag=record["etag"],
+        s3_key=record["s3_key"],
+    )
+
+
+@ai_models_router.delete(
+    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=RevisionDeleteResponse, tags=["Models"]
+)
+async def delete_model_file(
+    namespace: str, repo: str, file_id: str, _: None = Depends(verify_authorization)
+) -> RevisionDeleteResponse:
+    """
+    Delete a tracked file from a repository revision.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        file_id: Encoded file identifier or plain file path.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        RevisionDeleteResponse describing deletion outcome.
+
+    Raises:
+        HTTPException: 404 if the file cannot be found.
+    """
+
+    parts = file_id.split(":", 3)
+    revision, path = ("main", file_id) if len(parts) != 4 else (parts[2], parts[3])
+    deleted = await delete_file(namespace, repo, revision, path)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
+
+
+@ai_models_router.delete(
+    "/api/models/{namespace}/{repo}/revisions/{revision}", response_model=RevisionDeleteResponse, tags=["Models"]
+)
+async def delete_model_revision(
+    namespace: str, repo: str, revision: str, _: None = Depends(verify_authorization)
+) -> RevisionDeleteResponse:
+    """
+    Delete a revision and all files tracked under it.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        revision: Revision name to delete.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        RevisionDeleteResponse describing deletion outcome.
+
+    Raises:
+        HTTPException: 404 if the revision and its files are not found.
+    """
+
+    deleted_files = await delete_files_for_revision(namespace, repo, revision)
+    deleted_revision = await delete_revision(namespace, repo, revision)
+    if not deleted_revision and not deleted_files:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
+
+
+@ai_models_router.post("/api/models/{namespace}/{repo}/upload-url", response_model=UploadUrlResponse, tags=["Models"])
+async def generate_upload_url(
+    namespace: str, repo: str, request: UploadUrlRequest, _: None = Depends(verify_authorization)
+) -> UploadUrlResponse:
+    """
+    Generate a storage upload URL for a file in a revision.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        request: Upload URL request payload.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        UploadUrlResponse containing a pre-signed upload URL and object key.
+    """
+
+    provider = get_storage_provider()
+    object_key = f"{namespace}/{repo}/{request.revision_name}/{request.file_name}"
+    upload_url = await provider.generate_upload_url(object_key)
+    return UploadUrlResponse(upload_url=upload_url, object_key=object_key)
+
+
+@ai_models_router.post("/api/models/{namespace}/{repo}/complete-upload", response_model=RevisionModel, tags=["Models"])
+async def complete_upload(
+    namespace: str, repo: str, request: RevisionCreateRequest, _: None = Depends(verify_authorization)
+) -> RevisionModel:
+    """
+    Finalize an upload by creating/updating revision and file tracking records.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        request: Revision completion payload.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        RevisionModel containing finalized revision metadata.
+
+    Raises:
+        HTTPException: 404 if the repository does not exist.
+    """
+
+    provider = get_storage_provider()
+    storage_prefix = f"{namespace}/{repo}/{request.revision_name}"
+    object_keys = await provider.list_files(storage_prefix)
+
+    derived_revision_identifier = request.revision_identifier
+    if not derived_revision_identifier:
+        digest = hashlib.sha256()
+        for object_key in sorted(object_keys):
+            digest.update(object_key.encode())
+        # Keep revision identifiers non-null for legacy schemas that enforce commit_sha NOT NULL.
+        derived_revision_identifier = digest.hexdigest()
+
+    revision = await create_revision(
+        namespace,
+        repo,
+        request.revision_name,
+        derived_revision_identifier,
+        request.etag or derived_revision_identifier[:32],
+    )
+    if not revision:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    prefix_with_slash = f"{storage_prefix}/"
+    for object_key in object_keys:
+        if not object_key.startswith(prefix_with_slash):
+            continue
+        file_path = object_key[len(prefix_with_slash) :]
+        if not file_path:
+            continue
+
+        metadata = await provider.get_file_metadata(object_key)
+        content_etag = metadata.get("etag")
+        # Keep content SHA stable and non-null for schemas that require it.
+        content_sha = hashlib.sha256(f"{object_key}:{content_etag or ''}".encode()).hexdigest()
+
+        await track_file(
+            namespace=namespace,
+            repo_name=repo,
+            revision_name=request.revision_name,
+            file_path=file_path,
+            file_size=int(metadata["size"]),
+            content_sha=content_sha,
+            content_etag=content_etag,
+            s3_key=object_key,
+        )
+
+    return RevisionModel(id=str(revision["id"]), revision=revision["revision"], sha=revision["sha"] or "")
 
 
 @ai_models_router.get(
@@ -355,45 +786,20 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
 )
 async def signed_url(path: str):
     """
-    Stream file content for download.
+    Deprecated local signed-url endpoint.
 
-    Returns file content as a streaming response with proper Content-Length header.
-    Files are streamed in 64KB chunks to efficiently handle large files without
-    loading them entirely into memory.
+    This route is intentionally disabled and returns HTTP 410.
 
     Args:
         path: The file path within the repository (e.g., 'namespace/repo/filename.bin').
 
     Returns:
-        StreamingResponse: File content streamed in chunks with appropriate media type.
+        Never returns file content; always raises an exception.
 
     Raises:
-        HTTPException: 404 if the file does not exist.
+        HTTPException: 410 because local streaming is deprecated.
     """
-    local_path = get_local_file(BASE_FILES_DIR, path.split("/"))
-    file_size = local_path.stat().st_size
-
-    media_type = "application/json" if path.endswith(".json") else "application/octet-stream"
-
-    # yields the file in chunks
-    def file_iterator(path: Path, chunk_size: int = FILE_STREAM_CHUNK_SIZE):
-        with path.open("rb") as file:
-            while True:
-                chunk = file.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-
-    headers = {
-        "Content-Length": str(file_size),
-        "Content-Type": media_type,
-    }
-
-    return StreamingResponse(
-        file_iterator(local_path),
-        media_type=media_type,
-        headers=headers,
-    )
+    raise HTTPException(status_code=410, detail="Local streaming endpoint is deprecated; use storage signed URLs")
 
 
 @ai_models_router.get(
@@ -476,7 +882,11 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     },
     tags=["Models"],
 )
-async def list_models() -> list[RepositoryModel]:
+async def list_models(
+    namespace: str | None = Query(None),
+    tags: list[str] | None = Query(None),
+    search: str | None = Query(None),
+) -> list[RepositoryModel]:
     """
     Retrieve all available model repositories.
 
@@ -486,7 +896,7 @@ async def list_models() -> list[RepositoryModel]:
     Returns:
         List of RepositoryModel objects containing repository information.
     """
-    repos = await list_all_repositories()
+    repos = await list_repositories(namespace=namespace, tags=tags, search=search)
     return [
         RepositoryModel(
             id=f"{repo.namespace}/{repo.repo}",
@@ -496,6 +906,74 @@ async def list_models() -> list[RepositoryModel]:
         )
         for repo in repos
     ]
+
+
+@ai_models_router.get("/api/models/{namespace}/{repo}", response_model=RepositoryInfoModel, tags=["Models"])
+async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
+    """
+    Retrieve repository information, main revision metadata, and tracked files.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+
+    Returns:
+        RepositoryInfoModel with repository metadata, revision summary, and files.
+
+    Raises:
+        HTTPException: 404 if repository metadata is not found.
+    """
+
+    metadata = await get_repository_metadata(namespace, repo)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    revision_info = await db_get_revision(namespace, repo, metadata.repo and "main")
+    files_from_db = (
+        await list_files_in_revision(namespace=namespace, repo_name=repo, revision_name="main") if revision_info else []
+    )
+    return RepositoryInfoModel(
+        id=f"{namespace}/{repo}",
+        sha=(revision_info["sha"] or "") if revision_info else "",
+        etag=(revision_info["etag"] or revision_info["sha"] or "") if revision_info else "",
+        size=sum(f["size"] for f in files_from_db),
+        files=[RepositoryFileModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files_from_db],
+        metadata=metadata,
+        security_status=DEFAULT_SECURITY_FILE_STATUS,
+    )
+
+
+@ai_models_router.post("/api/models/{namespace}/{repo}", response_model=RepositoryMetadataModel, tags=["Models"])
+async def create_repository(
+    namespace: str,
+    repo: str,
+    request: RepositoryCreateRequest,
+    _: None = Depends(verify_authorization),
+) -> RepositoryMetadataModel:
+    """
+    Create repository metadata for a new repository.
+
+    Args:
+        namespace: Namespace/organization for the repository.
+        repo: Repository name.
+        request: Repository metadata creation payload.
+        _: Authorization dependency validated by FastAPI.
+
+    Returns:
+        RepositoryMetadataModel for the newly created repository.
+
+    Raises:
+        HTTPException: 409 if the repository already exists.
+    """
+
+    if await db_repository_exists(namespace, repo):
+        raise HTTPException(status_code=409, detail=f"Repository {namespace}/{repo} already exists")
+
+    return await create_repository_metadata(
+        namespace=namespace,
+        repo_name=repo,
+        description=request.description,
+        tags=request.tags,
+    )
 
 
 @ai_models_router.delete(
@@ -536,6 +1014,11 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
     if not repo_exists_check:
         raise HTTPException(status_code=404, detail="Repository not found")
 
+    # Delete S3 objects
+    provider = get_storage_provider()
+    prefix = f"{namespace}/{repo}/"
+    await provider.delete_prefix(prefix)
+
     # Delete from database
     deleted_from_db = await delete_repository_metadata(namespace, repo)
     if not deleted_from_db:
@@ -543,15 +1026,6 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
             status_code=500,
             detail=f"Failed to delete repository {namespace}/{repo} from database",
         )
-
-    # Delete files from disk if they exist
-    repo_path = BASE_FILES_DIR / Path(namespace) / Path(repo)
-    if repo_path.exists():
-        try:
-            delete_repository(BASE_FILES_DIR, namespace, repo)
-        except Exception as e:
-            # Log but don't fail if file deletion fails
-            print(f"Warning: Failed to delete repository files: {e}")
 
     return DeleteModelResponse(status="deleted", repo=f"{namespace}/{repo}")
 

@@ -138,3 +138,31 @@ def list_repository_files(base_dir: Path, namespace: str, repo: str) -> list[dic
         except Exception as e:
             logging.error(f"Error processing file {path}: {e}")
     return entries
+
+
+def compute_file_sha256(path: Path) -> str:
+    """
+    Compute SHA256 without loading file into memory.
+    """
+
+    sha = hashlib.sha256()
+
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            sha.update(chunk)
+
+    return sha.hexdigest()
+
+
+def compute_file_md5(path: Path) -> str:
+    """
+    Compute MD5 without loading file into memory.
+    """
+
+    md5 = hashlib.md5(usedforsecurity=False)
+
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            md5.update(chunk)
+
+    return md5.hexdigest()

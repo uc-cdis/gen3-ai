@@ -1,0 +1,301 @@
+{
+  "info": {
+    "name": "Gen3 AI Model Repo API",
+    "_postman_id": "5a4d1e3f-9f30-4c60-9a3e-8d0b3f9b6a6d",
+    "description": "Postman collection for gen3_ai_model_repo FastAPI routes.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:4141",
+      "type": "string"
+    },
+    {
+      "key": "bearer_token",
+      "value": "mock-token-123456",
+      "type": "string"
+    },
+    {
+      "key": "namespace",
+      "value": "test",
+      "type": "string"
+    },
+    {
+      "key": "repo",
+      "value": "repo",
+      "type": "string"
+    },
+    {
+      "key": "rev",
+      "value": "main",
+      "type": "string"
+    },
+    {
+      "key": "path",
+      "value": "config.json",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Upload Model",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{bearer_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Test model\",\n  \"tags\": [\"embedding\"]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/upload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "upload"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Repository Tree",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/tree/{{rev}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "tree",
+            "{{rev}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Repository Tree with Path",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/tree/{{rev}}/{{path}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "tree",
+            "{{rev}}",
+            "{{path}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Revision",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revision/{{rev}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "revision",
+            "{{rev}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Head File Resolve",
+      "request": {
+        "method": "HEAD",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/resolve/{{rev}}/{{path}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "resolve",
+            "{{rev}}",
+            "{{path}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get File Resolve",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/resolve/{{rev}}/{{path}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "resolve",
+            "{{rev}}",
+            "{{path}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Signed URL Content",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/signed-url/{{namespace}}/{{repo}}/{{path}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "signed-url",
+            "{{namespace}}",
+            "{{repo}}",
+            "{{path}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Model Info",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/info",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "info"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Models",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/models",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Delete Model",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{bearer_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Model Revisions",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{bearer_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revisions",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "models",
+            "{{namespace}}",
+            "{{repo}}",
+            "revisions"
+          ]
+        }
+      }
+    }
+  ]
+}

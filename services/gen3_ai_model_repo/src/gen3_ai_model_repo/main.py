@@ -8,10 +8,12 @@ from gen3_ai_model_repo import config
 from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.routes.ai_models import ai_models_router
+from gen3_ai_model_repo.storage.router import storage_router
 
 route_aggregator = APIRouter()
 route_aggregator.include_router(common_router)
 route_aggregator.include_router(ai_models_router)
+route_aggregator.include_router(storage_router)
 
 
 @asynccontextmanager

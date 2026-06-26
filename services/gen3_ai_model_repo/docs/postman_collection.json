@@ -1,0 +1,511 @@
+{
+  "info": {
+    "name": "Gen3 AI Model Repository API",
+    "_postman_id": "4f1d5f89-2a88-4c8f-9a3f-9a7c2c6c5d1a",
+    "description": "Validated against the current FastAPI implementation and OpenAPI spec for gen3_ai_model_repo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Repository APIs",
+      "item": [
+        {
+          "name": "Create Repository",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"description\":\"Production repository\",\"tags\":[\"prod\"]}"
+            },
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Repository metadata schema fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('namespace'); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('description'); pm.expect(json).to.have.property('tags'); pm.expect(json).to.have.property('created_at'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Repositories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/models?namespace={{namespace}}&search={{search}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "models"],
+              "query": [
+                {"key": "namespace", "value": "{{namespace}}"},
+                {"key": "search", "value": "{{search}}"}
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response is an array', function () { pm.expect(pm.response.json()).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Repository",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Has repository info schema fields', function () { const json = pm.response.json(); pm.expect(json).to.have.property('id'); pm.expect(json).to.have.property('sha'); pm.expect(json).to.have.property('etag'); pm.expect(json).to.have.property('size'); pm.expect(json).to.have.property('files'); pm.expect(json).to.have.property('metadata'); pm.expect(json).to.have.property('security_status'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Repository",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Has delete response fields', function () { const json = pm.response.json(); pm.expect(json).to.have.property('status'); pm.expect(json).to.have.property('repo'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Revision APIs",
+      "item": [
+        {
+          "name": "Create Revision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"revision_name\":\"{{revision}}\",\"revision_identifier\":\"sha-123\",\"etag\":\"etag-123\"}"
+            },
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revisions"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Revision schema fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('id'); pm.expect(json).to.have.property('revision'); pm.expect(json).to.have.property('sha'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Revision",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revisions/{{revision}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Revision schema fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('id'); pm.expect(json).to.have.property('revision'); pm.expect(json).to.have.property('sha'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Revisions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revisions"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response has repo and revisions', function () { const json = pm.response.json(); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('revisions'); pm.expect(json.revisions).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Revision",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revisions/{{revision}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Has delete revision fields', function () { const json = pm.response.json(); pm.expect(json).to.have.property('status'); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('revision'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Legacy Revision Lookup",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/revision/{{revision}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Revision schema fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('id'); pm.expect(json).to.have.property('revision'); pm.expect(json).to.have.property('sha'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Upload APIs",
+      "item": [
+        {
+          "name": "Multipart Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {"key": "revision_name", "value": "{{revision}}", "type": "text"},
+                {"key": "files", "type": "file", "src": "{{upload_file_path}}"}
+              ]
+            },
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/upload"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Multipart upload response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('status'); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('revision'); pm.expect(json).to.have.property('files'); pm.expect(json).to.have.property('total_size'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate Upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"revision_name\":\"{{revision}}\",\"file_name\":\"model.safetensors\"}"
+            },
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/upload-url"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Upload URL response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('upload_url'); pm.expect(json).to.have.property('object_key'); });",
+                  "const json = pm.response.json(); pm.environment.set('upload_url', json.upload_url); pm.environment.set('object_key', json.object_key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload File To Presigned URL",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/octet-stream"}
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{upload_file_path}}"
+              }
+            },
+            "url": "{{upload_url}}",
+            "description": "Use the exact upload_url from the previous step. Do not add Authorization headers and do not change host/query params."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 204', function () { pm.expect([200,204]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Complete Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"revision_name\":\"{{revision}}\",\"revision_identifier\":\"sha-123\",\"etag\":\"etag-123\"}"
+            },
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/complete-upload"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Revision response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('id'); pm.expect(json).to.have.property('revision'); pm.expect(json).to.have.property('sha'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HF APIs",
+      "item": [
+        {
+          "name": "Tree",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/tree/{{revision}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 404', function () { pm.expect([200,404]).to.include(pm.response.code); });",
+                  "pm.test('Tree response is array when successful', function () { if (pm.response.code === 200) { pm.expect(pm.response.json()).to.be.an('array'); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resolve",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/resolve/{{revision}}/config.json"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 302, 307, 404, or 410', function () { pm.expect([302,307,404,410]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "File APIs",
+      "item": [
+        {
+          "name": "List Files",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/files?revision={{revision}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('File list response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('files'); pm.expect(json.files).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get File Metadata",
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/files/{{file_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 404', function () { pm.expect([200,404]).to.include(pm.response.code); });",
+                  "pm.test('File metadata schema fields exist when successful', function () { if (pm.response.code === 200) { const json = pm.response.json(); pm.expect(json).to.have.property('file_id'); pm.expect(json).to.have.property('path'); pm.expect(json).to.have.property('size'); pm.expect(json).to.have.property('s3_key'); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete File",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": "{{base_url}}/api/models/{{namespace}}/{{repo}}/files/{{file_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 404', function () { pm.expect([200,404]).to.include(pm.response.code); });",
+                  "pm.test('Delete file response fields exist when successful', function () { if (pm.response.code === 200) { const json = pm.response.json(); pm.expect(json).to.have.property('status'); pm.expect(json).to.have.property('repo'); pm.expect(json).to.have.property('revision'); } });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Storage APIs",
+      "item": [
+        {
+          "name": "Verify Storage Prefix",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"storage_prefix\":\"{{storage_prefix}}\"}"
+            },
+            "url": "{{base_url}}/storage/verify"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Storage verify response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('exists'); pm.expect(json).to.have.property('file_count'); pm.expect(json).to.have.property('total_size'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate Download URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"object_key\":\"{{object_key}}\"}"
+            },
+            "url": "{{base_url}}/storage/download-url"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Download URL response fields exist', function () { const json = pm.response.json(); pm.expect(json).to.have.property('presigned_url'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+from gen3_ai_model_repo.database.db import get_db_pool
+from gen3_ai_model_repo.database.revisions import get_revision_identifier_column
 from gen3_ai_model_repo.models.schemas import (
     RepositoryMetadataModel,
     RevisionModel,
@@ -38,3 +40,36 @@ def repository_file_to_model(file_data: dict) -> TreeEntryModel:
         oid=file_data["oid"],
         size=file_data["size"],
     )
+
+
+async def update_revision_commit(
+    namespace: str,
+    repo_name: str,
+    revision_name: str,
+    commit_sha: str,
+    etag: str | None = None,
+):
+    pool = await get_db_pool()
+
+    async with pool.acquire() as conn:
+        identifier_column = await get_revision_identifier_column(conn)
+        await conn.execute(
+            f"""
+            UPDATE model_revisions
+            SET {identifier_column} = $1,
+                etag = $2
+            WHERE id = (
+                SELECT mr.id
+                FROM model_revisions mr
+                JOIN model_repositories repo ON repo.id = mr.repository_id
+                WHERE repo.namespace = $3
+                  AND repo.repo_name = $4
+                  AND mr.revision_name = $5
+            );
+            """,
+            commit_sha,
+            etag,
+            namespace,
+            repo_name,
+            revision_name,
+        )
