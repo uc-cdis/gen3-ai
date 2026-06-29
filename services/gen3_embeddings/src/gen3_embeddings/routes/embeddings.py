@@ -9,11 +9,11 @@ from gen3_embeddings.auth import (
 )
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
 from gen3_embeddings.database.db import (
-    Collection,
     DataAccessLayer,
     get_data_access_layer,
     get_data_access_layer_for_read_operations,
 )
+from gen3_embeddings.database.models import Collection
 from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_binary_result,

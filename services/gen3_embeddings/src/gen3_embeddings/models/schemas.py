@@ -36,6 +36,7 @@ class CollectionModel(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     self: str | None = None
+    available_embeddings_count: int | None = None
 
 
 class PaginatedCollectionsResponse(BaseModel):
@@ -138,7 +139,7 @@ class CreateCollectionBody(BaseModel):
     collection_name: str
     description: str | None = None
     dimensions: int
-    vector_type: VectorType = VectorType.vector
+    vector_type: VectorType | None = None
 
 
 class UpdateCollectionBody(BaseModel):

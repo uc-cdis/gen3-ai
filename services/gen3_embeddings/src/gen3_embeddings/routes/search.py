@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.database.db import (
-    Collection,
     DataAccessLayer,
-    Embedding,
     get_data_access_layer_for_read_operations,
 )
+from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
     SearchRequestBody,

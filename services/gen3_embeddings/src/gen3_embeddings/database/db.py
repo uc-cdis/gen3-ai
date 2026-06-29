@@ -75,20 +75,19 @@ What do we do in this file?
 """
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Self
+from typing import Any
 from uuid import UUID
 
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException, Request
-from pgvector import HalfVector, Vector
 from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
 from gen3_embeddings.auth import get_allowed_authz_for_request, get_allowed_authz_for_request_with_method
 from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.database.models import Collection, Embedding
+from gen3_embeddings.models.helpers import normalize_collection_name
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 _pool: asyncpg.Pool | None = None
@@ -130,52 +129,6 @@ async def get_data_access_layer_for_read_operations(request: Request):
     allowed_authz = await get_allowed_authz_for_request_with_method(request, method="read")
     dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
     yield dal
-
-
-@dataclass
-class Collection:
-    id: int
-    collection_name: str
-    description: str | None
-    ai_model_name: str | None
-    dimensions: int
-    vector_type: VectorType
-    created_at: datetime | None
-    updated_at: datetime | None
-
-    @classmethod
-    def from_record(cls, row: asyncpg.Record) -> Self:
-        data = dict(row)
-        return cls(**data)
-
-
-@dataclass
-class Embedding:
-    collection_id: int
-    embedding_id: UUID
-    embedding: Vector | HalfVector
-    authz: list[str]
-    metadata: dict | None
-    created_at: datetime | None
-    updated_at: datetime | None
-
-    @classmethod
-    def from_record(cls, row: asyncpg.Record) -> Self:
-        """
-        Build an Embedding dataclass from an asyncpg.Record.
-
-        This normalizes:
-        - metadata:  string -> dict (JSON)
-        """
-        return cls(
-            collection_id=row["collection_id"],
-            embedding_id=row["embedding_id"],
-            embedding=row["embedding"],
-            authz=row["authz"],
-            metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
 
 
 class DataAccessLayer:
@@ -268,6 +221,11 @@ class DataAccessLayer:
 
     async def get_collection_by_name(self, collection_name: str) -> Collection | None:
         allowed_names = self._get_allowed_collection_names_from_allowed_authz()
+
+        try:
+            collection_name = normalize_collection_name(collection_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
         if collection_name not in allowed_names:
             return None
@@ -830,5 +788,21 @@ class DataAccessLayer:
             stmt = await conn.prepare(sql)
             rows = await stmt.fetch(*params)
             return rows
+
+        return await self._with_rls(_query)
+
+    async def count_available_embeddings_in_collection(self, collection: Collection) -> int:
+        table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
+        async def _query(conn):
+            stmt = await conn.prepare(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM {table}
+                WHERE collection_id = $1::bigint
+                """
+            )
+            row = await stmt.fetchrow(collection.id)
+            return row["cnt"] if row else 0
 
         return await self._with_rls(_query)

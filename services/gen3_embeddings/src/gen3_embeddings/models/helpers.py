@@ -1,12 +1,28 @@
+import re
 from uuid import UUID
 
-from gen3_embeddings.database.db import Collection, Embedding
+from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.schemas import (
     CollectionModel,
     EmbeddingInfo,
     SingleEmbeddingResult,
     SingleEmbeddingResultBinary,
 )
+
+
+def normalize_collection_name(name: str) -> str:
+    """
+    Normalize and validate a collection_name used in path or elsewhere.
+
+    - strip whitespace
+    - lower-case
+    - ensure only [a-z0-9_-]
+    """
+    name = name.strip().lower()
+    pattern = re.compile(r"^[a-z0-9_-]+$")
+    if not pattern.match(name):
+        raise ValueError("collection_name may only contain lowercase letters, digits, hyphen (-), and underscore (_)")
+    return name
 
 
 def build_embedding_self_url(collection_name: str | None, embedding_id: UUID) -> str:
@@ -38,12 +54,13 @@ def build_collection_self_url(collection_name: str) -> str:
     return f"/vectorstore/collections/{collection_name}"
 
 
-def collection_to_model(col: Collection) -> CollectionModel:
+def collection_to_model(col: Collection, available_embeddings_count: int | None = None) -> CollectionModel:
     """
     Convert a DB collection dataclass into a CollectionModel Pydantic schema.
 
     Args:
         col: Dataclass representing a collections table row.
+        available_embeddings_count: Number of available embeddings in the collection.
 
     Returns:
         CollectionModel suitable for API responses.
@@ -57,6 +74,7 @@ def collection_to_model(col: Collection) -> CollectionModel:
         created_at=col.created_at,
         updated_at=col.updated_at,
         self=build_collection_self_url(col.collection_name),
+        available_embeddings_count=available_embeddings_count,
     )
 
 
