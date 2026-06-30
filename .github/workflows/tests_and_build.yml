@@ -27,8 +27,10 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.11.23'
+      JUST_VERSION: '1.53.0'
+      # Note: skipping updating versions b/c workflows can't edit workflow files easily
+      COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
 
   security:
@@ -42,8 +44,8 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.11.23'
+      JUST_VERSION: '1.53.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
@@ -84,8 +86,8 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.11.23'
+      JUST_VERSION: '1.53.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
