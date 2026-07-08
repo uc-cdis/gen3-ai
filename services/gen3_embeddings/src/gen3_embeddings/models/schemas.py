@@ -139,7 +139,7 @@ class CreateCollectionBody(BaseModel):
     collection_name: str
     description: str | None = None
     dimensions: int
-    vector_type: VectorType | None = None
+    vector_type: VectorType = VectorType.vector
 
 
 class UpdateCollectionBody(BaseModel):

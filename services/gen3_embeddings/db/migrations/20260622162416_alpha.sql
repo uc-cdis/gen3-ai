@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS embeddings_vector (
   embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   embedding VECTOR NOT NULL,
+  embedding_hash UUID NOT NULL,
   authz TEXT [] NOT NULL,
   metadata JSONB DEFAULT '{}'::JSONB,
 
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS embeddings_halfvec (
   embedding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   embedding HALFVEC NOT NULL,
+  embedding_hash UUID NOT NULL,
   authz TEXT [] NOT NULL,
   metadata JSONB DEFAULT '{}'::JSONB,
 
@@ -121,11 +123,11 @@ ALTER TABLE embeddings_halfvec ENABLE ROW LEVEL SECURITY;
 
 -- Enforce no duplicate embeddings in the same collection for vector type
 ALTER TABLE embeddings_vector
-ADD CONSTRAINT embeddings_vector_uniq_collection_vector
-UNIQUE (collection_id, embedding);
+ADD CONSTRAINT embeddings_vector_uniq_collection_embhash
+UNIQUE (collection_id, embedding_hash);
 ALTER TABLE embeddings_halfvec
-ADD CONSTRAINT embeddings_halfvec_uniq_collection_vector
-UNIQUE (collection_id, embedding);
+ADD CONSTRAINT embeddings_halfvec_uniq_collection_embhash
+UNIQUE (collection_id, embedding_hash);
 
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL

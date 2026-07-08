@@ -9,7 +9,6 @@ from gen3_embeddings.models.schemas import (
     CreateCollectionBody,
     PaginatedCollectionsResponse,
     UpdateCollectionBody,
-    VectorType,
 )
 
 collections_router = APIRouter()
@@ -89,16 +88,6 @@ async def create_collection(
     """
     Create a new collection.
 
-    If vector_type is not provided:
-      - dimensions <= 2000     -> vector
-      - 2000 < dimensions <= 4000 -> halfvec
-      - dimensions > 4000      -> error (currently not supported)
-
-    If vector_type IS provided:
-      - vector   requires dimensions <= 2000
-      - halfvec requires dimensions <= 4000
-      - any dimensions > 4000          -> error
-
     Args:
         request: The request object
         body: Request body containing collection_name, description, and dimensions.
@@ -114,42 +103,11 @@ async def create_collection(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Decide vector_type if not provided
-    if body.vector_type is None:
-        if body.dimensions <= 2000:
-            resolved_vector_type = VectorType.vector
-        elif body.dimensions <= 4000:
-            resolved_vector_type = VectorType.halfvec
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Dimensions greater than 4000 are currently not supported",
-            )
-    else:
-        resolved_vector_type = body.vector_type
-
-        if body.dimensions > 4000:
-            raise HTTPException(
-                status_code=400,
-                detail="Dimensions greater than 4000 are currently not supported",
-            )
-        if resolved_vector_type == VectorType.vector and body.dimensions > 2000:
-            raise HTTPException(
-                status_code=400,
-                detail="For vector type 'vector', dimensions must be <= 2000",
-            )
-        if resolved_vector_type == VectorType.halfvec and body.dimensions > 4000:
-            # This is redundant given the 4000 check above, but kept for clarity
-            raise HTTPException(
-                status_code=400,
-                detail="For vector type 'halfvec', dimensions must be <= 4000",
-            )
-
     col = await dal.create_collection(
         collection_name=normalized_name,
         description=body.description,
         dimensions=body.dimensions,
-        vector_type=resolved_vector_type,
+        vector_type=body.vector_type,
     )
     return collection_to_model(col)
 

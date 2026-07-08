@@ -157,7 +157,7 @@ def embedding_to_result(
         )
 
     return SingleEmbeddingResult(
-        vector=emb.embedding,
+        vector=emb.embedding.to_list() if hasattr(emb.embedding, "to_list") else emb.embedding,
         embedding_id=emb.embedding_id,
         input_index=input_index,
         info=info,

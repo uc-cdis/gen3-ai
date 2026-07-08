@@ -837,4 +837,5 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 - output page_size value use the actual output size or the defined page size?
 - delete functions need some work
 - move get_allowed_authz_for_request logic out of db.py
-- support dimensions > 4000
+- dimensions limit? create warnings on limitions on indexing for bigger dimension vectors
+- re-evaluate running the snyk test now that they support uv

@@ -386,12 +386,13 @@ class DataAccessLayer:
             # execute one concurrent safe query
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata)
+                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash)
                 SELECT
                     raw.collection_id,
                     raw.embedding{cast},
                     raw.authz,
-                    raw.metadata
+                    raw.metadata,
+                    md5(raw.embedding)::uuid
                 FROM jsonb_to_recordset($1::jsonb) AS raw(
                     collection_id bigint,
                     embedding text,
@@ -487,19 +488,20 @@ class DataAccessLayer:
             # RLS WITH CHECK enforces that the user has permission to modify rows.
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata)
+                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash)
                 SELECT
                     raw.collection_id,
                     raw.embedding{cast},
                     raw.authz,
-                    raw.metadata
+                    raw.metadata,
+                    md5(raw.embedding)::uuid
                 FROM jsonb_to_recordset($1::jsonb) AS raw(
                     collection_id bigint,
                     embedding text,
                     authz text[],
                     metadata jsonb
                 )
-                ON CONFLICT (collection_id, embedding)
+                ON CONFLICT (collection_id, embedding_hash)
                 DO UPDATE SET
                     authz = EXCLUDED.authz,
                     metadata = EXCLUDED.metadata,
