@@ -20,11 +20,14 @@ def validate_token(authorization: str | None):
     Raises:
         HTTPException: 401 if authorization header is missing or invalid
     """
+    if not MODEL_REPO_TOKEN:
+        raise HTTPException(status_code=503, detail="Service authentication is not configured")
+
     if authorization != MODEL_REPO_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-async def verify_authorization(authorization: str | None = Header(default=None)):
+def verify_authorization(authorization: str | None = Header(default=None)):
     """
     FastAPI dependency for authentication.
 

@@ -1,16 +1,58 @@
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def test_get_storage_provider_returns_local_provider(monkeypatch):
-    storage_init = importlib.import_module("gen3_ai_model_repo.storage.init")
+    storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
 
-    monkeypatch.setattr(storage_init, "STORAGE_PROVIDER", "local", raising=False)
-    monkeypatch.setattr(storage_init, "LOCAL_STORAGE_PATH", "/tmp/gen3-models", raising=False)
+    monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "local", raising=False)
+    monkeypatch.setattr(storage_helpers, "LOCAL_STORAGE_PATH", "/tmp/gen3-models", raising=False)
 
-    provider = storage_init.get_storage_provider()
+    provider = storage_helpers.get_storage_provider()
 
     assert provider.__class__.__name__ == "LocalStorageProvider"
+
+
+def test_get_storage_provider_returns_minio_provider(monkeypatch):
+    storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+
+    monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "minio", raising=False)
+    monkeypatch.setattr(storage_helpers, "MINIO_ENDPOINT", "localhost:9000", raising=False)
+    monkeypatch.setattr(storage_helpers, "MINIO_ACCESS_KEY", "minioadmin", raising=False)
+    monkeypatch.setattr(storage_helpers, "MINIO_SECRET_KEY", "minioadmin", raising=False)
+    monkeypatch.setattr(storage_helpers, "MINIO_BUCKET", "model-repo", raising=False)
+
+    provider = storage_helpers.get_storage_provider()
+
+    assert provider.__class__.__name__ == "MinioStorageProvider"
+
+
+@pytest.mark.skipif(importlib.util.find_spec("boto3") is None, reason="boto3 not installed")
+def test_get_storage_provider_returns_s3_provider(monkeypatch):
+    storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+
+    monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "s3", raising=False)
+    monkeypatch.setattr(storage_helpers, "S3_BUCKET", "model-repo", raising=False)
+    monkeypatch.setattr(storage_helpers, "S3_REGION", "us-east-1", raising=False)
+    monkeypatch.setattr(storage_helpers, "S3_ENDPOINT_URL", "", raising=False)
+    monkeypatch.setattr(storage_helpers, "S3_ACCESS_KEY_ID", "", raising=False)
+    monkeypatch.setattr(storage_helpers, "S3_SECRET_ACCESS_KEY", "", raising=False)
+
+    provider = storage_helpers.get_storage_provider()
+
+    assert provider.__class__.__name__ == "S3StorageProvider"
+
+
+def test_get_storage_provider_raises_on_unknown_provider(monkeypatch):
+    storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+
+    monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "unknown-provider", raising=False)
+
+    with pytest.raises(ValueError, match="Unsupported STORAGE_PROVIDER"):
+        storage_helpers.get_storage_provider()

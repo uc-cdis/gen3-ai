@@ -18,8 +18,16 @@ from gen3_inference.inference_protocols.utils.openai_chat_to_openresponses impor
 )
 from gen3_inference.types import OpenResponsesError
 
+"""Inference protocol client for OpenAI Chat API."""
+
 
 class OpenaiChat(InferenceProtocolClient):
+    """OpenAI chat inference protocol client.
+
+    generate_non_streaming_response: Generate a non-streaming chat completion response.
+    generate_streaming_response: Generate a streaming chat completion response.
+    """
+
     NAME = "openai_chat"
 
     def __init__(self, base_url: str | None = None):

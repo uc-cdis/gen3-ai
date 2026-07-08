@@ -78,6 +78,12 @@ def openai_streaming_response_to_openresponses(
     openai_response_stream: Stream[ResponseStreamEvent],
     metadata: dict[str, Any] | None = None,
 ):
+    """Convert an OpenAI streaming response into an Open Responses event stream.
+
+    openai_response_stream: The streaming response events from the OpenAI SDK.
+    metadata: Optional metadata to include with the converted events.
+    """
+
     # TODO: add metadata to some event?
     async def _generator() -> AsyncGenerator[bytes]:
         """

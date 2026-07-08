@@ -6,9 +6,7 @@ from gen3_ai_model_repo.storage.provider import StorageProvider
 
 
 class MinioStorageProvider(StorageProvider):
-    """
-    MinIO S3-compatible storage provider.
-    """
+    """MinIO S3-compatible storage provider."""
 
     def __init__(
         self,
@@ -17,6 +15,7 @@ class MinioStorageProvider(StorageProvider):
         secret_key: str,
         bucket_name: str,
     ):
+        """Initialize the provider with MinIO connection settings."""
         self.bucket_name = bucket_name
 
         self.client = Minio(
@@ -31,6 +30,7 @@ class MinioStorageProvider(StorageProvider):
         local_path: str,
         object_key: str,
     ):
+        """Upload a file to the MinIO bucket."""
         self.client.fput_object(
             self.bucket_name,
             object_key,
@@ -38,6 +38,7 @@ class MinioStorageProvider(StorageProvider):
         )
 
     async def upload_stream(self, stream, object_key: str):
+        """Upload a stream to the MinIO bucket."""
         self.client.put_object(
             self.bucket_name,
             object_key,
@@ -51,6 +52,7 @@ class MinioStorageProvider(StorageProvider):
         object_key: str,
         local_path: str,
     ):
+        """Download an object from the MinIO bucket to disk."""
         self.client.fget_object(
             self.bucket_name,
             object_key,
@@ -61,6 +63,7 @@ class MinioStorageProvider(StorageProvider):
         self,
         prefix: str,
     ) -> list[str]:
+        """List objects stored under a prefix in MinIO."""
         objects = self.client.list_objects(
             self.bucket_name,
             prefix=prefix,
@@ -73,6 +76,7 @@ class MinioStorageProvider(StorageProvider):
         self,
         object_key: str,
     ) -> bool:
+        """Return whether an object exists in the MinIO bucket."""
         try:
             self.client.stat_object(
                 self.bucket_name,
@@ -86,6 +90,7 @@ class MinioStorageProvider(StorageProvider):
         self,
         object_key: str,
     ):
+        """Delete an object from the MinIO bucket."""
         self.client.remove_object(
             self.bucket_name,
             object_key,
@@ -95,6 +100,7 @@ class MinioStorageProvider(StorageProvider):
         self,
         prefix: str,
     ):
+        """Delete all objects stored under a prefix in MinIO."""
         objects = self.client.list_objects(
             self.bucket_name,
             prefix=prefix,
@@ -110,6 +116,7 @@ class MinioStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
+        """Generate a signed URL for downloading an object."""
         return self.client.presigned_get_object(
             self.bucket_name,
             object_key,
@@ -121,6 +128,7 @@ class MinioStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
+        """Generate a signed URL for uploading an object."""
         return self.client.presigned_put_object(
             self.bucket_name,
             object_key,
@@ -131,6 +139,7 @@ class MinioStorageProvider(StorageProvider):
         self,
         object_key: str,
     ) -> dict:
+        """Return metadata for an object stored in MinIO."""
         stat = self.client.stat_object(
             self.bucket_name,
             object_key,

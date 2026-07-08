@@ -49,11 +49,12 @@ async def update_revision_commit(
     commit_sha: str,
     etag: str | None = None,
 ):
+    """Update the commit and ETag for a repository revision."""
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
         identifier_column = await get_revision_identifier_column(conn)
-        await conn.execute(
+        stmt = await conn.prepare(
             f"""
             UPDATE model_revisions
             SET {identifier_column} = $1,
@@ -66,10 +67,6 @@ async def update_revision_commit(
                   AND repo.repo_name = $4
                   AND mr.revision_name = $5
             );
-            """,
-            commit_sha,
-            etag,
-            namespace,
-            repo_name,
-            revision_name,
+            """
         )
+        await stmt.fetch(commit_sha, etag, namespace, repo_name, revision_name)

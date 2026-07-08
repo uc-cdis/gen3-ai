@@ -1,4 +1,4 @@
--- Migration 001: Initial schema for Gen3 AI Model Repository
+-- migrate:up
 
 -- ============================================================
 -- MODEL REPOSITORIES
@@ -131,3 +131,11 @@ COMMENT ON TABLE model_revisions IS
 
 COMMENT ON TABLE model_files IS
 'Files belonging to a repository revision and mapped to object storage';
+
+-- migrate:down
+
+DROP TABLE IF EXISTS model_files;
+DROP TABLE IF EXISTS model_revisions;
+DROP TRIGGER IF EXISTS update_model_repositories_updated_at ON model_repositories;
+DROP FUNCTION IF EXISTS update_model_repositories_updated_at();
+DROP TABLE IF EXISTS model_repositories;

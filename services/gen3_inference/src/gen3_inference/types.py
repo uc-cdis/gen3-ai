@@ -28,5 +28,15 @@ class OpenResponsesError(Error):
         ),
     ]
 
+    """
+    The error code, which is a more specific identifier for the error. This can be used
+    to programmatically handle different types of errors in a more granular way.
+    """
+
     def to_json(self) -> dict:
+        """Convert the error to a JSON-compatible dictionary.
+
+        Returns:
+            dict: A dictionary containing the serialized error payload.
+        """
         return {"error": json.loads(self.model_dump_json())}

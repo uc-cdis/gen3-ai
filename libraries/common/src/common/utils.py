@@ -7,10 +7,11 @@ def log_api_call(service: str, logging: Logger, debug_log: str | None = None, **
     provided kwargs as CSV.
 
     Args:
-        logging (Logger): the logger to use, must be provided for the context of the file that is actually logging.
+        service (str): Name of the service emitting the API call.
+        logging (Logger): The logger to use, must be provided for the context of the file that is actually logging.
             if we instantiated here, the log would look like it's coming from the utils file directly.
-        debug_log (str): Optional debug log message
-        **kwargs: Additional keyword arguments to include in the log message
+        debug_log (str | None): Optional debug log message.
+        **kwargs: Additional keyword arguments to include in the log message.
     """
     log_message = f"{service} API Call. "
     for kwarg, value in kwargs.items():

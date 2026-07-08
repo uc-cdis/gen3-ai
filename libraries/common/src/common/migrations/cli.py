@@ -7,6 +7,7 @@ BASE_DIR = pathlib.Path(__file__).parent
 
 
 def generate_migration_script(rev, name):
+    """Create a new migration script file with boilerplate content."""
     filename = f"{rev}_{name}.py"
     path = BASE_DIR / filename
 

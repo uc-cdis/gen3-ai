@@ -61,7 +61,10 @@ select = [
     "I",
 
     ## Missing docstring
-    "D103",
+    "D101", "D102", "D103",
+
+    ## Google-style docstrings
+    "D417",
 
     ## Naming conventions
     "N",

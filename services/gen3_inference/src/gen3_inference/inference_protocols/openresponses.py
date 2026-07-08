@@ -17,17 +17,35 @@ from gen3_inference.inference_protocols.utils.openai_responses_to_openresponses 
 )
 from gen3_inference.types import OpenResponsesError
 
+"""Inference protocol client for OpenResponses API."""
+
 
 class OpenResponsesClient(InferenceProtocolClient):
+    """OpenResponses inference protocol client.
+
+    generate_non_streaming_response: Generate a non-streaming response.
+    generate_streaming_response: Generate a streaming response.
+    """
+
     NAME = "openresponses"
 
     def __init__(self, base_url: str | None = None):
         super().__init__(base_url=base_url)
 
     async def generate_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
+        """Generate a non-streaming response.
+
+        body: The request payload to send to the inference provider.
+        model_info: Metadata describing the target model.
+        """
         return self._create_non_streaming_response(body, model_info)
 
     def generate_streaming_response(self, body: CreateResponseBody, model_info: dict) -> StreamingResponse:
+        """Generate a streaming response.
+
+        body: The request payload to send to the inference provider.
+        model_info: Metadata describing the target model.
+        """
         return self._create_streaming_response(body, model_info)
 
     def _create_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
