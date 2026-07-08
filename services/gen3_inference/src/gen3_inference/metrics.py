@@ -1,7 +1,14 @@
 from common.metrics import ServiceMetrics
 
+"""Metrics for the Gen3 Inference service."""
+
 
 class InferenceServiceMetrics(ServiceMetrics):
+    """Metrics for the Gen3 inference service.
+
+    add_to_api_interaction_counter: Increment the API interaction counter with labels.
+    """
+
     def __init__(self, metrics_client) -> None:
         self.metrics_client = metrics_client
 

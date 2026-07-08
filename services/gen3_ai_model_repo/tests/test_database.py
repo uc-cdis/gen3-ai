@@ -1,6 +1,30 @@
 import pytest
 
-from gen3_ai_model_repo.database import repo_metadata, revisions, file_tracking
+from gen3_ai_model_repo.database import file_tracking, helper, repo_metadata, revisions
+
+
+class FakeStatement:
+    def __init__(self, conn, query):
+        self.conn = conn
+        self.query = query
+
+    async def execute(self, *args):
+        self.conn.executed.append((self.query, args))
+        return "DELETE 1"
+
+    async def fetchrow(self, *args):
+        self.conn.executed.append((self.query, args))
+        return None
+
+    async def fetch(self, *args):
+        self.conn.executed.append((self.query, args))
+        return []
+
+    async def fetchval(self, *args):
+        self.conn.executed.append((self.query, args))
+        if "DELETE" in self.query and "RETURNING" in self.query:
+            return 1
+        return None
 
 
 class FakeConn:
@@ -8,17 +32,23 @@ class FakeConn:
         self.executed = []
         self.rows = []
 
+    async def prepare(self, query):
+        return FakeStatement(self, query)
+
     async def execute(self, query, *args):
         self.executed.append((query, args))
         return "DELETE 1"
 
     async def fetchrow(self, query, *args):
+        self.executed.append((query, args))
         return None
 
     async def fetch(self, query, *args):
+        self.executed.append((query, args))
         return []
 
     async def fetchval(self, query, *args):
+        self.executed.append((query, args))
         return None
 
 
@@ -39,6 +69,12 @@ class FakePool:
 
     def acquire(self):
         return FakeAcquire(self.conn)
+
+
+def test_helper_module_does_not_reexport_database_functions():
+    assert not hasattr(helper, "create_repository_metadata")
+    assert not hasattr(helper, "create_revision")
+    assert not hasattr(helper, "list_repositories")
 
 
 @pytest.mark.anyio

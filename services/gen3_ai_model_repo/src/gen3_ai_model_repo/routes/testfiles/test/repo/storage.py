@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from gen3_ai_model_repo.auth import verify_authorization
-from gen3_ai_model_repo.storage import get_storage_provider
+from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
 storage_router = APIRouter()
 
@@ -55,7 +55,8 @@ class StorageDownloadUrlResponse(BaseModel):
     presigned_url: str
 
 
-@storage_router.post("/storage/verify", response_model=StorageVerifyResponse, tags=["Storage"])
+@storage_router.post("/api/storage/verify", response_model=StorageVerifyResponse, tags=["Storage"])
+@storage_router.post("/storage/verify", response_model=StorageVerifyResponse, tags=["Storage"], include_in_schema=False)
 async def verify_storage(
     request: StorageVerifyRequest, _: None = Depends(verify_authorization)
 ) -> StorageVerifyResponse:
@@ -82,7 +83,13 @@ async def verify_storage(
     return StorageVerifyResponse(exists=bool(files), file_count=len(files), total_size=total_size)
 
 
-@storage_router.post("/storage/download-url", response_model=StorageDownloadUrlResponse, tags=["Storage"])
+@storage_router.post("/api/storage/download-url", response_model=StorageDownloadUrlResponse, tags=["Storage"])
+@storage_router.post(
+    "/storage/download-url",
+    response_model=StorageDownloadUrlResponse,
+    tags=["Storage"],
+    include_in_schema=False,
+)
 async def storage_download_url(
     request: StorageDownloadUrlRequest, _: None = Depends(verify_authorization)
 ) -> StorageDownloadUrlResponse:

@@ -6,6 +6,7 @@ from common import config as common_config
 # this is the starlette.config.Config() class instance
 from common.config import starlette_config
 
+# common logger, don't change this
 logging = common_config.logging
 logging.name = "gen3_ai_model_repo"
 
@@ -98,8 +99,34 @@ MINIO_BUCKET = starlette_config(
     default="model-repo",
 )
 
-# common logger, don't change this
 
+S3_REGION = starlette_config(
+    "S3_REGION",
+    default="us-east-1",
+)
+
+S3_BUCKET = starlette_config(
+    "S3_BUCKET",
+    default="model-repo",
+)
+
+S3_ENDPOINT_URL = starlette_config(
+    "S3_ENDPOINT_URL",
+    default="",
+    cast=str,
+)
+
+S3_ACCESS_KEY_ID = starlette_config(
+    "S3_ACCESS_KEY_ID",
+    default="",
+    cast=str,
+)
+
+S3_SECRET_ACCESS_KEY = starlette_config(
+    "S3_SECRET_ACCESS_KEY",
+    default="",
+    cast=str,
+)
 
 URL_PREFIX = starlette_config("GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX", default="", cast=str)
 

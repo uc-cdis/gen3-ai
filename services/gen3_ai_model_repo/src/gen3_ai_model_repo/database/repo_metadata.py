@@ -36,7 +36,7 @@ async def create_repository_metadata(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        stmt = await conn.prepare(
             """
             INSERT INTO model_repositories (
                 namespace,
@@ -50,12 +50,9 @@ async def create_repository_metadata(
                 description = EXCLUDED.description,
                 tags = EXCLUDED.tags,
                 updated_at = NOW();
-            """,
-            namespace,
-            repo_name,
-            description,
-            tags,
+            """
         )
+        await stmt.fetch(namespace, repo_name, description, tags)
 
     return await get_repository_metadata(
         namespace,
@@ -71,8 +68,8 @@ async def get_repository_metadata(
     Retrieve repository metadata from database.
 
     Args:
-        namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        namespace (str): The namespace/organization for the repository.
+        repo_name (str): The name of the repository.
 
     Returns:
         RepositoryMetadataModel if found, None otherwise.
@@ -80,7 +77,7 @@ async def get_repository_metadata(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        stmt = await conn.prepare(
             """
             SELECT
                 namespace,
@@ -91,10 +88,9 @@ async def get_repository_metadata(
             FROM model_repositories
             WHERE namespace = $1
             AND repo_name = $2;
-            """,
-            namespace,
-            repo_name,
+            """
         )
+        row = await stmt.fetchrow(namespace, repo_name)
 
     if row is None:
         return None
@@ -125,17 +121,17 @@ async def delete_repository_metadata(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        stmt = await conn.prepare(
             """
             DELETE FROM model_repositories
             WHERE namespace = $1
-            AND repo_name = $2;
-            """,
-            namespace,
-            repo_name,
+            AND repo_name = $2
+            RETURNING 1;
+            """
         )
+        deleted = await stmt.fetchval(namespace, repo_name)
 
-    return result == "DELETE 1"
+    return deleted is not None
 
 
 async def repository_exists(
@@ -155,16 +151,15 @@ async def repository_exists(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        stmt = await conn.prepare(
             """
             SELECT 1
             FROM model_repositories
             WHERE namespace = $1
             AND repo_name = $2;
-            """,
-            namespace,
-            repo_name,
+            """
         )
+        row = await stmt.fetchrow(namespace, repo_name)
 
     return row is not None
 
@@ -179,7 +174,7 @@ async def list_all_repositories() -> list[RepositoryMetadataModel]:
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
+        stmt = await conn.prepare(
             """
             SELECT
                 namespace,
@@ -190,6 +185,7 @@ async def list_all_repositories() -> list[RepositoryMetadataModel]:
             FROM model_repositories;
             """
         )
+        rows = await stmt.fetch()
 
     return [
         RepositoryMetadataModel(
@@ -207,6 +203,7 @@ async def get_repository(
     namespace: str,
     repo_name: str,
 ) -> RepositoryMetadataModel | None:
+    """Return repository metadata by namespace and repository name."""
     return await get_repository_metadata(namespace, repo_name)
 
 
@@ -215,6 +212,7 @@ async def list_repositories(
     tags: list[str] | None = None,
     search: str | None = None,
 ) -> list[RepositoryMetadataModel]:
+    """List repositories, optionally filtered by namespace, tags, or free-text search."""
     pool = await get_db_pool()
     clauses = []
     values: list[object] = []
@@ -235,7 +233,8 @@ async def list_repositories(
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY created_at DESC;"
     async with pool.acquire() as conn:
-        rows = await conn.fetch(sql, *values)
+        stmt = await conn.prepare(sql)
+        rows = await stmt.fetch(*values)
     return [
         RepositoryMetadataModel(
             namespace=row["namespace"],
@@ -291,16 +290,16 @@ async def update_repository_metadata(
     values.extend([namespace, repo_name])
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        stmt = await conn.prepare(
             f"""
             UPDATE model_repositories
             SET {", ".join(set_clauses)},
                 updated_at = NOW()
             WHERE namespace = ${len(values) - 1}
             AND repo_name = ${len(values)};
-            """,
-            *values,
+            """
         )
+        await stmt.fetch(*values)
 
     return await get_repository_metadata(
         namespace,

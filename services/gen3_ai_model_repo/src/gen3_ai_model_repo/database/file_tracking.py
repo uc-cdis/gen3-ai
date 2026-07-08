@@ -9,16 +9,16 @@ from gen3_ai_model_repo.database.db import get_db_pool
 
 
 async def model_files_has_s3_key(conn) -> bool:
-    return bool(
-        await conn.fetchval(
-            """
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = 'model_files'
-              AND column_name = 's3_key';
-            """
-        )
+    """Check whether the model_files table contains an s3_key column."""
+    stmt = await conn.prepare(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'model_files'
+          AND column_name = 's3_key';
+        """
     )
+    return bool(await stmt.fetchval())
 
 
 async def track_file(
@@ -38,13 +38,14 @@ async def track_file(
     If the file already exists in the revision, it will be updated.
 
     Args:
-        namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
-        revision_name: The name of the revision containing the file.
-        file_path: The path to the file within the revision.
-        file_size: The size of the file in bytes.
-        content_sha: The SHA hash of the file content.
-        content_etag: Optional ETag for the file.
+        namespace (str): The namespace/organization for the repository.
+        repo_name (str): The name of the repository.
+        revision_name (str): The name of the revision containing the file.
+        file_path (str): The path to the file within the revision.
+        file_size (int): The size of the file in bytes.
+        content_sha (str): The SHA hash of the file content.
+        content_etag (str | None): Optional ETag for the file.
+        s3_key (str | None): Optional S3 key for the file.
 
     Returns:
         True if the file was successfully tracked, False otherwise.
@@ -54,14 +55,13 @@ async def track_file(
     async with pool.acquire() as conn:
         has_s3_key = await model_files_has_s3_key(conn)
         # Get repository ID
-        repo_row = await conn.fetchrow(
+        repo_stmt = await conn.prepare(
             """
             SELECT id FROM model_repositories
             WHERE namespace = $1 AND repo_name = $2;
-            """,
-            namespace,
-            repo_name,
+            """
         )
+        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
 
         if not repo_row:
             return False
@@ -69,14 +69,13 @@ async def track_file(
         repo_id = repo_row["id"]
 
         # Get revision ID
-        revision_row = await conn.fetchrow(
+        revision_stmt = await conn.prepare(
             """
             SELECT id FROM model_revisions
             WHERE repository_id = $1 AND revision_name = $2;
-            """,
-            repo_id,
-            revision_name,
+            """
         )
+        revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
 
         if not revision_row:
             return False
@@ -85,7 +84,7 @@ async def track_file(
 
         # Insert or update file record
         if has_s3_key:
-            await conn.execute(
+            stmt = await conn.prepare(
                 """
                 INSERT INTO model_files (revision_id, file_path, file_size, content_sha, content_etag, s3_key)
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -95,16 +94,11 @@ async def track_file(
                     content_sha = EXCLUDED.content_sha,
                     content_etag = EXCLUDED.content_etag,
                     s3_key = EXCLUDED.s3_key;
-                """,
-                revision_id,
-                file_path,
-                file_size,
-                content_sha,
-                content_etag,
-                s3_key,
+                """
             )
+            await stmt.fetch(revision_id, file_path, file_size, content_sha, content_etag, s3_key)
         else:
-            await conn.execute(
+            stmt = await conn.prepare(
                 """
                 INSERT INTO model_files (revision_id, file_path, file_size, content_sha, content_etag)
                 VALUES ($1, $2, $3, $4, $5)
@@ -113,13 +107,9 @@ async def track_file(
                     file_size = EXCLUDED.file_size,
                     content_sha = EXCLUDED.content_sha,
                     content_etag = EXCLUDED.content_etag;
-                """,
-                revision_id,
-                file_path,
-                file_size,
-                content_sha,
-                content_etag,
+                """
             )
+            await stmt.fetch(revision_id, file_path, file_size, content_sha, content_etag)
 
     return True
 
@@ -135,9 +125,9 @@ async def list_files_in_revision(
     Retrieves metadata for all files in a given revision, ordered by file path.
 
     Args:
-        namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
-        revision_name: The name of the revision (default: "main").
+        namespace (str): The namespace/organization for the repository.
+        repo_name (str): The name of the repository.
+        revision_name (str): The name of the revision (default: "main").
 
     Returns:
         A list of dictionaries containing file metadata (path, size, oid, etag, type, created_at),
@@ -146,43 +136,41 @@ async def list_files_in_revision(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        repo_row = await conn.fetchrow(
+        repo_stmt = await conn.prepare(
             """
             SELECT id FROM model_repositories
             WHERE namespace = $1 AND repo_name = $2;
-            """,
-            namespace,
-            repo_name,
+            """
         )
+        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
 
         if not repo_row:
             return []
 
         repo_id = repo_row["id"]
 
-        revision_row = await conn.fetchrow(
+        revision_stmt = await conn.prepare(
             """
             SELECT id FROM model_revisions
             WHERE repository_id = $1 AND revision_name = $2;
-            """,
-            repo_id,
-            revision_name,
+            """
         )
+        revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
 
         if not revision_row:
             return []
 
         revision_id = revision_row["id"]
 
-        file_rows = await conn.fetch(
+        stmt = await conn.prepare(
             """
             SELECT file_path, file_size, content_sha, content_etag, created_at
             FROM model_files
             WHERE revision_id = $1
             ORDER BY file_path;
-            """,
-            revision_id,
+            """
         )
+        file_rows = await stmt.fetch(revision_id)
 
     return [
         {
@@ -203,12 +191,13 @@ async def get_file_record(
     revision_name: str,
     file_path: str,
 ) -> dict | None:
+    """Return the metadata record for a single file in a revision, if present."""
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
         has_s3_key = await model_files_has_s3_key(conn)
         if has_s3_key:
-            row = await conn.fetchrow(
+            stmt = await conn.prepare(
                 """
                 SELECT
                     mf.file_path,
@@ -223,14 +212,11 @@ async def get_file_record(
                   AND repo.repo_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4;
-                """,
-                namespace,
-                repo_name,
-                revision_name,
-                file_path,
+                """
             )
+            row = await stmt.fetchrow(namespace, repo_name, revision_name, file_path)
         else:
-            row = await conn.fetchrow(
+            stmt = await conn.prepare(
                 """
                 SELECT
                     mf.file_path,
@@ -244,12 +230,9 @@ async def get_file_record(
                   AND repo.repo_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4;
-                """,
-                namespace,
-                repo_name,
-                revision_name,
-                file_path,
+                """
             )
+            row = await stmt.fetchrow(namespace, repo_name, revision_name, file_path)
 
     if row is None:
         return None
@@ -269,10 +252,11 @@ async def delete_file(
     revision_name: str,
     file_path: str,
 ) -> bool:
+    """Delete a file record from a specific revision."""
     pool = await get_db_pool()
     assert pool is not None, "Database pool is not initialized"
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        stmt = await conn.prepare(
             """
             DELETE FROM model_files
             WHERE id IN (
@@ -284,14 +268,12 @@ async def delete_file(
                   AND repo.repo_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4
-            );
-            """,
-            namespace,
-            repo_name,
-            revision_name,
-            file_path,
+            )
+            RETURNING 1;
+            """
         )
-    return result == "DELETE 1"
+        deleted = await stmt.fetchval(namespace, repo_name, revision_name, file_path)
+    return deleted is not None
 
 
 async def delete_files_for_revision(
@@ -299,10 +281,11 @@ async def delete_files_for_revision(
     repo_name: str,
     revision_name: str,
 ) -> bool:
+    """Delete all file records for a revision."""
     pool = await get_db_pool()
     assert pool is not None, "Database pool is not initialized"
     async with pool.acquire() as conn:
-        result = await conn.execute(
+        stmt = await conn.prepare(
             """
             DELETE FROM model_files
             WHERE revision_id IN (
@@ -312,10 +295,9 @@ async def delete_files_for_revision(
                 WHERE repo.namespace = $1
                   AND repo.repo_name = $2
                   AND mr.revision_name = $3
-            );
-            """,
-            namespace,
-            repo_name,
-            revision_name,
+            )
+            RETURNING 1;
+            """
         )
-    return result.startswith("DELETE")
+        deleted_rows = await stmt.fetch(namespace, repo_name, revision_name)
+    return bool(deleted_rows)

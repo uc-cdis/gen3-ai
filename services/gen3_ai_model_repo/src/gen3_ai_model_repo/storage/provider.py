@@ -2,9 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class StorageProvider(ABC):
-    """
-    Base storage provider interface.
-    """
+    """Base storage provider interface."""
 
     @abstractmethod
     async def upload_file(
@@ -12,6 +10,7 @@ class StorageProvider(ABC):
         local_path: str,
         object_key: str,
     ):
+        """Upload a file from disk to the backing storage."""
         pass
 
     @abstractmethod
@@ -20,6 +19,7 @@ class StorageProvider(ABC):
         object_key: str,
         local_path: str,
     ):
+        """Download an object from the backing storage to disk."""
         pass
 
     @abstractmethod
@@ -27,6 +27,7 @@ class StorageProvider(ABC):
         self,
         prefix: str,
     ) -> list[str]:
+        """List objects under a prefix in the backing storage."""
         pass
 
     @abstractmethod
@@ -35,6 +36,7 @@ class StorageProvider(ABC):
         stream,
         object_key: str,
     ):
+        """Upload a stream to the backing storage."""
         pass
 
     @abstractmethod
@@ -42,6 +44,7 @@ class StorageProvider(ABC):
         self,
         object_key: str,
     ) -> bool:
+        """Return whether an object exists in the backing storage."""
         pass
 
     @abstractmethod
@@ -49,6 +52,7 @@ class StorageProvider(ABC):
         self,
         object_key: str,
     ):
+        """Delete an object from the backing storage."""
         pass
 
     @abstractmethod
@@ -56,6 +60,7 @@ class StorageProvider(ABC):
         self,
         prefix: str,
     ):
+        """Delete all objects with a given prefix."""
         pass
 
     @abstractmethod
@@ -64,6 +69,7 @@ class StorageProvider(ABC):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
+        """Generate a signed URL for downloading an object."""
         pass
 
     @abstractmethod
@@ -72,6 +78,7 @@ class StorageProvider(ABC):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
+        """Generate a signed URL for uploading an object."""
         pass
 
     @abstractmethod
@@ -79,4 +86,5 @@ class StorageProvider(ABC):
         self,
         object_key: str,
     ) -> dict:
+        """Return metadata for an object in the backing storage."""
         pass
