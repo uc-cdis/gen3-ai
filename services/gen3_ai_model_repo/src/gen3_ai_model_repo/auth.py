@@ -1,43 +1,20 @@
-from fastapi import Header, HTTPException
+from fastapi import Request
 
-from gen3_ai_model_repo.config import MODEL_REPO_TOKEN
+from common.auth import authorize_request
+from gen3_ai_model_repo import config
 
 
-def validate_token(authorization: str | None):
+async def verify_authorization(request: Request):
     """
-    Validate the incoming authorization header for the model repository API.
+    FastAPI dependency for authentication and authorization.
 
-    WARNING: Security Considerations
-    - The token is compared as a simple string match. For production use, consider:
-      - Using JWT tokens for more secure authentication
-      - Implementing token expiration and refresh mechanisms
-      - Using HTTPS/TLS for all API communications
-      - Implementing rate limiting and other security measures
-
-    Args:
-        authorization: The authorization header value
-
-    Raises:
-        HTTPException: 401 if authorization header is missing or invalid
+    Validates a real bearer token (JWT) and checks Arborist authorization for
+    this service-level resource.
     """
-    if not MODEL_REPO_TOKEN:
-        raise HTTPException(status_code=503, detail="Service authentication is not configured")
 
-    if authorization != MODEL_REPO_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-
-def verify_authorization(authorization: str | None = Header(default=None)):
-    """
-    FastAPI dependency for authentication.
-
-    This function can be used with FastAPI's Depends to automatically validate
-    the authorization header on protected routes.
-
-    Args:
-        authorization: The authorization header value (automatically extracted by FastAPI)
-
-    Raises:
-        HTTPException: 401 if authorization is invalid
-    """
-    validate_token(authorization)
+    await authorize_request(
+        authz_resources=[config.AUTHZ_SERVICE_RESOURCE],
+        authz_service_name=config.AUTHZ_SERVICE_NAME,
+        authz_access_method="access",
+        request=request,
+    )

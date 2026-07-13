@@ -1,19 +1,19 @@
 import json
-from gen3_inference.types import OpenResponsesError
-import pytest
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
-from fastapi.responses import StreamingResponse
-from httpx import Response
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from conftest import TEST_AI_MODEL, VALID_AI_MODEL_INFO, VALID_NON_STREAMED_RESPONSE, VALID_STREAMED_RESPONSE
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
+from httpx import Response
 from openresponses_types.types import CreateResponseBody
+
 from gen3_inference.errors import (
     ERROR_TYPE_INVALID_REQUEST,
     ERROR_TYPE_NOT_FOUND,
 )
-
-from conftest import TEST_AI_MODEL, VALID_NON_STREAMED_RESPONSE, VALID_STREAMED_RESPONSE, VALID_AI_MODEL_INFO
+from gen3_inference.types import OpenResponsesError
 
 
 @pytest.mark.asyncio
@@ -27,6 +27,12 @@ async def test_create_response_non_streaming_positive(
     """
     Verify that a normal (JSON) response works and that the JSON
     response is validated against ResponseResource.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid non-streaming request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture for runtime overrides.
+        client (TestClient): FastAPI test client fixture.
     """
     mock_get_model.return_value = VALID_AI_MODEL_INFO
 
@@ -59,6 +65,12 @@ async def test_create_response_streaming_positive(
 ):
     """
     Verify that the streaming branch returns a StreamingResponse
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture for runtime overrides.
+        client (TestClient): FastAPI test client fixture.
     """
     mock_get_model.return_value = VALID_AI_MODEL_INFO
 
@@ -95,6 +107,11 @@ async def test_get_ai_model_info_missing_model(
 ):
     """
     Body has no model - 400.
+
+    Args:
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     body = valid_user_msg_body_non_streaming.model_copy(update={"model": ""})
 
@@ -111,6 +128,11 @@ async def test_get_ai_model_info_not_found(
 ):
     """
     Primary host returns 404 and all trusted hosts return 404 - 404.
+
+    Args:
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture for HTTP client/config stubs.
+        client (TestClient): FastAPI test client fixture.
     """
     body = valid_user_msg_body_non_streaming.model_copy()
 
@@ -148,6 +170,13 @@ async def test_get_ai_model_info_trusted_domain_success(
 ):
     """
     Primary 404 but a trusted domain returns the model - success.
+
+    Args:
+        mock_get_client (AsyncMock): Patched protocol-client resolver.
+        mock_inference_client (MagicMock): Mock protocol client fixture.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     test_inference_protocol_client = "test_protocol_client"
     mocked_response = VALID_NON_STREAMED_RESPONSE
@@ -204,6 +233,11 @@ async def test_get_inference_protocol_client_unknown(
 ):
     """
     Model found but advertises an unsupported protocol - 400.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     mocked_return = VALID_AI_MODEL_INFO
     mocked_return["metadata"].update({"inference_protocol_clients": ["unsupported"]})
@@ -224,7 +258,13 @@ async def test_get_inference_protocol_client_empty(
     valid_user_msg_body_non_streaming: CreateResponseBody,
     client: TestClient,
 ):
-    """Empty list of protocol names - 400."""
+    """Empty list of protocol names - 400.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        client (TestClient): FastAPI test client fixture.
+    """
     mocked_return = VALID_AI_MODEL_INFO
     # empty
     mocked_return["metadata"].update({"inference_protocol_clients": []})
@@ -243,6 +283,10 @@ async def test_create_response_missing_model(valid_user_msg_body_non_streaming: 
     """
     Send a request where the body contains no model field.
     The endpoint should return 400 before reaching the protocol client.
+
+    Args:
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     body = valid_user_msg_body_non_streaming.model_copy(update={"model": ""})
     resp = client.post("/v1/responses", json=json.loads(body.model_dump_json()))
@@ -257,6 +301,11 @@ async def test_create_response_unknown_protocol(
     """
     The model advertises an inference protocol that the service doesn't
     understand. Expect 400.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
     """
 
     # Fake the get_ai_model_info to return a model with a bogus protocol
@@ -281,6 +330,12 @@ async def test_create_response_model_not_found(
     """
     The model is requested, but the repository (primary + trusted) does not
     contain it. Endpoint should propagate the 404 from get_ai_model_info.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
     """
     mock_get_model.side_effect = HTTPException(
         status_code=404,
@@ -303,6 +358,12 @@ async def test_create_response_bogus_protocol(
     """
     Simulate the normal path but let get_inference_protocol_client raise.
     The endpoint should return a 400 error.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     # Fake get_ai_model_info to return a model that advertises only
     # an unsupported protocol
@@ -325,6 +386,12 @@ async def test_create_response_with_openresponses_client(
     """
     Verify that the router actually chooses OpenResponsesClient when it is
     advertised in the model's inference_protocol_clients list.
+
+    Args:
+        mock_get_model (AsyncMock): Patched model-info resolver.
+        valid_user_msg_body_non_streaming (CreateResponseBody): Valid request body fixture.
+        monkeypatch (pytest.MonkeyPatch): Pytest monkeypatch fixture.
+        client (TestClient): FastAPI test client fixture.
     """
     mock_get_model.return_value = VALID_AI_MODEL_INFO
 

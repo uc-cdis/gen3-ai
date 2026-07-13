@@ -7,6 +7,7 @@ from gen3_ai_model_repo.routes.ai_models_uploads import ai_models_uploads_router
 
 
 def test_openapi_includes_repository_routes():
+    """Verify OpenAPI schema includes core repository route paths."""
     app = FastAPI()
     app.include_router(ai_models_files_router)
     app.include_router(ai_models_repositories_router)

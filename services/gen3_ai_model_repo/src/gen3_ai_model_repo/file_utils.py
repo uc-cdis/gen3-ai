@@ -1,11 +1,11 @@
 import hashlib
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
+from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
 
 

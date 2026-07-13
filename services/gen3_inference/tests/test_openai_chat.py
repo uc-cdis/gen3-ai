@@ -3,11 +3,11 @@ Tests for OpenAI Chat Completions utils
 """
 
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
-from gen3_inference.inference_protocols.openai_chat import OpenaiChat
 
+from gen3_inference.inference_protocols.openai_chat import OpenaiChat
 from gen3_inference.inference_protocols.utils.openai_chat_to_openresponses import (
     chat_completion_to_openresponses_response,
 )
@@ -19,7 +19,10 @@ async def test_generate_non_streaming_response_calls_client(
     mock_openai_class: MagicMock,
 ):
     """
-    Test that generate_non_streaming_response calls OpenAI client with correct parameters
+    Test that generate_non_streaming_response calls OpenAI with expected args.
+
+    Args:
+        mock_openai_class (MagicMock): Patched OpenAI class used to inject a fake client.
     """
     # mock response
     mock_response = MagicMock()
@@ -78,7 +81,10 @@ async def test_generate_streaming_response_calls_client(
     mock_openai_class: MagicMock,
 ):
     """
-    Test that generate_streaming_response calls OpenAI client with stream=True
+    Test that generate_streaming_response calls OpenAI with stream enabled.
+
+    Args:
+        mock_openai_class (MagicMock): Patched OpenAI class used to inject a fake client.
     """
     # mock chunks
     chunks = [

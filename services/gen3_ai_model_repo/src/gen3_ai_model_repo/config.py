@@ -10,11 +10,6 @@ from common.config import starlette_config
 logging = common_config.logging
 logging.name = "gen3_ai_model_repo"
 
-MODEL_REPO_TOKEN = starlette_config(
-    "MODEL_REPO_TOKEN",
-    default="mock-token-123456",
-    cast=str,
-)
 MODEL_STORAGE_PATH = starlette_config(
     "MODEL_STORAGE_PATH",
     default="./testfiles",
@@ -182,4 +177,3 @@ GEN3_AI_MODEL_REPO_URL = common_config.GEN3_AI_MODEL_REPO_URL
 GEN3_EMBEDDINGS_URL = common_config.GEN3_EMBEDDINGS_URL
 GEN3_INFERENCE_URL = common_config.GEN3_INFERENCE_URL
 # DO NOT EDIT THE ABOVE
-MODEL_REPO_TOKEN = "Bearer mock-token-123456"

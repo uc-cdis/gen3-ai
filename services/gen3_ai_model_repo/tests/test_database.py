@@ -72,6 +72,7 @@ class FakePool:
 
 
 def test_helper_module_does_not_reexport_database_functions():
+    """Ensure helper module does not expose data-layer API functions."""
     assert not hasattr(helper, "create_repository_metadata")
     assert not hasattr(helper, "create_revision")
     assert not hasattr(helper, "list_repositories")
@@ -79,6 +80,11 @@ def test_helper_module_does_not_reexport_database_functions():
 
 @pytest.mark.anyio
 async def test_delete_repository_metadata(monkeypatch):
+    """Verify repository metadata delete returns True on successful delete.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
+    """
     conn = FakeConn()
 
     async def fake_get_db_pool():
@@ -90,6 +96,12 @@ async def test_delete_repository_metadata(monkeypatch):
 
 @pytest.mark.anyio
 async def test_track_file_false_when_missing_repo(monkeypatch):
+    """Verify file tracking returns False when repository lookup fails.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
+    """
+
     class MissingRepoConn(FakeConn):
         async def fetchrow(self, query, *args):
             return None
@@ -103,6 +115,12 @@ async def test_track_file_false_when_missing_repo(monkeypatch):
 
 @pytest.mark.anyio
 async def test_get_or_create_revision_none_when_missing_repo(monkeypatch):
+    """Verify revision upsert returns None when repository does not exist.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
+    """
+
     async def fake_get_db_pool():
         return FakePool(FakeConn())
 

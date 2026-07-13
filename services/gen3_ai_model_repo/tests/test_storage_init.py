@@ -9,6 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def test_get_storage_provider_returns_local_provider(monkeypatch):
+    """Verify local provider is constructed when STORAGE_PROVIDER=local.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
+    """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "local", raising=False)
@@ -20,6 +25,11 @@ def test_get_storage_provider_returns_local_provider(monkeypatch):
 
 
 def test_get_storage_provider_returns_minio_provider(monkeypatch):
+    """Verify MinIO provider is constructed when STORAGE_PROVIDER=minio.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
+    """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "minio", raising=False)
@@ -35,6 +45,11 @@ def test_get_storage_provider_returns_minio_provider(monkeypatch):
 
 @pytest.mark.skipif(importlib.util.find_spec("boto3") is None, reason="boto3 not installed")
 def test_get_storage_provider_returns_s3_provider(monkeypatch):
+    """Verify S3 provider is constructed when STORAGE_PROVIDER=s3.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
+    """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "s3", raising=False)
@@ -50,6 +65,11 @@ def test_get_storage_provider_returns_s3_provider(monkeypatch):
 
 
 def test_get_storage_provider_raises_on_unknown_provider(monkeypatch):
+    """Verify unsupported provider names raise a clear ValueError.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
+    """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "unknown-provider", raising=False)
