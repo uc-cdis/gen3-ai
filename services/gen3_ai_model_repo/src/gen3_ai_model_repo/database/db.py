@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -10,6 +9,7 @@ from gen3_ai_model_repo.config import (
     DB_PASSWORD,
     DB_PORT,
     DB_USER,
+    logging,
 )
 
 db_pool = None
