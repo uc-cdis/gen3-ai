@@ -111,8 +111,16 @@ setup:
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
     else
-        echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
-        exit 1
+        if [[ "${GITHUB_ACTIONS:-}" = "true" ]]; then
+            echo -e "${YELLOW}** WARNING: dbmate not found in CI. Installing... **${RESET}"
+            curl -fsSL "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64" -o dbmate
+            chmod +x dbmate
+            sudo mv dbmate /usr/local/bin/dbmate
+            echo "dbmate is installed. version: $(dbmate --version)"
+        else
+            echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
+            exit 1
+        fi
     fi
 
     print_header "just setup:" "verifying" "pre-commit" "installation..."
