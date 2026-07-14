@@ -35,7 +35,7 @@ class MultipartUploadResponse(BaseModel):
 
 async def repository_has_current_revision(conn) -> bool:
     """
-    Check whether the model_repositories table has a current_revision column.
+    Check whether the models table has a current_revision column.
 
     Args:
         conn: Active database connection.
@@ -48,7 +48,7 @@ async def repository_has_current_revision(conn) -> bool:
         """
         SELECT 1
         FROM information_schema.columns
-        WHERE table_name = 'model_repositories'
+                WHERE table_name = 'models'
           AND column_name = 'current_revision';
         """
     )

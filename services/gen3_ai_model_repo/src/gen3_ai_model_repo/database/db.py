@@ -66,12 +66,12 @@ async def get_db_pool():
 @dataclass
 class ModelRepository:
     """
-    Dataclass representing a model_repositories table row.
+    Dataclass representing a models table row.
     """
 
     id: int
     namespace: str
-    repo_name: str
+    model_name: str
     description: str | None
     tags: list[str]
     current_revision: str

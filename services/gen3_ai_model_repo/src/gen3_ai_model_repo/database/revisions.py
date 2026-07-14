@@ -7,6 +7,11 @@ retrieving, and listing revisions with commit SHAs and ETags.
 
 from gen3_ai_model_repo.database.db import get_db_pool
 
+GET_MODEL_ID_SQL = """
+    SELECT id FROM models
+    WHERE namespace = $1 AND model_name = $2;
+"""
+
 
 async def get_revision_identifier_column(conn) -> str:
     """
@@ -37,7 +42,7 @@ async def get_revision_identifier_column(conn) -> str:
 
 async def create_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str = "main",
     revision_identifier: str | None = None,
     etag: str | None = None,
@@ -46,32 +51,27 @@ async def create_revision(
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         identifier_column = await get_revision_identifier_column(conn)
-        repo_stmt = await conn.prepare(
-            """
-            SELECT id FROM model_repositories
-            WHERE namespace = $1 AND repo_name = $2;
-            """
-        )
-        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
-        if not repo_row:
+        model_stmt = await conn.prepare(GET_MODEL_ID_SQL)
+        model_row = await model_stmt.fetchrow(namespace, model_name)
+        if not model_row:
             return None
-        repo_id = repo_row["id"]
+        model_id = model_row["id"]
         insert_stmt = await conn.prepare(
             f"""
-            INSERT INTO model_revisions (repository_id, revision_name, {identifier_column}, etag)
+            INSERT INTO model_revisions (model_id, revision_name, {identifier_column}, etag)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (repository_id, revision_name)
+            ON CONFLICT (model_id, revision_name)
             DO UPDATE SET {identifier_column} = EXCLUDED.{identifier_column},
                           etag = EXCLUDED.etag;
             """
         )
-        await insert_stmt.fetch(repo_id, revision_name, revision_identifier, etag)
-    return await get_revision(namespace, repo_name, revision_name)
+        await insert_stmt.fetch(model_id, revision_name, revision_identifier, etag)
+    return await get_revision(namespace, model_name, revision_name)
 
 
 async def get_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
 ) -> dict | None:
     """Return the metadata for a specific revision, if present."""
@@ -82,11 +82,11 @@ async def get_revision(
             f"""
             SELECT mr.id, mr.revision_name, mr.{identifier_column} AS revision_identifier, mr.etag, mr.created_at
             FROM model_revisions mr
-            JOIN model_repositories repo ON repo.id = mr.repository_id
-            WHERE repo.namespace = $1 AND repo.repo_name = $2 AND mr.revision_name = $3;
+            JOIN models repo ON repo.id = mr.model_id
+            WHERE repo.namespace = $1 AND repo.model_name = $2 AND mr.revision_name = $3;
             """
         )
-        row = await stmt.fetchrow(namespace, repo_name, revision_name)
+        row = await stmt.fetchrow(namespace, model_name, revision_name)
     if not row:
         return None
     return {
@@ -100,7 +100,7 @@ async def get_revision(
 
 async def get_or_create_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str = "main",
     commit_sha: str | None = None,
     etag: str | None = None,
@@ -113,7 +113,7 @@ async def get_or_create_revision(
 
     Args:
         namespace (str): The namespace/organization for the repository.
-        repo_name (str): The name of the repository.
+        model_name (str): The name of the model.
         revision_name (str): The name of the revision (default: "main").
         commit_sha (str | None): Optional commit SHA for creating a new revision.
         etag (str | None): Optional ETag for the revision.
@@ -124,20 +124,15 @@ async def get_or_create_revision(
     """
     pool = await get_db_pool()
 
-    # Get repository ID
+    # Get model ID
     async with pool.acquire() as conn:
-        repo_stmt = await conn.prepare(
-            """
-            SELECT id FROM model_repositories
-            WHERE namespace = $1 AND repo_name = $2;
-            """
-        )
-        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
+        model_stmt = await conn.prepare(GET_MODEL_ID_SQL)
+        model_row = await model_stmt.fetchrow(namespace, model_name)
 
-    if not repo_row:
+    if not model_row:
         return None
 
-    repo_id = repo_row["id"]
+    model_id = model_row["id"]
 
     async with pool.acquire() as conn:
         identifier_column = await get_revision_identifier_column(conn)
@@ -146,10 +141,10 @@ async def get_or_create_revision(
             f"""
             SELECT id, {identifier_column} AS revision_identifier, etag, created_at
             FROM model_revisions
-            WHERE repository_id = $1 AND revision_name = $2;
+            WHERE model_id = $1 AND revision_name = $2;
             """
         )
-        revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
+        revision_row = await revision_stmt.fetchrow(model_id, revision_name)
 
         if revision_row:
             return {
@@ -164,20 +159,20 @@ async def get_or_create_revision(
         if commit_sha:
             insert_stmt = await conn.prepare(
                 f"""
-                INSERT INTO model_revisions (repository_id, revision_name, {identifier_column}, etag)
+                INSERT INTO model_revisions (model_id, revision_name, {identifier_column}, etag)
                 VALUES ($1, $2, $3, $4);
                 """
             )
-            await insert_stmt.fetch(repo_id, revision_name, commit_sha, etag)
+            await insert_stmt.fetch(model_id, revision_name, commit_sha, etag)
 
             revision_stmt = await conn.prepare(
                 f"""
                 SELECT id, {identifier_column} AS revision_identifier, etag, created_at
                 FROM model_revisions
-                WHERE repository_id = $1 AND revision_name = $2;
+                WHERE model_id = $1 AND revision_name = $2;
                 """
             )
-            revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
+            revision_row = await revision_stmt.fetchrow(model_id, revision_name)
 
             return {
                 "id": revision_row["id"],
@@ -192,7 +187,7 @@ async def get_or_create_revision(
 
 async def list_revisions(
     namespace: str,
-    repo_name: str,
+    model_name: str,
 ) -> list[dict]:
     """
     List all revisions for a repository.
@@ -201,7 +196,7 @@ async def list_revisions(
 
     Args:
         namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        model_name: The name of the model.
 
     Returns:
         A list of dictionaries containing revision details, or an empty list if
@@ -211,28 +206,23 @@ async def list_revisions(
 
     async with pool.acquire() as conn:
         identifier_column = await get_revision_identifier_column(conn)
-        repo_stmt = await conn.prepare(
-            """
-            SELECT id FROM model_repositories
-            WHERE namespace = $1 AND repo_name = $2;
-            """
-        )
-        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
+        model_stmt = await conn.prepare(GET_MODEL_ID_SQL)
+        model_row = await model_stmt.fetchrow(namespace, model_name)
 
-        if not repo_row:
+        if not model_row:
             return []
 
-        repo_id = repo_row["id"]
+        model_id = model_row["id"]
 
         revision_stmt = await conn.prepare(
             f"""
             SELECT id, revision_name, {identifier_column} AS revision_identifier, etag, created_at
             FROM model_revisions
-            WHERE repository_id = $1
+            WHERE model_id = $1
             ORDER BY created_at DESC;
             """
         )
-        revision_rows = await revision_stmt.fetch(repo_id)
+        revision_rows = await revision_stmt.fetch(model_id)
 
     return [
         {
@@ -248,7 +238,7 @@ async def list_revisions(
 
 async def delete_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
 ) -> bool:
     """Delete a revision for a repository."""
@@ -260,13 +250,13 @@ async def delete_revision(
             WHERE id IN (
                 SELECT mr.id
                 FROM model_revisions mr
-                JOIN model_repositories repo ON repo.id = mr.repository_id
+                                JOIN models repo ON repo.id = mr.model_id
                 WHERE repo.namespace = $1
-                  AND repo.repo_name = $2
+                                    AND repo.model_name = $2
                   AND mr.revision_name = $3
                         )
                         RETURNING 1;
             """
         )
-        deleted = await stmt.fetchval(namespace, repo_name, revision_name)
+        deleted = await stmt.fetchval(namespace, model_name, revision_name)
     return deleted is not None

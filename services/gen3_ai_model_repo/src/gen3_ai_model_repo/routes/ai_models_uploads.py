@@ -33,7 +33,7 @@ async def _hash_upload_file(upload: UploadFile) -> tuple[str, str, int]:
     return sha256.hexdigest(), md5.hexdigest(), total_size
 
 
-async def _create_repository_and_initial_revision(
+async def _create_model_and_initial_revision(
     conn,
     namespace: str,
     repo: str,
@@ -44,35 +44,35 @@ async def _create_repository_and_initial_revision(
     has_current_revision = await repository_has_current_revision(conn)
     has_s3_key, has_file_type = await model_files_optional_columns(conn)
 
-    exists_stmt = await conn.prepare("SELECT 1 FROM model_repositories WHERE namespace=$1 AND repo_name=$2")
+    exists_stmt = await conn.prepare("SELECT 1 FROM models WHERE namespace=$1 AND model_name=$2")
     exists = await exists_stmt.fetchval(namespace, repo)
     if exists:
         raise HTTPException(status_code=409, detail=f"Repository {namespace}/{repo} already exists")
 
     if has_current_revision:
         insert_repo_stmt = await conn.prepare(
-            "INSERT INTO model_repositories (namespace, repo_name, description, tags, current_revision) VALUES ($1,$2,$3,$4,$5)"
+            "INSERT INTO models (namespace, model_name, description, tags, current_revision) VALUES ($1,$2,$3,$4,$5)"
         )
         await insert_repo_stmt.fetch(namespace, repo, None, [], revision_name)
     else:
         insert_repo_stmt = await conn.prepare(
-            "INSERT INTO model_repositories (namespace, repo_name, description, tags) VALUES ($1,$2,$3,$4)"
+            "INSERT INTO models (namespace, model_name, description, tags) VALUES ($1,$2,$3,$4)"
         )
         await insert_repo_stmt.fetch(namespace, repo, None, [])
 
-    repo_id_stmt = await conn.prepare("SELECT id FROM model_repositories WHERE namespace=$1 AND repo_name=$2")
-    repo_id = await repo_id_stmt.fetchval(namespace, repo)
+    model_id_stmt = await conn.prepare("SELECT id FROM models WHERE namespace=$1 AND model_name=$2")
+    model_id = await model_id_stmt.fetchval(namespace, repo)
 
     initial_revision_hash = hashlib.sha256(f"{namespace}/{repo}:{revision_name}".encode()).hexdigest()
     insert_revision_stmt = await conn.prepare(
-        f"INSERT INTO model_revisions (repository_id, revision_name, {identifier_column}, etag) VALUES ($1,$2,$3,$4)"
+        f"INSERT INTO model_revisions (model_id, revision_name, {identifier_column}, etag) VALUES ($1,$2,$3,$4)"
     )
-    await insert_revision_stmt.fetch(repo_id, revision_name, initial_revision_hash, initial_revision_hash[:32])
+    await insert_revision_stmt.fetch(model_id, revision_name, initial_revision_hash, initial_revision_hash[:32])
 
-    revision_id_stmt = await conn.prepare("SELECT id FROM model_revisions WHERE repository_id=$1 AND revision_name=$2")
-    revision_id = await revision_id_stmt.fetchval(repo_id, revision_name)
+    revision_id_stmt = await conn.prepare("SELECT id FROM model_revisions WHERE model_id=$1 AND revision_name=$2")
+    revision_id = await revision_id_stmt.fetchval(model_id, revision_name)
 
-    return repo_id, revision_id, identifier_column, has_current_revision, has_s3_key, has_file_type
+    return model_id, revision_id, identifier_column, has_current_revision, has_s3_key, has_file_type
 
 
 async def _prepare_file_insert_stmt(conn, has_s3_key: bool, has_file_type: bool):
@@ -137,7 +137,7 @@ async def _process_uploaded_files(
 
 
 @ai_models_uploads_router.post(
-    "/api/repositories/{namespace}/{repo}/upload", response_model=MultipartUploadResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/upload", response_model=MultipartUploadResponse, tags=["Models"]
 )
 async def upload_model(
     namespace: str,
@@ -163,13 +163,13 @@ async def upload_model(
         await tx.start()
         try:
             (
-                repo_id,
+                model_id,
                 revision_id,
                 identifier_column,
                 has_current_revision,
                 has_s3_key,
                 has_file_type,
-            ) = await _create_repository_and_initial_revision(conn, namespace, repo, revision_name)
+            ) = await _create_model_and_initial_revision(conn, namespace, repo, revision_name)
             file_insert_stmt = await _prepare_file_insert_stmt(conn, has_s3_key, has_file_type)
 
             uploaded_objects, uploaded_file_digests, total_size = await _process_uploaded_files(
@@ -193,8 +193,8 @@ async def upload_model(
             )
             await update_revision_stmt.fetch(revision_hash, revision_hash[:32], revision_id)
             if has_current_revision:
-                update_repo_stmt = await conn.prepare("UPDATE model_repositories SET current_revision=$1 WHERE id=$2")
-                await update_repo_stmt.fetch(revision_name, repo_id)
+                update_repo_stmt = await conn.prepare("UPDATE models SET current_revision=$1 WHERE id=$2")
+                await update_repo_stmt.fetch(revision_name, model_id)
             await tx.commit()
         except Exception:
             await tx.rollback()
@@ -215,7 +215,7 @@ async def upload_model(
 
 
 @ai_models_uploads_router.post(
-    "/api/repositories/{namespace}/{repo}/revisions",
+    "/api/models/{namespace}/{repo}/revisions",
     response_model=RevisionModel,
     summary="Create revision",
     tags=["Models"],
@@ -237,7 +237,7 @@ async def create_model_revision(
 
 
 @ai_models_uploads_router.post(
-    "/api/repositories/{namespace}/{repo}/upload-url", response_model=UploadUrlResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/upload-url", response_model=UploadUrlResponse, tags=["Models"]
 )
 async def generate_upload_url(
     namespace: str, repo: str, request: UploadUrlRequest, _: None = Depends(verify_authorization)
@@ -253,7 +253,7 @@ async def generate_upload_url(
 
 
 @ai_models_uploads_router.post(
-    "/api/repositories/{namespace}/{repo}/complete-upload", response_model=RevisionModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/complete-upload", response_model=RevisionModel, tags=["Models"]
 )
 async def complete_upload(
     namespace: str, repo: str, request: RevisionCreateRequest, _: None = Depends(verify_authorization)
@@ -297,7 +297,7 @@ async def complete_upload(
 
         await track_file(
             namespace=namespace,
-            repo_name=repo,
+            model_name=repo,
             revision_name=request.revision_name,
             file_path=file_path,
             file_size=int(metadata["size"]),

@@ -23,7 +23,7 @@ async def model_files_has_s3_key(conn) -> bool:
 
 async def track_file(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
     file_path: str,
     file_size: int,
@@ -39,7 +39,7 @@ async def track_file(
 
     Args:
         namespace (str): The namespace/organization for the repository.
-        repo_name (str): The name of the repository.
+        model_name (str): The name of the model.
         revision_name (str): The name of the revision containing the file.
         file_path (str): The path to the file within the revision.
         file_size (int): The size of the file in bytes.
@@ -54,28 +54,28 @@ async def track_file(
 
     async with pool.acquire() as conn:
         has_s3_key = await model_files_has_s3_key(conn)
-        # Get repository ID
-        repo_stmt = await conn.prepare(
+        # Get model ID
+        model_stmt = await conn.prepare(
             """
-            SELECT id FROM model_repositories
-            WHERE namespace = $1 AND repo_name = $2;
+            SELECT id FROM models
+            WHERE namespace = $1 AND model_name = $2;
             """
         )
-        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
+        model_row = await model_stmt.fetchrow(namespace, model_name)
 
-        if not repo_row:
+        if not model_row:
             return False
 
-        repo_id = repo_row["id"]
+        model_id = model_row["id"]
 
         # Get revision ID
         revision_stmt = await conn.prepare(
             """
             SELECT id FROM model_revisions
-            WHERE repository_id = $1 AND revision_name = $2;
+            WHERE model_id = $1 AND revision_name = $2;
             """
         )
-        revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
+        revision_row = await revision_stmt.fetchrow(model_id, revision_name)
 
         if not revision_row:
             return False
@@ -116,7 +116,7 @@ async def track_file(
 
 async def list_files_in_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str = "main",
 ) -> list[dict]:
     """
@@ -126,7 +126,7 @@ async def list_files_in_revision(
 
     Args:
         namespace (str): The namespace/organization for the repository.
-        repo_name (str): The name of the repository.
+        model_name (str): The name of the model.
         revision_name (str): The name of the revision (default: "main").
 
     Returns:
@@ -136,26 +136,26 @@ async def list_files_in_revision(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        repo_stmt = await conn.prepare(
+        model_stmt = await conn.prepare(
             """
-            SELECT id FROM model_repositories
-            WHERE namespace = $1 AND repo_name = $2;
+            SELECT id FROM models
+            WHERE namespace = $1 AND model_name = $2;
             """
         )
-        repo_row = await repo_stmt.fetchrow(namespace, repo_name)
+        model_row = await model_stmt.fetchrow(namespace, model_name)
 
-        if not repo_row:
+        if not model_row:
             return []
 
-        repo_id = repo_row["id"]
+        model_id = model_row["id"]
 
         revision_stmt = await conn.prepare(
             """
             SELECT id FROM model_revisions
-            WHERE repository_id = $1 AND revision_name = $2;
+            WHERE model_id = $1 AND revision_name = $2;
             """
         )
-        revision_row = await revision_stmt.fetchrow(repo_id, revision_name)
+        revision_row = await revision_stmt.fetchrow(model_id, revision_name)
 
         if not revision_row:
             return []
@@ -187,7 +187,7 @@ async def list_files_in_revision(
 
 async def get_file_record(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
     file_path: str,
 ) -> dict | None:
@@ -207,14 +207,14 @@ async def get_file_record(
                     mf.s3_key
                 FROM model_files mf
                 JOIN model_revisions mr ON mr.id = mf.revision_id
-                JOIN model_repositories repo ON repo.id = mr.repository_id
+                                JOIN models repo ON repo.id = mr.model_id
                 WHERE repo.namespace = $1
-                  AND repo.repo_name = $2
+                                    AND repo.model_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4;
                 """
             )
-            row = await stmt.fetchrow(namespace, repo_name, revision_name, file_path)
+            row = await stmt.fetchrow(namespace, model_name, revision_name, file_path)
         else:
             stmt = await conn.prepare(
                 """
@@ -225,14 +225,14 @@ async def get_file_record(
                     mf.content_etag
                 FROM model_files mf
                 JOIN model_revisions mr ON mr.id = mf.revision_id
-                JOIN model_repositories repo ON repo.id = mr.repository_id
+                                JOIN models repo ON repo.id = mr.model_id
                 WHERE repo.namespace = $1
-                  AND repo.repo_name = $2
+                                    AND repo.model_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4;
                 """
             )
-            row = await stmt.fetchrow(namespace, repo_name, revision_name, file_path)
+            row = await stmt.fetchrow(namespace, model_name, revision_name, file_path)
 
     if row is None:
         return None
@@ -242,13 +242,13 @@ async def get_file_record(
         "size": row["file_size"],
         "sha": row["content_sha"],
         "etag": row["content_etag"],
-        "s3_key": row["s3_key"] if has_s3_key else f"{namespace}/{repo_name}/{revision_name}/{file_path}",
+        "s3_key": row["s3_key"] if has_s3_key else f"{namespace}/{model_name}/{revision_name}/{file_path}",
     }
 
 
 async def delete_file(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
     file_path: str,
 ) -> bool:
@@ -263,22 +263,22 @@ async def delete_file(
                 SELECT mf.id
                 FROM model_files mf
                 JOIN model_revisions mr ON mr.id = mf.revision_id
-                JOIN model_repositories repo ON repo.id = mr.repository_id
+                                JOIN models repo ON repo.id = mr.model_id
                 WHERE repo.namespace = $1
-                  AND repo.repo_name = $2
+                                    AND repo.model_name = $2
                   AND mr.revision_name = $3
                   AND mf.file_path = $4
             )
             RETURNING 1;
             """
         )
-        deleted = await stmt.fetchval(namespace, repo_name, revision_name, file_path)
+        deleted = await stmt.fetchval(namespace, model_name, revision_name, file_path)
     return deleted is not None
 
 
 async def delete_files_for_revision(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     revision_name: str,
 ) -> bool:
     """Delete all file records for a revision."""
@@ -291,13 +291,13 @@ async def delete_files_for_revision(
             WHERE revision_id IN (
                 SELECT mr.id
                 FROM model_revisions mr
-                JOIN model_repositories repo ON repo.id = mr.repository_id
+                                JOIN models repo ON repo.id = mr.model_id
                 WHERE repo.namespace = $1
-                  AND repo.repo_name = $2
+                                    AND repo.model_name = $2
                   AND mr.revision_name = $3
             )
             RETURNING 1;
             """
         )
-        deleted_rows = await stmt.fetch(namespace, repo_name, revision_name)
+        deleted_rows = await stmt.fetch(namespace, model_name, revision_name)
     return bool(deleted_rows)

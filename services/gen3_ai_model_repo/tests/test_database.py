@@ -79,8 +79,8 @@ def test_helper_module_does_not_reexport_database_functions():
 
 
 @pytest.mark.anyio
-async def test_delete_repository_metadata(monkeypatch):
-    """Verify repository metadata delete returns True on successful delete.
+async def test_delete_model_metadata(monkeypatch):
+    """Verify model metadata delete returns True on successful delete.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
@@ -91,7 +91,7 @@ async def test_delete_repository_metadata(monkeypatch):
         return FakePool(conn)
 
     monkeypatch.setattr(repo_metadata, "get_db_pool", fake_get_db_pool)
-    assert await repo_metadata.delete_repository_metadata("ns", "repo") is True
+    assert await repo_metadata.delete_model_metadata("ns", "repo") is True
 
 
 @pytest.mark.anyio

@@ -23,10 +23,12 @@ from gen3_ai_model_repo.response import build_head_response
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
 ai_models_files_router = APIRouter()
+REVISION_NOT_FOUND_DETAIL = "Revision not found"
+FILE_NOT_FOUND_DETAIL = "File not found"
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/tree/{rev}",
+    "/api/models/{namespace}/{repo}/tree/{rev}",
     response_model=list[TreeEntryModel],
     summary="List repository directory contents",
     description="Return a flat list of entries for the repository. The output matches the structure documented by Hugging Face.",
@@ -37,7 +39,7 @@ ai_models_files_router = APIRouter()
     tags=["Models"],
 )
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/tree/{rev}/{path:path}",
+    "/api/models/{namespace}/{repo}/tree/{rev}/{path:path}",
     response_model=list[TreeEntryModel],
     summary="List repository path contents",
     description="Return a flat list of entries for the specified path in the repository.",
@@ -65,7 +67,7 @@ async def list_repo_tree(
 
     files = await list_files_in_revision(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         revision_name=rev,
     )
 
@@ -78,7 +80,7 @@ async def list_repo_tree(
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/revision/{rev}",
+    "/api/models/{namespace}/{repo}/revision/{rev}",
     response_model=RevisionModel,
     summary="Get revision metadata",
     description="Retrieve detailed metadata for a specific revision of a model repository.",
@@ -94,12 +96,12 @@ async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
     """
     data = await db_get_revision(namespace, repo, rev)
     if not data:
-        raise HTTPException(status_code=404, detail="Revision not found")
+        raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
     return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/revisions/{revision}",
+    "/api/models/{namespace}/{repo}/revisions/{revision}",
     response_model=RevisionModel,
     summary="Get revision metadata",
     tags=["Models"],
@@ -111,12 +113,12 @@ async def get_model_revision(namespace: str, repo: str, revision: str) -> Revisi
 
     data = await db_get_revision(namespace, repo, revision)
     if not data:
-        raise HTTPException(status_code=404, detail="Revision not found")
+        raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
     return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
 
 
 @ai_models_files_router.head(
-    "/api/repositories/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    "/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}",
     summary="Get file metadata without downloading",
     description="Retrieve file metadata (size, hash, signed URL) without downloading the full file content.",
     responses={
@@ -132,7 +134,7 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
 
     file_record = await get_file_record(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         revision_name=rev,
         file_path=path,
     )
@@ -140,7 +142,7 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     if not file_record:
         raise HTTPException(
             status_code=404,
-            detail="File not found",
+            detail=FILE_NOT_FOUND_DETAIL,
         )
 
     size = file_record["size"]
@@ -154,7 +156,7 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    "/api/models/{namespace}/{repo}/resolve/{rev}/{path:path}",
     summary="Download model file with redirect",
     description="Retrieve a model file from a specific revision. Returns a redirect to a signed URL for file download.",
     responses={
@@ -170,12 +172,12 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
     logging.info(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
     file_record = await get_file_record(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         revision_name=rev,
         file_path=path,
     )
     if not file_record:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
 
     provider = get_storage_provider()
     signed_url = await provider.generate_signed_url(file_record["s3_key"])
@@ -184,7 +186,7 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/files", response_model=FileListResponseModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files", response_model=FileListResponseModel, tags=["Models"]
 )
 async def list_model_files(namespace: str, repo: str, revision: str = "main") -> FileListResponseModel:
     """
@@ -209,7 +211,7 @@ async def list_model_files(namespace: str, repo: str, revision: str = "main") ->
 
 
 @ai_models_files_router.get(
-    "/api/repositories/{namespace}/{repo}/files/{file_id}", response_model=FileMetadataModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=FileMetadataModel, tags=["Models"]
 )
 async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadataModel:
     """
@@ -223,7 +225,7 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
         revision, path = "main", file_id
     record = await get_file_record(namespace, repo, revision, path)
     if not record:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
     return FileMetadataModel(
         file_id=file_id,
         path=record["path"],
@@ -235,7 +237,7 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
 
 
 @ai_models_files_router.delete(
-    "/api/repositories/{namespace}/{repo}/files/{file_id}", response_model=RevisionDeleteResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=RevisionDeleteResponse, tags=["Models"]
 )
 async def delete_model_file(
     namespace: str, repo: str, file_id: str, _: None = Depends(verify_authorization)
@@ -248,12 +250,12 @@ async def delete_model_file(
     revision, path = ("main", file_id) if len(parts) != 4 else (parts[2], parts[3])
     deleted = await delete_file(namespace, repo, revision, path)
     if not deleted:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
     return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
 
 
 @ai_models_files_router.delete(
-    "/api/repositories/{namespace}/{repo}/revisions/{revision}",
+    "/api/models/{namespace}/{repo}/revisions/{revision}",
     response_model=RevisionDeleteResponse,
     tags=["Models"],
 )
@@ -267,7 +269,7 @@ async def delete_model_revision(
     deleted_files = await delete_files_for_revision(namespace, repo, revision)
     deleted_revision = await delete_revision(namespace, repo, revision)
     if not deleted_revision and not deleted_files:
-        raise HTTPException(status_code=404, detail="Revision not found")
+        raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
     return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
 
 
