@@ -9,9 +9,9 @@ from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.models.schemas import RepositoryMetadataModel
 
 
-async def create_repository_metadata(
+async def create_model_metadata(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     description: str,
     tags: list[str] | None = None,
 ) -> RepositoryMetadataModel:
@@ -38,31 +38,31 @@ async def create_repository_metadata(
     async with pool.acquire() as conn:
         stmt = await conn.prepare(
             """
-            INSERT INTO model_repositories (
+            INSERT INTO models (
                 namespace,
-                repo_name,
+                model_name,
                 description,
                 tags
             )
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (namespace, repo_name)
+            ON CONFLICT (namespace, model_name)
             DO UPDATE SET
                 description = EXCLUDED.description,
                 tags = EXCLUDED.tags,
                 updated_at = NOW();
             """
         )
-        await stmt.fetch(namespace, repo_name, description, tags)
+        await stmt.fetch(namespace, model_name, description, tags)
 
-    return await get_repository_metadata(
+    return await get_model_metadata(
         namespace,
-        repo_name,
+        model_name,
     )
 
 
-async def get_repository_metadata(
+async def get_model_metadata(
     namespace: str,
-    repo_name: str,
+    model_name: str,
 ) -> RepositoryMetadataModel | None:
     """
     Retrieve repository metadata from database.
@@ -81,16 +81,16 @@ async def get_repository_metadata(
             """
             SELECT
                 namespace,
-                repo_name,
+                model_name AS repo_name,
                 description,
                 tags,
                 created_at
-            FROM model_repositories
+            FROM models
             WHERE namespace = $1
-            AND repo_name = $2;
+            AND model_name = $2;
             """
         )
-        row = await stmt.fetchrow(namespace, repo_name)
+        row = await stmt.fetchrow(namespace, model_name)
 
     if row is None:
         return None
@@ -104,9 +104,9 @@ async def get_repository_metadata(
     )
 
 
-async def delete_repository_metadata(
+async def delete_model_metadata(
     namespace: str,
-    repo_name: str,
+    model_name: str,
 ) -> bool:
     """
     Delete repository metadata from database.
@@ -123,20 +123,20 @@ async def delete_repository_metadata(
     async with pool.acquire() as conn:
         stmt = await conn.prepare(
             """
-            DELETE FROM model_repositories
+            DELETE FROM models
             WHERE namespace = $1
-            AND repo_name = $2
+            AND model_name = $2
             RETURNING 1;
             """
         )
-        deleted = await stmt.fetchval(namespace, repo_name)
+        deleted = await stmt.fetchval(namespace, model_name)
 
     return deleted is not None
 
 
-async def repository_exists(
+async def model_exists(
     namespace: str,
-    repo_name: str,
+    model_name: str,
 ) -> bool:
     """
     Check whether a repository exists in the database.
@@ -154,17 +154,17 @@ async def repository_exists(
         stmt = await conn.prepare(
             """
             SELECT 1
-            FROM model_repositories
+            FROM models
             WHERE namespace = $1
-            AND repo_name = $2;
+            AND model_name = $2;
             """
         )
-        row = await stmt.fetchrow(namespace, repo_name)
+        row = await stmt.fetchrow(namespace, model_name)
 
     return row is not None
 
 
-async def list_all_repositories() -> list[RepositoryMetadataModel]:
+async def list_all_models() -> list[RepositoryMetadataModel]:
     """
     Return all repositories from the database.
 
@@ -178,11 +178,11 @@ async def list_all_repositories() -> list[RepositoryMetadataModel]:
             """
             SELECT
                 namespace,
-                repo_name,
+                model_name AS repo_name,
                 description,
                 tags,
                 created_at
-            FROM model_repositories;
+            FROM models;
             """
         )
         rows = await stmt.fetch()
@@ -199,15 +199,15 @@ async def list_all_repositories() -> list[RepositoryMetadataModel]:
     ]
 
 
-async def get_repository(
+async def get_model(
     namespace: str,
-    repo_name: str,
+    model_name: str,
 ) -> RepositoryMetadataModel | None:
     """Return repository metadata by namespace and repository name."""
-    return await get_repository_metadata(namespace, repo_name)
+    return await get_model_metadata(namespace, model_name)
 
 
-async def list_repositories(
+async def list_models(
     namespace: str | None = None,
     tags: list[str] | None = None,
     search: str | None = None,
@@ -224,10 +224,10 @@ async def list_repositories(
         clauses.append(f"tags && ${len(values)}")
     if search:
         values.append(f"%{search}%")
-        clauses.append(f"(repo_name ILIKE ${len(values)} OR description ILIKE ${len(values)})")
+        clauses.append(f"(model_name ILIKE ${len(values)} OR description ILIKE ${len(values)})")
     sql = """
-        SELECT namespace, repo_name, description, tags, created_at
-        FROM model_repositories
+        SELECT namespace, model_name AS repo_name, description, tags, created_at
+        FROM models
     """
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
@@ -247,9 +247,9 @@ async def list_repositories(
     ]
 
 
-async def update_repository_metadata(
+async def update_model_metadata(
     namespace: str,
-    repo_name: str,
+    model_name: str,
     description: str | None = None,
     tags: list[str] | None = None,
 ) -> RepositoryMetadataModel | None:
@@ -282,26 +282,26 @@ async def update_repository_metadata(
         set_clauses.append(f"tags = ${len(values)}")
 
     if not set_clauses:
-        return await get_repository_metadata(
+        return await get_model_metadata(
             namespace,
-            repo_name,
+            model_name,
         )
 
-    values.extend([namespace, repo_name])
+    values.extend([namespace, model_name])
 
     async with pool.acquire() as conn:
         stmt = await conn.prepare(
             f"""
-            UPDATE model_repositories
+            UPDATE models
             SET {", ".join(set_clauses)},
                 updated_at = NOW()
             WHERE namespace = ${len(values) - 1}
-            AND repo_name = ${len(values)};
+            AND model_name = ${len(values)};
             """
         )
         await stmt.fetch(*values)
 
-    return await get_repository_metadata(
+    return await get_model_metadata(
         namespace,
-        repo_name,
+        model_name,
     )

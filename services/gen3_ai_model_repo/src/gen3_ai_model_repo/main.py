@@ -14,7 +14,7 @@ async def lifespan(app: FastAPI):
     """
     Handle application startup and shutdown lifecycle.
     """
-    print("Starting up Gen3 AI Model Repository Service")
+    logging.info("Starting up Gen3 AI Model Repository Service")
 
     await check_db_connection()
 

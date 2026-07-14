@@ -5,13 +5,13 @@ from gen3_ai_model_repo.auth import verify_authorization
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
 from gen3_ai_model_repo.database.file_tracking import list_files_in_revision
 from gen3_ai_model_repo.database.repo_metadata import (
-    create_repository_metadata,
-    delete_repository_metadata,
-    get_repository_metadata,
-    list_repositories,
+    create_model_metadata,
+    delete_model_metadata,
+    get_model_metadata,
+    list_models,
 )
 from gen3_ai_model_repo.database.repo_metadata import (
-    repository_exists as db_repository_exists,
+    model_exists as db_model_exists,
 )
 from gen3_ai_model_repo.database.revisions import get_or_create_revision, list_revisions
 from gen3_ai_model_repo.database.revisions import get_revision as db_get_revision
@@ -28,10 +28,11 @@ from gen3_ai_model_repo.routes.ai_models_shared import RepositoryCreateRequest
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
 ai_models_repositories_router = APIRouter()
+REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
 
 
 @ai_models_repositories_router.get(
-    "/api/repositories",
+    "/api/models",
     response_model=list[RepositoryModel],
     summary="List all model repositories",
     description="Retrieve a list of all available model repositories with basic metadata.",
@@ -40,7 +41,7 @@ ai_models_repositories_router = APIRouter()
     },
     tags=["Models"],
 )
-async def list_models(
+async def list_models_route(
     namespace: str | None = Query(None),
     tags: list[str] | None = Query(None),
     search: str | None = Query(None),
@@ -48,7 +49,7 @@ async def list_models(
     """
     Retrieve all available model repositories.
     """
-    repos = await list_repositories(namespace=namespace, tags=tags, search=search)
+    repos = await list_models(namespace=namespace, tags=tags, search=search)
     return [
         RepositoryModel(
             id=f"{repo.namespace}/{repo.repo}",
@@ -61,19 +62,21 @@ async def list_models(
 
 
 @ai_models_repositories_router.get(
-    "/api/repositories/{namespace}/{repo}", response_model=RepositoryInfoModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}", response_model=RepositoryInfoModel, tags=["Models"]
 )
 async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
     """
     Retrieve repository information, main revision metadata, and tracked files.
     """
 
-    metadata = await get_repository_metadata(namespace, repo)
+    metadata = await get_model_metadata(namespace, repo)
     if not metadata:
-        raise HTTPException(status_code=404, detail="Repository not found")
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
     revision_info = await db_get_revision(namespace, repo, "main")
     files_from_db = (
-        await list_files_in_revision(namespace=namespace, repo_name=repo, revision_name="main") if revision_info else []
+        await list_files_in_revision(namespace=namespace, model_name=repo, revision_name="main")
+        if revision_info
+        else []
     )
     return RepositoryInfoModel(
         id=f"{namespace}/{repo}",
@@ -87,7 +90,7 @@ async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
 
 
 @ai_models_repositories_router.post(
-    "/api/repositories/{namespace}/{repo}", response_model=RepositoryMetadataModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}", response_model=RepositoryMetadataModel, tags=["Models"]
 )
 async def create_repository(
     namespace: str,
@@ -99,19 +102,19 @@ async def create_repository(
     Create repository metadata for a new repository.
     """
 
-    if await db_repository_exists(namespace, repo):
+    if await db_model_exists(namespace, repo):
         raise HTTPException(status_code=409, detail=f"Repository {namespace}/{repo} already exists")
 
-    return await create_repository_metadata(
+    return await create_model_metadata(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         description=request.description,
         tags=request.tags,
     )
 
 
 @ai_models_repositories_router.delete(
-    "/api/repositories/{namespace}/{repo}",
+    "/api/models/{namespace}/{repo}",
     response_model=DeleteModelResponse,
     summary="Delete a model repository",
     description="Delete a model repository including its metadata from the database and files from disk.",
@@ -128,15 +131,15 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
     """
     Delete a model repository.
     """
-    repo_exists_check = await db_repository_exists(namespace, repo)
+    repo_exists_check = await db_model_exists(namespace, repo)
     if not repo_exists_check:
-        raise HTTPException(status_code=404, detail="Repository not found")
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
 
     provider = get_storage_provider()
     prefix = f"{namespace}/{repo}/"
     await provider.delete_prefix(prefix)
 
-    deleted_from_db = await delete_repository_metadata(namespace, repo)
+    deleted_from_db = await delete_model_metadata(namespace, repo)
     if not deleted_from_db:
         raise HTTPException(
             status_code=500,
@@ -147,7 +150,7 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
 
 
 @ai_models_repositories_router.get(
-    "/api/repositories/{namespace}/{repo}/revisions",
+    "/api/models/{namespace}/{repo}/revisions",
     response_model=RevisionListResponseModel,
     summary="List model revisions",
     description="Retrieve all revisions of a model repository from the database.",
@@ -166,9 +169,9 @@ async def list_model_revisions(
     List all revisions of a model repository.
     """
 
-    repo_exists_check = await db_repository_exists(namespace, repo)
+    repo_exists_check = await db_model_exists(namespace, repo)
     if not repo_exists_check:
-        raise HTTPException(status_code=404, detail="Repository not found")
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
 
     revisions_data = await list_revisions(namespace, repo)
 
@@ -191,7 +194,7 @@ async def list_model_revisions(
 
 
 @ai_models_repositories_router.get(
-    "/api/repositories/{namespace}/{repo}/info",
+    "/api/models/{namespace}/{repo}/info",
     response_model=RepositoryInfoModel,
     summary="Get model repository information",
     description="Retrieve comprehensive information about a model repository including metadata, files, and revision info.",
@@ -205,17 +208,17 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     """
     Get comprehensive information about a model repository.
     """
-    repo_exists_in_db = await db_repository_exists(namespace, repo)
+    repo_exists_in_db = await db_model_exists(namespace, repo)
     if not repo_exists_in_db:
-        raise HTTPException(status_code=404, detail="Repository not found")
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
 
-    metadata = await get_repository_metadata(namespace, repo)
+    metadata = await get_model_metadata(namespace, repo)
     if not metadata:
         raise HTTPException(status_code=404, detail="Metadata not found")
 
     revision_info = await get_or_create_revision(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         revision_name="main",
     )
 
@@ -224,7 +227,7 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
 
     files_from_db = await list_files_in_revision(
         namespace=namespace,
-        repo_name=repo,
+        model_name=repo,
         revision_name="main",
     )
 

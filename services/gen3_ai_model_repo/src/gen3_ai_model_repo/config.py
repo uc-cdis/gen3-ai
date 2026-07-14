@@ -23,7 +23,7 @@ DB_DRIVER = starlette_config(
 
 DB_USER = starlette_config(
     "DB_USER",
-    default="sairamkova",
+    default="postgres",
 )
 
 DB_PASSWORD = starlette_config(
@@ -144,7 +144,7 @@ AUTHZ_SERVICE_RESOURCE = starlette_config(
 
 FILE_STREAM_CHUNK_SIZE = starlette_config(
     "GEN3_AI_MODEL_REPO_FILE_STREAM_CHUNK_SIZE",
-    default="65536",
+    default=65536,
     cast=int,
 )
 
