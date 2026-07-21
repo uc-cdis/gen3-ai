@@ -32,7 +32,7 @@ class Embedding:
     collection_id: int
     embedding_id: UUID
     embedding: Vector | HalfVector
-    authz: list[str]
+    authz: str
     metadata: dict | None
     created_at: datetime | None
     updated_at: datetime | None

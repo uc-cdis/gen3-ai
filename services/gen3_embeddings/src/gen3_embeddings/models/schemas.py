@@ -49,7 +49,7 @@ class PaginatedCollectionsResponse(BaseModel):
 
 class EmbeddingInfo(BaseModel):
     collection_id: int
-    authz: list[str]
+    authz: str
     metadata: dict | None = None
     self: str
 
@@ -157,7 +157,7 @@ class UpdateEmbeddingBody(BaseModel):
 
     embedding: list[float] | None = None
     metadata: dict | None = None
-    authz: list[str] | None = None
+    authz: str | None = None
 
 
 class EmbeddingToCreate(BaseModel):
@@ -174,6 +174,7 @@ class EmbeddingToCreate(BaseModel):
 
     embedding: list[float] | list[str]
     metadata: dict | None = None
+    embedding_id: UUID | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -183,6 +184,7 @@ class EmbeddingToCreate(BaseModel):
                     "source": "some_file.md",
                     "chunk_size": "1000",
                 },
+                "embedding_id": "00000000-0000-0000-0000-000000000000",
             }
         }
     }
@@ -191,8 +193,8 @@ class EmbeddingToCreate(BaseModel):
 class CreateEmbeddingsBody(BaseModel):
     """
     Data for creating embeddings in a collection.
-    authz example: "authz": ["/vectorstore/collections/my_collection", "/my/custom/path"]
+    authz example: "authz": "/vectorstore/collections/my_collection"
     """
 
-    authz: list[str] | None = None
+    authz: str | None = None
     embeddings: list[EmbeddingToCreate]

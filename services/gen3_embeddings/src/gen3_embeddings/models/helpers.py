@@ -25,6 +25,21 @@ def normalize_collection_name(name: str) -> str:
     return name
 
 
+def normalize_authz(authz: str | None) -> str | None:
+    """
+    Normalize and validate an authz string used in path or elsewhere.
+
+    - strip whitespace
+    - ensure it starts with a slash if not None or empty
+    """
+    if not authz:
+        return None
+    authz = authz.strip()
+    if authz and not authz.startswith("/"):
+        raise ValueError("authz must start with a slash (/)")
+    return authz
+
+
 def build_embedding_self_url(collection_name: str | None, embedding_id: UUID) -> str:
     """
     Build the 'self' URL for an embedding.

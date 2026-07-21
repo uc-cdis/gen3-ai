@@ -335,15 +335,10 @@ class DataAccessLayer:
         self,
         collection: Collection,
         embeddings: list[list[float]],
-        authz: list[str],
+        authz: str,
         metadata_list: list[dict] | None,
     ) -> list[Embedding]:
         """
-        TODO: why emb_vec and meta have to be string? and the vector return from
-        TODO: asyncpg.exceptions.InsufficientPrivilegeError: new row violates row-level security policy for table "embeddings"
-        the database is string instead of list of float? Current temp fix is convert
-        them to accepted format.
-
         Bulk create multiple embeddings in the given collection.
 
         Args:
@@ -363,45 +358,68 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
+        # Deduplicate within the request based on (embedding, metadata, authz)
+        unique_payload_data: list[dict] = []
+        # key -> unique index
+        seen: dict[tuple[str, str, str], int] = {}
+        # for each original index i, which unique index j it maps to
+        original_to_unique: list[int] = []
+        has_duplicates = False
+
+        for emb_vec, metadata in zip(embeddings, metadata_list):
+            # Use json.dumps with sorted keys to make metadata deterministic
+            emb_json = json.dumps(emb_vec)
+            meta_json = json.dumps(metadata or {}, sort_keys=True)
+            key = (emb_json, meta_json, authz)
+
+            if key in seen:
+                j = seen[key]
+                original_to_unique.append(j)
+                has_duplicates = True
+            else:
+                j = len(unique_payload_data)
+                original_to_unique.append(j)
+                seen[key] = j
+                unique_payload_data.append(
+                    {
+                        "collection_id": collection.id,
+                        "embedding": emb_json,
+                        "authz": authz,
+                        "metadata": metadata or {},
+                    }
+                )
+
+        if not unique_payload_data:
+            return []
+
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            """
-            Convert data in bulk to JSON, then use postgres support for JSON -> records
-            to bulk insert in a single transaction.
-            """
-            payload_data = [
-                {
-                    "collection_id": collection.id,
-                    "embedding": json.dumps(emb_vec),
-                    "authz": authz,
-                    "metadata": metadata or {},
-                }
-                for emb_vec, metadata in zip(embeddings, metadata_list)
-            ]
-
+            # Convert data in bulk to JSON, then use postgres support for JSON -> records
+            # to bulk insert in a single transaction.
             # convert the entire batch into a single JSON string
-            json_payload = json.dumps(payload_data)
+            json_payload = json.dumps(unique_payload_data)
 
             # execute one concurrent safe query
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash)
+                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
                 SELECT
                     raw.collection_id,
                     raw.embedding{cast},
                     raw.authz,
                     raw.metadata,
-                    md5(raw.embedding)::uuid
+                    md5(raw.embedding)::uuid,
+                    md5(raw.metadata::text)::uuid
                 FROM jsonb_to_recordset($1::jsonb) AS raw(
                     collection_id bigint,
                     embedding text,
-                    authz text[],
+                    authz text,
                     metadata jsonb
                 )
                 -- only return what we need back, not the embedding itself b/c it's big
                 -- and we already have it in Python
-                RETURNING embedding_id, created_at, updated_at;
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
                 """
             )
             try:
@@ -413,20 +431,25 @@ class DataAccessLayer:
                     "No embeddings were created. Use PUT to force update existing embeddings.",
                 ) from exc
 
-            results = [
-                Embedding(
-                    embedding_id=row["embedding_id"],
-                    collection_id=collection.id,
-                    embedding=emb_vec,
-                    authz=authz,
-                    metadata=meta,
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
+            if len(rows) != len(unique_payload_data):
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal error: mismatch between unique upsert results and inputs.",
                 )
-                for row, emb_vec, meta in zip(rows, embeddings, metadata_list)
-            ]
 
-            return results
+            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
+
+            if not has_duplicates:
+                # If there were no duplicates in the request, we can return the results directly
+                return unique_results
+            else:
+                # If there were duplicates in the request, we need to map back to the original order
+                results: list[Embedding] = []
+                for orig_idx in range(len(embeddings)):
+                    unique_idx = original_to_unique[orig_idx]
+                    results.append(unique_results[unique_idx])
+
+                return results
 
         return await self._with_rls(_query)
 
@@ -450,15 +473,11 @@ class DataAccessLayer:
         self,
         collection: Collection,
         embeddings: list[list[float]],
-        authz: list[str],
+        authz: str,
         metadata_list: list[dict] | None,
     ) -> list[Embedding]:
         """
         Bulk upsert multiple embeddings in the given collection.
-
-        - If an embedding (same collection_id + vector) does not exist, it is inserted.
-        - If it exists, it is updated (metadata/authz).
-        - Entire operation is transactional (all or nothing).
         """
         if metadata_list is None:
             metadata_list = [{} for _ in embeddings]
@@ -468,43 +487,63 @@ class DataAccessLayer:
                 detail="metadata_list length must match embeddings length",
             )
 
+        # Deduplicate within the request based on (embedding, metadata, authz)
+        unique_payload_data: list[dict] = []
+        # key -> unique index
+        seen: dict[tuple[str, str, str], int] = {}
+        # for each original index i, which unique index j it maps to
+        original_to_unique: list[int] = []
+        has_duplicates = False
+
+        for emb_vec, metadata in zip(embeddings, metadata_list):
+            # Use json.dumps with sorted keys to make metadata deterministic
+            emb_json = json.dumps(emb_vec)
+            meta_json = json.dumps(metadata or {}, sort_keys=True)
+            key = (emb_json, meta_json, authz)
+
+            if key in seen:
+                j = seen[key]
+                original_to_unique.append(j)
+                has_duplicates = True
+            else:
+                j = len(unique_payload_data)
+                original_to_unique.append(j)
+                seen[key] = j
+                unique_payload_data.append(
+                    {
+                        "collection_id": collection.id,
+                        "embedding": emb_json,
+                        "authz": authz,
+                        "metadata": metadata or {},
+                    }
+                )
+
+        if not unique_payload_data:
+            return []
+
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            payload_data = [
-                {
-                    "collection_id": collection.id,
-                    "embedding": json.dumps(emb_vec),
-                    "authz": authz,
-                    "metadata": metadata or {},
-                }
-                for emb_vec, metadata in zip(embeddings, metadata_list)
-            ]
+            json_payload = json.dumps(unique_payload_data)
 
-            json_payload = json.dumps(payload_data)
-
-            # Important: ON CONFLICT on (collection_id, embedding)
-            # Update authz and metadata, plus updated_at.
-            # RLS WITH CHECK enforces that the user has permission to modify rows.
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash)
+                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
                 SELECT
                     raw.collection_id,
                     raw.embedding{cast},
                     raw.authz,
                     raw.metadata,
-                    md5(raw.embedding)::uuid
+                    md5(raw.embedding)::uuid AS embedding_hash,
+                    md5(raw.metadata::text)::uuid AS metadata_hash
                 FROM jsonb_to_recordset($1::jsonb) AS raw(
                     collection_id bigint,
                     embedding text,
-                    authz text[],
+                    authz text,
                     metadata jsonb
                 )
-                ON CONFLICT (collection_id, embedding_hash)
+                ON CONFLICT (collection_id, embedding_hash, metadata_hash, authz)
                 DO UPDATE SET
-                    authz = EXCLUDED.authz,
-                    metadata = EXCLUDED.metadata,
                     updated_at = NOW()
                 RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
                 """
@@ -512,8 +551,25 @@ class DataAccessLayer:
             # If RLS denies insert or update, this will raise an error
             rows = await stmt.fetch(json_payload)
 
-            results = [Embedding.from_record(row) for row in rows]
-            return results
+            if len(rows) != len(unique_payload_data):
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal error: mismatch between unique upsert results and inputs.",
+                )
+
+            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
+
+            if not has_duplicates:
+                # If there were no duplicates in the request, we can return the results directly
+                return unique_results
+            else:
+                # If there were duplicates in the request, we need to map back to the original order
+                results: list[Embedding] = []
+                for orig_idx in range(len(embeddings)):
+                    unique_idx = original_to_unique[orig_idx]
+                    results.append(unique_results[unique_idx])
+
+                return results
 
         return await self._with_rls(_query)
 
@@ -523,9 +579,18 @@ class DataAccessLayer:
         embedding_id: UUID,
         embedding: list[float] | None,
         metadata: dict | None,
-        new_authz: list[str] | None = None,
+        new_authz: str | None = None,
     ) -> Embedding | None:
-        # TODO: embedding has to be string currently, look into why.
+        """
+        Update an embedding row in the appropriate embeddings_* table.
+
+        - If `embedding` is provided, update the vector and recompute embedding_hash.
+        - If `metadata` is provided, update metadata and recompute metadata_hash.
+        - If `new_authz` is provided, update authz.
+
+        The combination (collection_id, embedding_hash, metadata_hash, authz)
+        must remain unique (per the DB constraint).
+        """
         table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
@@ -533,27 +598,45 @@ class DataAccessLayer:
             params = [collection.id, embedding_id]
             param_idx = 3
 
+            # embedding: update vector and embedding_hash
             if embedding is not None:
+                # store embedding as JSON text, then cast in SQL
+                embedding_json = json.dumps(embedding)
                 set_parts.append(f"embedding = ${param_idx}{vector_cast}")
-                params.append(json.dumps(embedding))
-                # params.append(embedding)
+                params.append(embedding)
                 param_idx += 1
 
+                # recompute embedding_hash from the same JSON text representation
+                set_parts.append(f"embedding_hash = md5(${param_idx}::text)::uuid")
+                params.append(embedding_json)
+                param_idx += 1
+
+            # metadata: update metadata and metadata_hash
             if metadata is not None:
+                metadata_json = json.dumps(metadata)
                 set_parts.append(f"metadata = ${param_idx}::jsonb")
-                params.append(json.dumps(metadata))
-                # params.append(metadata)
+                params.append(metadata_json)
                 param_idx += 1
 
+                # recompute metadata_hash from metadata::text
+                set_parts.append(f"metadata_hash = md5(${param_idx}::text)::uuid")
+                params.append(metadata_json)
+                param_idx += 1
+
+            # authz: update authz
             if new_authz is not None:
-                set_parts.append(f"authz = ${param_idx}::text[]")
+                set_parts.append(f"authz = ${param_idx}::text")
                 params.append(new_authz)
                 param_idx += 1
 
             if not set_parts:
-                # nothing to update
+                # nothing to update; just read and return the existing row
                 stmt = await conn.prepare(
-                    f"SELECT * FROM {table} WHERE collection_id = $1::bigint AND embedding_id = $2::uuid"
+                    f"""
+                    SELECT *
+                    FROM {table}
+                    WHERE collection_id = $1::bigint AND embedding_id = $2::uuid
+                    """
                 )
                 row = await stmt.fetchrow(collection.id, embedding_id)
                 return Embedding.from_record(row) if row else None
@@ -568,7 +651,19 @@ class DataAccessLayer:
                 RETURNING *
                 """
             )
-            row = await stmt.fetchrow(*params)
+            try:
+                row = await stmt.fetchrow(*params)
+            except UniqueViolationError as exc:
+                # updating caused a collision with another row that has the same
+                # (collection_id, embedding_hash, metadata_hash, authz)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Update would create a duplicate embedding "
+                        "with same vector, metadata, and authz in this collection."
+                    ),
+                ) from exc
+
             return Embedding.from_record(row) if row else None
 
         return await self._with_rls(_query)

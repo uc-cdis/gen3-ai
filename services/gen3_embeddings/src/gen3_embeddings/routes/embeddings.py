@@ -18,6 +18,7 @@ from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_binary_result,
     embedding_to_result,
+    normalize_authz,
 )
 from gen3_embeddings.models.schemas import (
     CreateEmbeddingsBody,
@@ -126,14 +127,15 @@ async def update_embedding_in_collection(
         raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
     # If authz is being updated, check update permission on new authz paths
-    if body.authz is not None:
-        if body.authz == []:
+    authz = normalize_authz(body.authz)
+    if authz is not None:
+        if authz == "":
             raise HTTPException(status_code=400, detail="authz cannot be empty when provided")
 
         await authorize_request(
             request=request,
             authz_access_method="update",
-            authz_resources=body.authz,
+            authz_resources=authz,
         )
 
     emb = await dal.update_embedding(
@@ -141,7 +143,7 @@ async def update_embedding_in_collection(
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
-        new_authz=body.authz,
+        new_authz=authz,
     )
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
@@ -172,11 +174,11 @@ async def put_embeddings_in_collection(
     """
     TODO: implementaion for StringArrayInput and ai_model
 
-    Create or update one or more embeddings in a specific collection. If an embedding already exists (same vector), update its metadata/authz. If it does not exist, create it. Entire request is all-or-nothing.
+    Create or update one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
 
-    - If `body.authz` is provided (list of authz paths), use those authz paths for all embeddings.
+    - If `body.authz` is provided, use the authz path for all embeddings.
     - If not provided, default authz is `/vectorstore/collections/{collection_name}`.
     - Check `create` and `update` permissions on:
         - the collection authz path, and
@@ -206,7 +208,7 @@ async def put_embeddings_in_collection(
         raise HTTPException(status_code=400, detail="embeddings must be a non-empty array")
 
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
-    embedding_authz_paths = body.authz or [default_collection_authz]
+    embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
     # 1) Check 'create' and 'update' on collection
     logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
@@ -222,21 +224,22 @@ async def put_embeddings_in_collection(
     )
 
     # 2) Check 'create' and 'update' on embedding authz paths
-    if embedding_authz_paths != [default_collection_authz]:
-        logging.debug(f"authorize_request for `create` and `update` on embedding authz paths {embedding_authz_paths}")
+    if embedding_authz_path != default_collection_authz:
+        logging.debug(f"authorize_request for `create` and `update` on embedding authz paths {embedding_authz_path}")
         await authorize_request(
             request=request,
             authz_access_method="create",
-            authz_resources=embedding_authz_paths,
+            authz_resources=[embedding_authz_path],
         )
         await authorize_request(
             request=request,
             authz_access_method="update",
-            authz_resources=embedding_authz_paths,
+            authz_resources=[embedding_authz_path],
         )
 
-    vectors: list[list[float]] = []
-    metadata_list: list[dict] = []
+    vectors_no_id: list[list[float]] = []
+    metadata_list_no_id: list[dict] = []
+    items_with_id: list[tuple[UUID, list[float], dict]] = []
 
     for item in body.embeddings:
         emb = item.embedding
@@ -248,20 +251,57 @@ async def put_embeddings_in_collection(
                 detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
             )
 
-        vectors.append([float(x) for x in emb])
-        metadata_list.append(meta)
+        emb_vector = [float(x) for x in emb]
+
+        if item.embedding_id is not None:
+            items_with_id.append((item.embedding_id, emb_vector, meta))
+        else:
+            vectors_no_id.append(emb_vector)
+            metadata_list_no_id.append(meta)
 
     logging.debug(f"PUT (upsert) embeddings in collection.id: `{collection.id}`...")
 
-    created_or_updated = await dal.upsert_embeddings_bulk(
-        collection=collection,
-        embeddings=vectors,
-        authz=embedding_authz_paths,
-        metadata_list=metadata_list,
-    )
+    updated_from_ids = []
+    for i, (emb_id, emb_vec, meta) in enumerate(items_with_id):
+        emb = await dal.update_embedding(
+            collection=collection,
+            embedding_id=emb_id,
+            embedding=emb_vec,
+            metadata=meta,
+            new_authz=embedding_authz_path,
+        )
+        if not emb:
+            # If embedding_id not found or RLS denied
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to update embedding with id {emb_id}",
+            )
+        updated_from_ids.append(emb)
+
+    created_or_updated = []
+    if vectors_no_id:
+        created_or_updated = await dal.upsert_embeddings_bulk(
+            collection=collection,
+            embeddings=vectors_no_id,
+            authz=embedding_authz_path,
+            metadata_list=metadata_list_no_id,
+        )
 
     results: list[SingleEmbeddingResult] = []
-    for i, emb in enumerate(created_or_updated):
+
+    # Iterate again over body.embeddings and map each to either updated_from_ids
+    # or created_or_updated in the same order.
+    id_idx = 0
+    noid_idx = 0
+
+    for i, item in enumerate(body.embeddings):
+        if item.embedding_id is not None:
+            emb = updated_from_ids[id_idx]
+            id_idx += 1
+        else:
+            emb = created_or_updated[noid_idx]
+            noid_idx += 1
+
         results.append(
             embedding_to_result(
                 emb=emb,
@@ -445,7 +485,7 @@ async def create_embeddings_in_collection(
         raise HTTPException(status_code=400, detail="embeddings must be a non-empty array")
 
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
-    embedding_authz_paths = body.authz or [default_collection_authz]
+    embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
     # 1) Check create on collection authz
     logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
@@ -457,11 +497,11 @@ async def create_embeddings_in_collection(
 
     # 2) Check create on embedding authz paths
     logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
-    if embedding_authz_paths != [default_collection_authz]:
+    if embedding_authz_path != default_collection_authz:
         await authorize_request(
             request=request,
             authz_access_method="create",
-            authz_resources=embedding_authz_paths,
+            authz_resources=[embedding_authz_path],
         )
 
     vectors: list[list[float]] = []
@@ -486,7 +526,7 @@ async def create_embeddings_in_collection(
     created = await dal.create_embeddings_bulk(
         collection=collection,
         embeddings=vectors,
-        authz=embedding_authz_paths,
+        authz=embedding_authz_path,
         metadata_list=metadata_list,
     )
 

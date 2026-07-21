@@ -65,8 +65,9 @@ CREATE TABLE IF NOT EXISTS embeddings_vector (
 
   embedding VECTOR NOT NULL,
   embedding_hash UUID NOT NULL,
-  authz TEXT [] NOT NULL,
+  authz TEXT NOT NULL,
   metadata JSONB DEFAULT '{}'::JSONB,
+  metadata_hash UUID,
 
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
@@ -82,8 +83,9 @@ CREATE TABLE IF NOT EXISTS embeddings_halfvec (
 
   embedding HALFVEC NOT NULL,
   embedding_hash UUID NOT NULL,
-  authz TEXT [] NOT NULL,
+  authz TEXT NOT NULL,
   metadata JSONB DEFAULT '{}'::JSONB,
+  metadata_hash UUID,
 
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
@@ -110,12 +112,12 @@ ON embeddings_vector USING gin (metadata);
 CREATE INDEX IF NOT EXISTS idx_embeddings_halfvec_metadata_gin
 ON embeddings_halfvec USING gin (metadata);
 
--- on authz tags for faster filtering, similar to above
-CREATE INDEX IF NOT EXISTS idx_embeddings_vector_authz_gin
-ON embeddings_vector USING gin (authz);
+-- on authz tags for faster filtering
+CREATE INDEX IF NOT EXISTS idx_embeddings_vector_authz
+ON embeddings_vector (authz);
 
-CREATE INDEX IF NOT EXISTS idx_embeddings_halfvec_authz_gin
-ON embeddings_halfvec USING gin (authz);
+CREATE INDEX IF NOT EXISTS idx_embeddings_halfvec_authz
+ON embeddings_halfvec (authz);
 
 -- row level security will enforce authz
 ALTER TABLE embeddings_vector ENABLE ROW LEVEL SECURITY;
@@ -124,10 +126,10 @@ ALTER TABLE embeddings_halfvec ENABLE ROW LEVEL SECURITY;
 -- Enforce no duplicate embeddings in the same collection for vector type
 ALTER TABLE embeddings_vector
 ADD CONSTRAINT embeddings_vector_uniq_collection_embhash
-UNIQUE (collection_id, embedding_hash);
+UNIQUE (collection_id, embedding_hash, metadata_hash, authz);
 ALTER TABLE embeddings_halfvec
 ADD CONSTRAINT embeddings_halfvec_uniq_collection_embhash
-UNIQUE (collection_id, embedding_hash);
+UNIQUE (collection_id, embedding_hash, metadata_hash, authz);
 
 -- we can use row level security by setting a local var in
 -- postgres and then reading it here. so before this, we SET LOCAL
@@ -144,10 +146,10 @@ BEGIN
   ) THEN
     CREATE POLICY authz_policy_vector ON embeddings_vector
       USING (
-        authz && current_setting('app.allowed_authz', true)::text[]
+        authz = ANY(current_setting('app.allowed_authz', true)::text[])
       )
       WITH CHECK (
-        authz && current_setting('app.allowed_authz', true)::text[]
+        authz = ANY(current_setting('app.allowed_authz', true)::text[])
       );
   END IF;
 END;
@@ -164,10 +166,10 @@ BEGIN
   ) THEN
     CREATE POLICY authz_policy_halfvec ON embeddings_halfvec
       USING (
-        authz && current_setting('app.allowed_authz', true)::text[]
+        authz = ANY(current_setting('app.allowed_authz', true)::text[])
       )
       WITH CHECK (
-        authz && current_setting('app.allowed_authz', true)::text[]
+        authz = ANY(current_setting('app.allowed_authz', true)::text[])
       );
   END IF;
 END;
