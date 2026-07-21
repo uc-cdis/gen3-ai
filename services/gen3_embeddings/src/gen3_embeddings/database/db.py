@@ -112,7 +112,10 @@ async def get_pool():
     global _pool
     if _pool is None:
         _pool = await asyncpg.create_pool(
-            str(config.DB_CONNECTION_STRING), min_size=10, max_size=10, init=register_vector
+            str(config.DB_CONNECTION_STRING),
+            min_size=config.PGPOOL_MIN_SIZE,
+            max_size=config.PGPOOL_MAX_SIZE,
+            init=register_vector,
         )
     return _pool
 

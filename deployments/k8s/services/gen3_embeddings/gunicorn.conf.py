@@ -8,6 +8,7 @@ from gen3_embeddings.config import (
     # OTEL_EXPORTER_OTLP_ENDPOINT,
     DEBUG,
     VERBOSE_INTERNAL_LOGS,
+    GUNICORN_WORKERS,
 )
 # from opentelemetry import trace
 # from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
@@ -116,7 +117,7 @@ logger_class = CustomLogger
 bind = "0.0.0.0:4142"
 
 # override with ENV VAR: GUNICORN_WORKERS
-workers = 4
+workers = GUNICORN_WORKERS
 
 # default was `30` for the 2 below
 # can override with ENV VAR: GUNICORN_ARGS="--timeout 120 --graceful_timeout 120"

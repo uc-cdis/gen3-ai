@@ -9,6 +9,9 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
+# gunicorn setting for the number of workers to spawn, see https://docs.gunicorn.org/en/stable/settings.html#workers
+GUNICORN_WORKERS = starlette_config("GUNICORN_WORKERS", cast=int, default="1")
+
 DEFAULT_PAGE_SIZE = starlette_config("DEFAULT_PAGE_SIZE", default=100)
 MAX_PAGE_SIZE = starlette_config("MAX_PAGE_SIZE", default=1000)
 
@@ -18,6 +21,9 @@ PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default=None)
 PGHOST = starlette_config("PGHOST", default="localhost")
 PGPORT = starlette_config("PGPORT", cast=int, default="5432")
 PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
+
+PGPOOL_MIN_SIZE = starlette_config("PGPOOL_MIN_SIZE", cast=int, default="1")
+PGPOOL_MAX_SIZE = starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5")
 
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
