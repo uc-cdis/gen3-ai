@@ -18,3 +18,4 @@ def test_openapi_includes_model_routes():
     assert "/api/models" in paths
     assert "/api/models/{namespace}/{repo}" in paths
     assert "/api/models/{namespace}/{repo}/revisions" in paths
+    assert "patch" in paths["/api/models/{namespace}/{repo}"]

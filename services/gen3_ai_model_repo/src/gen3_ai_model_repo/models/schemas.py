@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RepositoryModel(BaseModel):
@@ -8,7 +8,7 @@ class RepositoryModel(BaseModel):
 
     id: str
     description: str
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
 
 
@@ -26,7 +26,7 @@ class RepositoryMetadataModel(BaseModel):
     namespace: str
     repo: str
     description: str | None = None
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
 
 
@@ -120,7 +120,7 @@ class FileMetadataModel(BaseModel):
     size: int
     sha: str | None = None
     etag: str | None = None
-    s3_key: str
+    object_key: str
 
 
 class FileListResponseModel(BaseModel):

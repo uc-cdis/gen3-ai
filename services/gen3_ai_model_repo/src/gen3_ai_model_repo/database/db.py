@@ -4,6 +4,7 @@ from datetime import datetime
 import asyncpg
 
 from gen3_ai_model_repo.config import (
+    DB_CONNECTION_STRING,
     DB_DATABASE,
     DB_HOST,
     DB_PASSWORD,
@@ -24,15 +25,24 @@ async def connect_db():
 
     logging.info("Connecting to PostgreSQL")
 
-    db_pool = await asyncpg.create_pool(
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_DATABASE,
-        host=DB_HOST,
-        port=DB_PORT,
-        min_size=10,
-        max_size=10,
-    )
+    connection_uri = str(DB_CONNECTION_STRING) if DB_CONNECTION_STRING else ""
+
+    if connection_uri:
+        db_pool = await asyncpg.create_pool(
+            dsn=connection_uri,
+            min_size=10,
+            max_size=10,
+        )
+    else:
+        db_pool = await asyncpg.create_pool(
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_DATABASE,
+            host=DB_HOST,
+            port=DB_PORT,
+            min_size=10,
+            max_size=10,
+        )
 
     logging.info("PostgreSQL connection pool initialized")
 

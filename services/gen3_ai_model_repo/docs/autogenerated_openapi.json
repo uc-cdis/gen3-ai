@@ -4,5 +4,2167 @@
     "title": "Gen3 AI Model Repository Service",
     "version": "0.1.0"
   },
-  "paths": {}
+  "paths": {
+    "/api/models/{namespace}/{repo}/tree/{rev}/{path}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List repository path contents",
+        "description": "Return a flat list of entries for the specified path in the repository.",
+        "operationId": "list_repo_tree_api_models__namespace___repo__tree__rev___path__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rev"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "If true, return commit data and minimal security info",
+              "default": false,
+              "title": "Expand"
+            },
+            "description": "If true, return commit data and minimal security info"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved path listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TreeEntryModel"
+                  },
+                  "title": "Response List Repo Tree Api Models  Namespace   Repo  Tree  Rev   Path  Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository or path not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/tree/{rev}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List repository directory contents",
+        "description": "Return a flat list of entries for the repository. The output matches the structure documented by Hugging Face.",
+        "operationId": "list_repo_tree_api_models__namespace___repo__tree__rev__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rev"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "If true, return commit data and minimal security info",
+              "default": false,
+              "title": "Expand"
+            },
+            "description": "If true, return commit data and minimal security info"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved directory listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TreeEntryModel"
+                  },
+                  "title": "Response List Repo Tree Api Models  Namespace   Repo  Tree  Rev  Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository or path not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/revision/{rev}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get revision metadata",
+        "description": "Retrieve detailed metadata for a specific revision of a model repository.",
+        "operationId": "get_revision_api_models__namespace___repo__revision__rev__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rev"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionModel"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Revision not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/revisions/{revision}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get revision metadata",
+        "description": "Retrieve revision metadata by revision name.",
+        "operationId": "get_model_revision_api_models__namespace___repo__revisions__revision__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Delete Model Revision",
+        "description": "Delete a revision and all files tracked under it.",
+        "operationId": "delete_model_revision_api_models__namespace___repo__revisions__revision__delete",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/resolve/{rev}/{path}": {
+      "head": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get file metadata without downloading",
+        "description": "Retrieve file metadata (size, hash, signed URL) without downloading the full file content.",
+        "operationId": "head_file_api_models__namespace___repo__resolve__rev___path__head",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rev"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to signed URL with metadata headers"
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Download model file with redirect",
+        "description": "Retrieve a model file from a specific revision. Returns a redirect to a signed URL for file download.",
+        "operationId": "get_file_api_models__namespace___repo__resolve__rev___path__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "rev",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rev"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "302": {
+            "description": "Redirect to signed URL for file download"
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/files": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List Model Files",
+        "description": "List tracked files for a repository revision.",
+        "operationId": "list_model_files_api_models__namespace___repo__files_get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/files/{file_id}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get Model File",
+        "description": "Retrieve file metadata from a repository using a file identifier.",
+        "operationId": "get_model_file_api_models__namespace___repo__files__file_id__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadataModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Delete Model File",
+        "description": "Delete a tracked file from a repository revision.",
+        "operationId": "delete_model_file_api_models__namespace___repo__files__file_id__delete",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/signed-url/{path}": {
+      "get": {
+        "tags": [
+          "Files"
+        ],
+        "summary": "Stream file content",
+        "description": "Stream file content for download. This endpoint serves files in chunks with proper Content-Length header for large file support.",
+        "operationId": "signed_url_signed_url__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content streamed successfully",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List all model repositories",
+        "description": "Retrieve a list of all available model repositories with basic metadata.",
+        "operationId": "list_models_route_api_models_get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tags"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved repository list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepositoryModel"
+                  },
+                  "title": "Response List Models Route Api Models Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get Repository",
+        "description": "Retrieve repository information, main revision metadata, and tracked files.",
+        "operationId": "get_repository_api_models__namespace___repo__get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryInfoModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Create Repository",
+        "description": "Create repository metadata for a new repository.",
+        "operationId": "create_repository_api_models__namespace___repo__post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryMetadataModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Update repository metadata",
+        "description": "Update mutable metadata fields for a repository.",
+        "operationId": "update_repository_api_models__namespace___repo__patch",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryMetadataModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Delete a model repository",
+        "description": "Delete a model repository including its metadata from the database and files from disk.",
+        "operationId": "delete_model_api_models__namespace___repo__delete",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteModelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Repository not found"
+          },
+          "500": {
+            "description": "Failed to delete repository"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/revisions": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List model revisions",
+        "description": "Retrieve all revisions of a model repository from the database.",
+        "operationId": "list_model_revisions_api_models__namespace___repo__revisions_get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved revision list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionListResponseModel"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Repository not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Create revision",
+        "description": "Create a revision for an existing repository.",
+        "operationId": "create_model_revision_api_models__namespace___repo__revisions_post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/info": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get model repository information",
+        "description": "Retrieve comprehensive information about a model repository including metadata, files, and revision info.",
+        "operationId": "get_model_info_api_models__namespace___repo__info_get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved model information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryInfoModel"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository or metadata not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/upload": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Upload Model",
+        "description": "Upload one or more files and create a repository revision.",
+        "operationId": "upload_model_api_models__namespace___repo__upload_post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_model_api_models__namespace___repo__upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartUploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/upload-url": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Generate Upload Url",
+        "description": "Generate a storage upload URL for a file in a revision.",
+        "operationId": "generate_upload_url_api_models__namespace___repo__upload_url_post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadUrlRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/complete-upload": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Complete Upload",
+        "description": "Finalize an upload by creating/updating revision and file tracking records.",
+        "operationId": "complete_upload_api_models__namespace___repo__complete_upload_post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/storage/verify": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Verify Storage",
+        "description": "Verify the existence and size of files at a storage prefix.\n\nQueries the configured storage backend for all files under the given prefix,\ncounts them, and sums their sizes.\n\nArgs:\n    request: Contains the storage_prefix to inspect.\n    _: Authorization dependency validated by FastAPI.\n\nReturns:\n    StorageVerifyResponse with existence flag, file count, and total size.",
+        "operationId": "verify_storage_api_storage_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageVerifyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/storage/download-url": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Storage Download Url",
+        "description": "Generate a pre-signed download URL for a storage object.\n\nArgs:\n    request: Contains the object_key identifying the target file.\n    _: Authorization dependency validated by FastAPI.\n\nReturns:\n    StorageDownloadUrlResponse containing the pre-signed URL.",
+        "operationId": "storage_download_url_api_storage_download_url_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageDownloadUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageDownloadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_upload_model_api_models__namespace___repo__upload_post": {
+        "properties": {
+          "revision_name": {
+            "type": "string",
+            "title": "Revision Name",
+            "default": "main"
+          },
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_model_api_models__namespace___repo__upload_post"
+      },
+      "DeleteModelResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "repo"
+        ],
+        "title": "DeleteModelResponse",
+        "description": "Response payload for delete operations."
+      },
+      "FileListResponseModel": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileMetadataModel"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "files"
+        ],
+        "title": "FileListResponseModel",
+        "description": "Response payload containing a list of file metadata entries."
+      },
+      "FileMetadataModel": {
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "title": "File Id"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          },
+          "object_key": {
+            "type": "string",
+            "title": "Object Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_id",
+          "path",
+          "size",
+          "object_key"
+        ],
+        "title": "FileMetadataModel",
+        "description": "Metadata describing a stored file."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MultipartUploadResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files"
+          },
+          "total_size": {
+            "type": "integer",
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "repo",
+          "revision",
+          "files",
+          "total_size"
+        ],
+        "title": "MultipartUploadResponse",
+        "description": "Response payload for multipart model uploads.\n\nAttributes:\n    status: Upload status string.\n    repo: Repository identifier in namespace/repo form.\n    revision: Revision name associated with the upload.\n    files: Number of uploaded files.\n    total_size: Total uploaded size in bytes."
+      },
+      "RepositoryCreateRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "title": "RepositoryCreateRequest",
+        "description": "Request payload for creating a repository.\n\nAttributes:\n    description: Optional human-readable repository description.\n    tags: Optional list of tags used for filtering and discovery."
+      },
+      "RepositoryFileModel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "oid": {
+            "type": "string",
+            "title": "Oid"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "oid",
+          "size"
+        ],
+        "title": "RepositoryFileModel",
+        "description": "A file entry included in repository metadata."
+      },
+      "RepositoryInfoModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryFileModel"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/RepositoryMetadataModel"
+          },
+          "security_status": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Security Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sha",
+          "etag",
+          "size",
+          "files",
+          "metadata",
+          "security_status"
+        ],
+        "title": "RepositoryInfoModel",
+        "description": "Detailed repository information returned by the API."
+      },
+      "RepositoryMetadataModel": {
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "namespace",
+          "repo"
+        ],
+        "title": "RepositoryMetadataModel",
+        "description": "Metadata describing a repository and its current state."
+      },
+      "RepositoryModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "description"
+        ],
+        "title": "RepositoryModel",
+        "description": "Repository information returned by the API."
+      },
+      "RepositoryUpdateRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "title": "RepositoryUpdateRequest",
+        "description": "Request payload for updating repository metadata fields."
+      },
+      "RevisionCreateRequest": {
+        "properties": {
+          "revision_name": {
+            "type": "string",
+            "title": "Revision Name",
+            "default": "main"
+          },
+          "revision_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Identifier"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "title": "RevisionCreateRequest",
+        "description": "Request payload for creating a revision."
+      },
+      "RevisionDeleteResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "repo",
+          "revision"
+        ],
+        "title": "RevisionDeleteResponse",
+        "description": "Response payload for revision deletion."
+      },
+      "RevisionListResponseModel": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionModel"
+            },
+            "type": "array",
+            "title": "Revisions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "revisions"
+        ],
+        "title": "RevisionListResponseModel",
+        "description": "Response payload containing a list of revisions."
+      },
+      "RevisionModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "sha"
+        ],
+        "title": "RevisionModel",
+        "description": "Revision metadata for a repository revision."
+      },
+      "StorageDownloadUrlRequest": {
+        "properties": {
+          "object_key": {
+            "type": "string",
+            "title": "Object Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "object_key"
+        ],
+        "title": "StorageDownloadUrlRequest",
+        "description": "Request payload for generating a pre-signed download URL.\n\nAttributes:\n    object_key: Full object key identifying the file in the storage backend."
+      },
+      "StorageDownloadUrlResponse": {
+        "properties": {
+          "presigned_url": {
+            "type": "string",
+            "title": "Presigned Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "presigned_url"
+        ],
+        "title": "StorageDownloadUrlResponse",
+        "description": "Response payload containing a pre-signed download URL.\n\nAttributes:\n    presigned_url: Time-limited URL granting direct access to the object."
+      },
+      "StorageVerifyRequest": {
+        "properties": {
+          "storage_prefix": {
+            "type": "string",
+            "title": "Storage Prefix"
+          }
+        },
+        "type": "object",
+        "required": [
+          "storage_prefix"
+        ],
+        "title": "StorageVerifyRequest",
+        "description": "Request payload for verifying storage contents at a prefix.\n\nAttributes:\n    storage_prefix: Path prefix to inspect inside the storage backend."
+      },
+      "StorageVerifyResponse": {
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "file_count": {
+            "type": "integer",
+            "title": "File Count"
+          },
+          "total_size": {
+            "type": "integer",
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exists",
+          "file_count",
+          "total_size"
+        ],
+        "title": "StorageVerifyResponse",
+        "description": "Response payload describing the state of a storage prefix.\n\nAttributes:\n    exists: True if at least one file exists at the prefix.\n    file_count: Number of files found under the prefix.\n    total_size: Aggregate size in bytes of all files under the prefix."
+      },
+      "TreeEntryModel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "oid": {
+            "type": "string",
+            "title": "Oid"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "oid",
+          "size"
+        ],
+        "title": "TreeEntryModel",
+        "description": "Tree entry describing a file in a repository tree."
+      },
+      "UploadUrlRequest": {
+        "properties": {
+          "revision_name": {
+            "type": "string",
+            "title": "Revision Name",
+            "default": "main"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_name"
+        ],
+        "title": "UploadUrlRequest",
+        "description": "Request payload for generating an upload URL."
+      },
+      "UploadUrlResponse": {
+        "properties": {
+          "upload_url": {
+            "type": "string",
+            "title": "Upload Url"
+          },
+          "object_key": {
+            "type": "string",
+            "title": "Object Key"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "PUT"
+          }
+        },
+        "type": "object",
+        "required": [
+          "upload_url",
+          "object_key"
+        ],
+        "title": "UploadUrlResponse",
+        "description": "Response payload containing an upload URL and object key."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
 }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RepositoryCreateRequest(BaseModel):
@@ -11,7 +11,14 @@ class RepositoryCreateRequest(BaseModel):
     """
 
     description: str | None = None
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
+
+
+class RepositoryUpdateRequest(BaseModel):
+    """Request payload for updating repository metadata fields."""
+
+    description: str | None = None
+    tags: list[str] | None = None
 
 
 class MultipartUploadResponse(BaseModel):

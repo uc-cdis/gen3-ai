@@ -5,6 +5,11 @@ class StorageProvider(ABC):
     """Base storage provider interface."""
 
     @abstractmethod
+    async def ensure_container(self):
+        """Ensure backing container (bucket/root directory) exists."""
+        pass
+
+    @abstractmethod
     async def upload_file(
         self,
         local_path: str,

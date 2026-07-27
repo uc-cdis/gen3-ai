@@ -9,4 +9,4 @@ def build_head_response(commit_hash: str, etag: str, size: int, signed_url: str)
         "X-Linked-Size": str(size),
         "Location": signed_url,
     }
-    return RedirectResponse(url=signed_url, headers=headers)
+    return RedirectResponse(url=signed_url, headers=headers, status_code=302)

@@ -14,6 +14,10 @@ class LocalStorageProvider(StorageProvider):
         """Initialize the provider with a root directory for file storage."""
         self.root_directory = Path(root_directory)
 
+    async def ensure_container(self):
+        """Ensure the local root directory exists."""
+        self.root_directory.mkdir(parents=True, exist_ok=True)
+
     async def upload_file(
         self,
         local_path: str,

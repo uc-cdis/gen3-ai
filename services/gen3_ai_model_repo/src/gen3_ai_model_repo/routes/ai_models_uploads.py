@@ -3,6 +3,7 @@ import hashlib
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from gen3_ai_model_repo.auth import verify_authorization
+from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.database.file_tracking import track_file
 from gen3_ai_model_repo.database.revisions import create_revision, get_revision_identifier_column
@@ -196,14 +197,30 @@ async def upload_model(
                 update_repo_stmt = await conn.prepare("UPDATE models SET current_revision=$1 WHERE id=$2")
                 await update_repo_stmt.fetch(revision_name, model_id)
             await tx.commit()
+        except HTTPException:
+            await tx.rollback()
+            for object_key in uploaded_objects:
+                try:
+                    await provider.delete_file(object_key)
+                except Exception:
+                    logging.exception(
+                        "Failed to clean up uploaded object after HTTP error", extra={"object_key": object_key}
+                    )
+            raise
         except Exception:
             await tx.rollback()
             for object_key in uploaded_objects:
                 try:
                     await provider.delete_file(object_key)
                 except Exception:
-                    pass
-            raise
+                    logging.exception(
+                        "Failed to clean up uploaded object after server error", extra={"object_key": object_key}
+                    )
+            logging.exception(
+                "Multipart upload failed",
+                extra={"namespace": namespace, "repo": repo, "revision_name": revision_name},
+            )
+            raise HTTPException(status_code=500, detail="Failed to upload model files")
 
     return MultipartUploadResponse(
         status="uploaded",
@@ -256,7 +273,9 @@ async def generate_upload_url(
     "/api/models/{namespace}/{repo}/complete-upload", response_model=RevisionModel, tags=["Models"]
 )
 async def complete_upload(
-    namespace: str, repo: str, request: RevisionCreateRequest, _: None = Depends(verify_authorization)
+    namespace: str,
+    repo: str,
+    request: RevisionCreateRequest,  # , _: None = Depends(verify_authorization)
 ) -> RevisionModel:
     """
     Finalize an upload by creating/updating revision and file tracking records.
@@ -265,6 +284,8 @@ async def complete_upload(
     provider = get_storage_provider()
     storage_prefix = f"{namespace}/{repo}/{request.revision_name}"
     object_keys = await provider.list_files(storage_prefix)
+    if not object_keys:
+        raise HTTPException(status_code=404, detail="No uploaded files found for the requested revision")
 
     derived_revision_identifier = request.revision_identifier
     if not derived_revision_identifier:

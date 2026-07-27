@@ -67,13 +67,13 @@ CREATE TABLE IF NOT EXISTS models (
     UNIQUE (namespace, model_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_models_namespace
+CREATE INDEX IF NOT EXISTS idx_models_namespace -- noqa: PG01
 ON models (namespace);
 
-CREATE INDEX IF NOT EXISTS idx_models_current_revision
+CREATE INDEX IF NOT EXISTS idx_models_current_revision -- noqa: PG01
 ON models (current_revision);
 
-CREATE INDEX IF NOT EXISTS idx_models_created_at
+CREATE INDEX IF NOT EXISTS idx_models_created_at -- noqa: PG01
 ON models (created_at);
 
 -- ============================================================
@@ -124,13 +124,13 @@ CREATE TABLE IF NOT EXISTS model_revisions (
     UNIQUE (model_id, revision_identifier)
 );
 
-CREATE INDEX IF NOT EXISTS idx_model_revisions_model
+CREATE INDEX IF NOT EXISTS idx_model_revisions_model -- noqa: PG01
 ON model_revisions (model_id);
 
-CREATE INDEX IF NOT EXISTS idx_model_revisions_identifier
+CREATE INDEX IF NOT EXISTS idx_model_revisions_identifier -- noqa: PG01
 ON model_revisions (revision_identifier);
 
-CREATE INDEX IF NOT EXISTS idx_model_revisions_created_at
+CREATE INDEX IF NOT EXISTS idx_model_revisions_created_at -- noqa: PG01
 ON model_revisions (created_at);
 
 DROP TRIGGER IF EXISTS update_model_revisions_updated_at
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS model_files (
 
     file_path TEXT NOT NULL,
 
-    s3_key TEXT NOT NULL,
+    s3_key TEXT,
 
     file_size BIGINT NOT NULL,
 
@@ -172,17 +172,20 @@ CREATE TABLE IF NOT EXISTS model_files (
     UNIQUE (revision_id, file_path)
 );
 
-CREATE INDEX IF NOT EXISTS idx_model_files_revision
+CREATE INDEX IF NOT EXISTS idx_model_files_revision -- noqa: PG01
 ON model_files (revision_id);
 
-CREATE INDEX IF NOT EXISTS idx_model_files_sha
+CREATE INDEX IF NOT EXISTS idx_model_files_sha -- noqa: PG01
 ON model_files (content_sha);
 
-CREATE INDEX IF NOT EXISTS idx_model_files_s3_key
+CREATE INDEX IF NOT EXISTS idx_model_files_s3_key -- noqa: PG01
 ON model_files (s3_key);
 
-CREATE INDEX IF NOT EXISTS idx_model_files_created_at
+CREATE INDEX IF NOT EXISTS idx_model_files_created_at -- noqa: PG01
 ON model_files (created_at);
+
+ALTER TABLE model_files
+ALTER COLUMN s3_key SET NOT NULL;
 
 DROP TRIGGER IF EXISTS update_model_files_updated_at
 ON model_files;

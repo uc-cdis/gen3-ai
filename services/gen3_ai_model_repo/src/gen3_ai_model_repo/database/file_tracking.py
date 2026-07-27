@@ -242,6 +242,7 @@ async def get_file_record(
         "size": row["file_size"],
         "sha": row["content_sha"],
         "etag": row["content_etag"],
+        "object_key": row["s3_key"] if has_s3_key else f"{namespace}/{model_name}/{revision_name}/{file_path}",
         "s3_key": row["s3_key"] if has_s3_key else f"{namespace}/{model_name}/{revision_name}/{file_path}",
     }
 

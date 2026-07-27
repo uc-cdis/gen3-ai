@@ -14,16 +14,30 @@ class MinioStorageProvider(StorageProvider):
         access_key: str,
         secret_key: str,
         bucket_name: str,
+        secure: bool = False,
+        create_bucket_if_missing: bool = True,
     ):
         """Initialize the provider with MinIO connection settings."""
         self.bucket_name = bucket_name
+        self.create_bucket_if_missing = create_bucket_if_missing
 
         self.client = Minio(
             endpoint,
             access_key=access_key,
             secret_key=secret_key,
-            secure=False,
+            secure=secure,
         )
+
+    async def ensure_container(self):
+        """Ensure the configured MinIO bucket exists."""
+        if self.client.bucket_exists(self.bucket_name):
+            return
+
+        if self.create_bucket_if_missing:
+            self.client.make_bucket(self.bucket_name)
+            return
+
+        raise FileNotFoundError(f"Bucket does not exist: {self.bucket_name}")
 
     async def upload_file(
         self,

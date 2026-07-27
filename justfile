@@ -302,6 +302,12 @@ db_setup SERVICE="all": _check_dependencies
         fi
 
         service_name="{{SERVICE}}"
+        if [[ -z "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" ]]; then export PGDATABASE="${DB_DATABASE}"; fi
+        if [[ -z "${DB_DATABASE:-}" && -n "${PGDATABASE:-}" ]]; then export DB_DATABASE="${PGDATABASE}"; fi
+        if [[ -n "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" && "${PGDATABASE}" != "${DB_DATABASE}" ]]; then
+            echo -e "${RED}** ERROR: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Align them in services/{{SERVICE}}/.env **${RESET}"
+            exit 1
+        fi
         set_postgres_defaults
         psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" 2>/dev/null || echo "Database exists."
     fi
@@ -461,6 +467,7 @@ sql_lint SERVICE="all" EXTRA_ARG="": _check_dependencies
     set -euo pipefail
     source scripts/.justfile_helpers.bash
     print_header "just run:" "running" "{{SERVICE}}" "service..."
+    if [ "{{SERVICE}}" != "gen3_inference" ]; then just db_setup "{{SERVICE}}"; fi
     export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
     uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
 
@@ -494,6 +501,12 @@ _run_dbmate SERVICE ACTION ARGS="":
     fi
 
     service_name="{{SERVICE}}"
+    if [[ -z "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" ]]; then export PGDATABASE="${DB_DATABASE}"; fi
+    if [[ -z "${DB_DATABASE:-}" && -n "${PGDATABASE:-}" ]]; then export DB_DATABASE="${PGDATABASE}"; fi
+    if [[ -n "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" && "${PGDATABASE}" != "${DB_DATABASE}" ]]; then
+        echo -e "${RED}** ERROR: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Align them in ${DIR}/.env **${RESET}"
+        exit 1
+    fi
     set_postgres_defaults
 
     MIGRATIONS_DIR="${DIR}/db/migrations"
