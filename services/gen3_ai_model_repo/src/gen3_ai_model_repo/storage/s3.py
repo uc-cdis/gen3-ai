@@ -11,11 +11,14 @@ class S3StorageProvider(StorageProvider):
         endpoint_url: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
+        create_bucket_if_missing: bool = True,
     ):
         """Initialize the provider with S3 connection settings."""
         import boto3
 
         self.bucket_name = bucket_name
+        self.region = region
+        self.create_bucket_if_missing = create_bucket_if_missing
         session = boto3.session.Session()
         self.client = session.client(
             "s3",
@@ -24,6 +27,26 @@ class S3StorageProvider(StorageProvider):
             aws_access_key_id=access_key_id or None,
             aws_secret_access_key=secret_access_key or None,
         )
+
+    async def ensure_container(self):
+        """Ensure the configured S3 bucket exists."""
+        from botocore.exceptions import ClientError
+
+        try:
+            self.client.head_bucket(Bucket=self.bucket_name)
+            return
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code", ""))
+            if error_code not in {"404", "NoSuchBucket"}:
+                raise
+
+        if not self.create_bucket_if_missing:
+            raise FileNotFoundError(f"Bucket does not exist: {self.bucket_name}")
+
+        create_kwargs: dict[str, object] = {"Bucket": self.bucket_name}
+        if self.region and self.region != "us-east-1":
+            create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": self.region}
+        self.client.create_bucket(**create_kwargs)
 
     async def upload_file(
         self,

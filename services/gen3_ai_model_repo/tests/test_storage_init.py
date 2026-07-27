@@ -15,6 +15,7 @@ def test_get_storage_provider_returns_local_provider(monkeypatch):
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
     """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+    monkeypatch.setattr(storage_helpers, "_provider_cache", None, raising=False)
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "local", raising=False)
     monkeypatch.setattr(storage_helpers, "LOCAL_STORAGE_PATH", "/tmp/gen3-models", raising=False)
@@ -31,6 +32,7 @@ def test_get_storage_provider_returns_minio_provider(monkeypatch):
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
     """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+    monkeypatch.setattr(storage_helpers, "_provider_cache", None, raising=False)
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "minio", raising=False)
     monkeypatch.setattr(storage_helpers, "MINIO_ENDPOINT", "localhost:9000", raising=False)
@@ -51,6 +53,7 @@ def test_get_storage_provider_returns_s3_provider(monkeypatch):
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
     """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+    monkeypatch.setattr(storage_helpers, "_provider_cache", None, raising=False)
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "s3", raising=False)
     monkeypatch.setattr(storage_helpers, "S3_BUCKET", "model-repo", raising=False)
@@ -71,6 +74,7 @@ def test_get_storage_provider_raises_on_unknown_provider(monkeypatch):
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch storage config values.
     """
     storage_helpers = importlib.import_module("gen3_ai_model_repo.storage.helpers")
+    monkeypatch.setattr(storage_helpers, "_provider_cache", None, raising=False)
 
     monkeypatch.setattr(storage_helpers, "STORAGE_PROVIDER", "unknown-provider", raising=False)
 

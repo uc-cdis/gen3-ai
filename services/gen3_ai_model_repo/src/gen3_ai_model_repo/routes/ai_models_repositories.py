@@ -9,12 +9,11 @@ from gen3_ai_model_repo.database.repo_metadata import (
     delete_model_metadata,
     get_model_metadata,
     list_models,
+    update_model_metadata,
 )
-from gen3_ai_model_repo.database.repo_metadata import (
-    model_exists as db_model_exists,
-)
-from gen3_ai_model_repo.database.revisions import get_or_create_revision, list_revisions
+from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import get_revision as db_get_revision
+from gen3_ai_model_repo.database.revisions import list_revisions
 from gen3_ai_model_repo.models.schemas import (
     DeleteModelResponse,
     RepositoryFileModel,
@@ -24,7 +23,7 @@ from gen3_ai_model_repo.models.schemas import (
     RevisionListResponseModel,
     RevisionModel,
 )
-from gen3_ai_model_repo.routes.ai_models_shared import RepositoryCreateRequest
+from gen3_ai_model_repo.routes.ai_models_shared import RepositoryCreateRequest, RepositoryUpdateRequest
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
 ai_models_repositories_router = APIRouter()
@@ -113,6 +112,34 @@ async def create_repository(
     )
 
 
+@ai_models_repositories_router.patch(
+    "/api/models/{namespace}/{repo}",
+    response_model=RepositoryMetadataModel,
+    summary="Update repository metadata",
+    tags=["Models"],
+)
+async def update_repository(
+    namespace: str,
+    repo: str,
+    request: RepositoryUpdateRequest,
+    # _: None = Depends(verify_authorization),
+) -> RepositoryMetadataModel:
+    """Update mutable metadata fields for a repository."""
+
+    if not await db_model_exists(namespace, repo):
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
+
+    updated = await update_model_metadata(
+        namespace=namespace,
+        model_name=repo,
+        description=request.description,
+        tags=request.tags,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
+    return updated
+
+
 @ai_models_repositories_router.delete(
     "/api/models/{namespace}/{repo}",
     response_model=DeleteModelResponse,
@@ -158,7 +185,7 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
         status.HTTP_200_OK: {"description": "Successfully retrieved revision list"},
         status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
         status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
-        status.HTTP_404_NOT_FOUND: {"description": "Repository not found or no revisions exist"},
+        status.HTTP_404_NOT_FOUND: {"description": "Repository not found"},
     },
     tags=["Models"],
 )
@@ -174,9 +201,6 @@ async def list_model_revisions(
         raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
 
     revisions_data = await list_revisions(namespace, repo)
-
-    if not revisions_data:
-        raise HTTPException(status_code=404, detail="No revisions found for repository")
 
     revisions = [
         RevisionModel(
@@ -216,14 +240,7 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     if not metadata:
         raise HTTPException(status_code=404, detail="Metadata not found")
 
-    revision_info = await get_or_create_revision(
-        namespace=namespace,
-        model_name=repo,
-        revision_name="main",
-    )
-
-    if not revision_info:
-        raise HTTPException(status_code=404, detail="Revision not found")
+    revision_info = await db_get_revision(namespace, repo, "main")
 
     files_from_db = await list_files_in_revision(
         namespace=namespace,
@@ -235,8 +252,8 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
 
     return RepositoryInfoModel(
         id=f"{namespace}/{repo}",
-        sha=revision_info["sha"],
-        etag=revision_info["etag"] or revision_info["sha"],
+        sha=(revision_info["sha"] if revision_info else ""),
+        etag=((revision_info["etag"] or revision_info["sha"]) if revision_info else ""),
         size=total_size,
         files=[RepositoryFileModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files_from_db],
         metadata=metadata,

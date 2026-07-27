@@ -10,6 +10,7 @@ from gen3_ai_model_repo.database.file_tracking import (
     get_file_record,
     list_files_in_revision,
 )
+from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import delete_revision
 from gen3_ai_model_repo.database.revisions import get_revision as db_get_revision
 from gen3_ai_model_repo.models.schemas import (
@@ -59,11 +60,9 @@ async def list_repo_tree(
     """
     List repository directory contents at a specific revision.
     """
-    if rev != "main":
-        raise HTTPException(
-            status_code=400,
-            detail="Only 'main' revision is currently supported",
-        )
+    repo_exists = await db_model_exists(namespace, repo)
+    if not repo_exists:
+        raise HTTPException(status_code=404, detail="Repository not found")
 
     files = await list_files_in_revision(
         namespace=namespace,
@@ -71,8 +70,6 @@ async def list_repo_tree(
         revision_name=rev,
     )
 
-    if not files:
-        raise HTTPException(status_code=404, detail="Repository or path not found")
     if path:
         files = [f for f in files if f["path"].startswith(path)]
 
@@ -122,7 +119,7 @@ async def get_model_revision(namespace: str, repo: str, revision: str) -> Revisi
     summary="Get file metadata without downloading",
     description="Retrieve file metadata (size, hash, signed URL) without downloading the full file content.",
     responses={
-        status.HTTP_200_OK: {"description": "File metadata retrieved successfully"},
+        status.HTTP_302_FOUND: {"description": "Redirect to signed URL with metadata headers"},
         status.HTTP_404_NOT_FOUND: {"description": "File not found"},
     },
     tags=["Models"],
@@ -150,7 +147,7 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     etag = file_record["etag"]
 
     provider = get_storage_provider()
-    signed_url = await provider.generate_signed_url(file_record["s3_key"])
+    signed_url = await provider.generate_signed_url(file_record["object_key"])
 
     return build_head_response(commit_hash, etag, size, signed_url)
 
@@ -180,7 +177,7 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
 
     provider = get_storage_provider()
-    signed_url = await provider.generate_signed_url(file_record["s3_key"])
+    signed_url = await provider.generate_signed_url(file_record["object_key"])
     logging.info(f"Redirecting to signed URL: {signed_url}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
 
@@ -203,7 +200,7 @@ async def list_model_files(namespace: str, repo: str, revision: str = "main") ->
                 size=f["size"],
                 sha=f["oid"],
                 etag=f["etag"],
-                s3_key=f"{namespace}/{repo}/{revision}/{f['path']}",
+                object_key=f"{namespace}/{repo}/{revision}/{f['path']}",
             )
             for f in files
         ],
@@ -232,7 +229,7 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
         size=record["size"],
         sha=record["sha"],
         etag=record["etag"],
-        s3_key=record["s3_key"],
+        object_key=record["object_key"],
     )
 
 

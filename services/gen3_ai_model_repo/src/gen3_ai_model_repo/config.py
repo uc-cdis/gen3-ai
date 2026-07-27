@@ -1,3 +1,5 @@
+import os
+
 from starlette.datastructures import Secret
 
 # this is the config module
@@ -10,6 +12,16 @@ from common.config import starlette_config
 logging = common_config.logging
 logging.name = "gen3_ai_model_repo"
 
+
+def _first_env_value(*keys: str, default: str = "") -> str:
+    """Return the first non-empty environment variable value from keys."""
+    for key in keys:
+        value = os.getenv(key)
+        if value:
+            return value
+    return default
+
+
 MODEL_STORAGE_PATH = starlette_config(
     "MODEL_STORAGE_PATH",
     default="./testfiles",
@@ -18,33 +30,33 @@ MODEL_STORAGE_PATH = starlette_config(
 
 DB_DRIVER = starlette_config(
     "DB_DRIVER",
-    default="postgresql",
+    default=_first_env_value("PGDRIVER", default="postgresql"),
 )
 
 DB_USER = starlette_config(
     "DB_USER",
-    default="postgres",
+    default=_first_env_value("PGUSER", default="postgres"),
 )
 
 DB_PASSWORD = starlette_config(
     "DB_PASSWORD",
-    default="postgres",
+    default=_first_env_value("PGPASSWORD", default="postgres"),
 )
 
 DB_HOST = starlette_config(
     "DB_HOST",
-    default="localhost",
+    default=_first_env_value("PGHOST", default="localhost"),
 )
 
 DB_PORT = starlette_config(
     "DB_PORT",
     cast=int,
-    default="5432",
+    default=_first_env_value("PGPORT", default="5432"),
 )
 
 DB_DATABASE = starlette_config(
     "DB_DATABASE",
-    default="gen3_model_repo",
+    default=_first_env_value("PGDATABASE", default="gen3_ai_model_repo"),
 )
 
 DB_CONNECTION_STRING = starlette_config(
@@ -53,17 +65,6 @@ DB_CONNECTION_STRING = starlette_config(
     default=(f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}"),
 )
 
-URL_PREFIX = starlette_config(
-    "GEN3_AI_MODEL_REPO_URL_PREFIX",
-    default="",
-    cast=str,
-)
-
-AUTHZ_SERVICE_NAME = starlette_config(
-    "GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_NAME",
-    default="gen3-ai-model-repo",
-    cast=str,
-)
 STORAGE_PROVIDER = starlette_config(
     "STORAGE_PROVIDER",
     default="minio",
@@ -87,6 +88,12 @@ MINIO_ACCESS_KEY = starlette_config(
 MINIO_SECRET_KEY = starlette_config(
     "MINIO_SECRET_KEY",
     default="minioadmin",
+)
+
+MINIO_SECURE = starlette_config(
+    "MINIO_SECURE",
+    cast=bool,
+    default=False,
 )
 
 MINIO_BUCKET = starlette_config(
@@ -123,7 +130,17 @@ S3_SECRET_ACCESS_KEY = starlette_config(
     cast=str,
 )
 
-URL_PREFIX = starlette_config("GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX", default="", cast=str)
+STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
+    "STORAGE_CREATE_BUCKET_IF_MISSING",
+    cast=bool,
+    default=True,
+)
+
+URL_PREFIX = starlette_config(
+    "GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX",
+    default=_first_env_value("GEN3_AI_MODEL_REPO_URL_PREFIX", default=""),
+    cast=str,
+)
 
 # WARNING: Careful changing these, they require close sync with the authorization source
 #          of truth. This is the "service" passed to Gen3 Authz for authorization checks
@@ -133,12 +150,12 @@ URL_PREFIX = starlette_config("GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX", default="",
 #          rest of the docs/service for more info on AI_MODEL_REPO authz.
 AUTHZ_SERVICE_NAME = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME",
-    default="gen3-ai-model-repo",
+    default=_first_env_value("GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_NAME", default="gen3-ai-model-repo"),
     cast=str,
 )
 AUTHZ_SERVICE_RESOURCE = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_RESOURCE",
-    default="/services/gen3-ai-model-repo",
+    default=_first_env_value("GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_RESOURCE", default="/services/gen3-ai-model-repo"),
     cast=str,
 )
 
