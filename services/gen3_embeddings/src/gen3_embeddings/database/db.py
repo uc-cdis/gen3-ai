@@ -7,7 +7,7 @@ OVERVIEW
 We're using asyncpg alongside FastAPI's dependency injection.
 
 This file contains the logic for database manipulation in a "data access layer"
-(DataAccessLayer) class, such that other areas of the code have simple
+(DataAccessLayer / DAL) class, such that other areas of the code have simple
 `.create_*()`, `.list_*()`, `.search_*()` calls which won't require knowledge
 of how to manage connections or interact with the db directly. Connections are
 managed via an asyncpg connection pool and FastAPI's dependency injection

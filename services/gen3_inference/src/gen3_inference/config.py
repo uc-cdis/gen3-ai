@@ -8,6 +8,8 @@ from common.config import starlette_config
 
 # common logger, don't change this
 logging = common_config.logging
+
+# name of the top-level package in this service
 logging.name = "gen3_inference"
 
 # WARNING: Careful changing these, they require a trust relationship and client credentials
