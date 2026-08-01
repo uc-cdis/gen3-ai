@@ -5,14 +5,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class VectorPrecision(StrEnum):
+    float16 = "float16"
+    float32 = "float32"
+
+
 class VectorType(StrEnum):
     vector = "vector"
     halfvec = "halfvec"
 
-
-class VectorPrecision(StrEnum):
-    float16 = "float16"
-    float32 = "float32"
+    @property
+    def precision(self) -> VectorPrecision:
+        if self == VectorType.vector:
+            return VectorPrecision.float32
+        if self == VectorType.halfvec:
+            return VectorPrecision.float16
+        raise ValueError(f"Unsupported vector type: {self}")
 
 
 class DistanceMetric(StrEnum):

@@ -651,34 +651,22 @@ async def get_embeddings_bulk_from_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    embs = await dal.get_embeddings_bulk(
+    rows = await dal.get_embeddings_bulk_from_collection_ordered(
         embedding_ids=embedding_uuids,
-        collection_id=collection.id,
-        vector_type=collection.vector_type,
+        collection=collection,
     )
 
-    if embs:
-        logging.debug(
-            f"Type of emb.embedding with vector_type=`{collection.vector_type}` is `{type(embs[-1].embedding)}`"
-        )
+    precision = collection.vector_type.precision
 
-    emb_by_id = {e.embedding_id: e for e in embs}
-
-    binary_results: list[SingleEmbeddingResultBinary] = []
-
-    # Preserve original order and input collection
-    for input_index, emb_id in enumerate(embedding_uuids):
-        emb = emb_by_id.get(emb_id)
-        if not emb:
-            continue
-
-        res = embedding_to_binary_result(
+    binary_results = [
+        embedding_to_binary_result(
             emb=emb,
             collection=collection,
             input_index=input_index,
             exclude_info=exclude_info,
-            precision="float16" if collection.vector_type == "halfvec" else "float32",
+            precision=precision,
         )
-        binary_results.append(res)
+        for input_index, emb in rows
+    ]
 
     return EmbeddingResponseBinary(embeddings=binary_results, count=len(binary_results))

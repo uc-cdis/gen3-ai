@@ -24,6 +24,7 @@ class Collection:
     @classmethod
     def from_record(cls, row: asyncpg.Record) -> Self:
         data = dict(row)
+        data["vector_type"] = VectorType(data["vector_type"])
         return cls(**data)
 
 

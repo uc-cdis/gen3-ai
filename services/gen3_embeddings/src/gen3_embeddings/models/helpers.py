@@ -7,6 +7,7 @@ from gen3_embeddings.models.schemas import (
     EmbeddingInfo,
     SingleEmbeddingResult,
     SingleEmbeddingResultBinary,
+    VectorPrecision,
 )
 
 
@@ -98,7 +99,7 @@ def embedding_to_binary_result(
     collection: Collection | None,
     exclude_info: bool = False,
     input_index: int | None = None,
-    precision: str = "float32",
+    precision: VectorPrecision = VectorPrecision.float32,
 ) -> SingleEmbeddingResultBinary:
     """
     Convert a DB Embedding dataclass into an API embedding result.

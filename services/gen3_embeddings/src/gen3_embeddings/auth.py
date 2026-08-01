@@ -107,11 +107,21 @@ async def get_user_id(token: HTTPAuthorizationCredentials | None = None, request
         logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING user_id = 0")
         return "0"
 
+    if request:
+        cached = getattr(request.state, "user_id", None)
+        if cached is not None:
+            return cached
+
     token_claims = await _get_token_claims(token, request)
     if "sub" not in token_claims:
         raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
-    return token_claims["sub"]
+    user_id = token_claims["sub"]
+
+    if request:
+        request.state.user_id = user_id
+
+    return user_id
 
 
 async def get_user_authz_mapping(
@@ -137,6 +147,11 @@ async def get_user_authz_mapping(
     if config.DEBUG_SKIP_AUTH and not token:
         logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING no authz mapping")
         return {}
+
+    if request:
+        cached = getattr(request.state, "user_authz_mapping", None)
+        if cached is not None:
+            return cached
 
     token = await _get_token(token, request)
 
@@ -171,6 +186,9 @@ async def get_user_authz_mapping(
 
     logging.debug(f"Got user's authz mapping: {authz_mapping}")
 
+    if request:
+        request.state.user_authz_mapping = authz_mapping
+
     return authz_mapping
 
 
@@ -194,6 +212,11 @@ async def _get_token_claims(
     Raises:
         HTTPException: Raised if the token is missing or invalid.
     """
+    if request:
+        cached = getattr(request.state, "token_claims", None)
+        if cached is not None:
+            return cached
+
     token = await _get_token(token, request)
     # either this was provided or we've tried to get it from the Bearer header
     if not token:
@@ -218,6 +241,9 @@ async def _get_token_claims(
             "Could not verify, parse, and/or validate the provided access token.",
         ) from exc
 
+    if request:
+        request.state.token_claims = token_claims
+
     return token_claims
 
 
@@ -232,10 +258,18 @@ async def _get_token(token: HTTPAuthorizationCredentials | str | None, request: 
     Returns:
         The obtained token.
     """
-    if not token:
-        # we need a request in order to get a bearer token
-        if request:
-            token = await get_bearer_token(request)
+    if token:
+        return token
+
+    if request:
+        cached = getattr(request.state, "bearer_token", None)
+        if cached is not None:
+            return cached
+
+        token = await get_bearer_token(request)
+        request.state.bearer_token = token
+        return token
+
     return token
 
 
@@ -357,21 +391,22 @@ async def get_allowed_authz_for_request(request: Request) -> list[str]:
     This is used by the route layer to supply allowed_authz into the
     data access layer (DAL) for RLS.
     """
-    user_authz_mapping = await get_user_authz_mapping(request=request)
     method = _get_crud_action_from_request(request)
-    allowed_authz = get_allowed_authz_from_mapping(
-        authz_mapping=user_authz_mapping,
-        method=method,
-    )
-    logging.debug(f"allowed_authz for {method}: {allowed_authz}")
-    return allowed_authz
+    return await get_allowed_authz_for_request_with_method(request=request, method=method)
 
 
 async def get_allowed_authz_for_request_with_method(request: Request, method: str) -> list[str]:
+    cache_attr = f"allowed_authz_{method}"
+    cached = getattr(request.state, cache_attr, None)
+    if cached is not None:
+        logging.debug(f"allowed_authz for {method} fetched from request cache")
+        return cached
+
     user_authz_mapping = await get_user_authz_mapping(request=request)
     allowed_authz = get_allowed_authz_from_mapping(
         authz_mapping=user_authz_mapping,
         method=method,
     )
+    setattr(request.state, cache_attr, allowed_authz)
     logging.debug(f"allowed_authz for {method}: {allowed_authz}")
     return allowed_authz

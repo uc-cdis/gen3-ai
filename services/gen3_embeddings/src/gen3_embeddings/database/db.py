@@ -85,6 +85,7 @@ from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
 from gen3_embeddings.auth import get_allowed_authz_for_request, get_allowed_authz_for_request_with_method
+from gen3_embeddings.config import logging
 from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
@@ -111,6 +112,9 @@ async def get_pool():
     """
     global _pool
     if _pool is None:
+        logging.info(
+            "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
+        )
         _pool = await asyncpg.create_pool(
             str(config.DB_CONNECTION_STRING),
             min_size=config.PGPOOL_MIN_SIZE,
@@ -770,6 +774,46 @@ class DataAccessLayer:
                     rows = await stmt.fetch(embedding_ids)
                     results.extend(rows_to_embeddings(rows))
 
+            return results
+
+        return await self._with_rls(_query)
+
+    async def get_embeddings_bulk_from_collection_ordered(
+        self,
+        embedding_ids: list[UUID],
+        collection: Collection,
+    ) -> list[tuple[int, Embedding]]:
+        if not embedding_ids:
+            return []
+
+        table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+
+        async def _query(conn):
+            stmt = await conn.prepare(
+                f"""
+                SELECT
+                    e.collection_id,
+                    e.embedding_id,
+                    e.embedding,
+                    e.authz,
+                    e.metadata,
+                    e.created_at,
+                    e.updated_at,
+                    inp.ord
+                FROM unnest($1::uuid[]) WITH ORDINALITY AS inp(embedding_id, ord)
+                JOIN {table} e
+                ON e.embedding_id = inp.embedding_id
+                WHERE e.collection_id = $2::bigint
+                ORDER BY inp.ord
+                """
+            )
+            rows = await stmt.fetch(embedding_ids, collection.id)
+
+            results: list[tuple[int, Embedding]] = []
+            for row in rows:
+                input_index = row["ord"] - 1
+                emb = Embedding.from_record(row)
+                results.append((input_index, emb))
             return results
 
         return await self._with_rls(_query)
