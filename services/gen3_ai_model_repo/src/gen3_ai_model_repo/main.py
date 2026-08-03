@@ -69,6 +69,11 @@ def get_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.get("/_status", include_in_schema=False)
+    async def status():
+        """Return the service liveness status for Kubernetes probes."""
+        return {"status": "ok"}
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logging.exception(
