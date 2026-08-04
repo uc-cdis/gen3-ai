@@ -135,7 +135,7 @@ async def update_embedding_in_collection(
         await authorize_request(
             request=request,
             authz_access_method="update",
-            authz_resources=authz,
+            authz_resources=[authz],
         )
 
     emb = await dal.update_embedding(

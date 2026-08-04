@@ -28,7 +28,7 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
       UV_VERSION: '0.12.1'
-      JUST_VERSION: '1.57.0'
+      JUST_VERSION: '1.58.0'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.12.1'
-      JUST_VERSION: '1.57.0'
+      JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.12.1'
-      JUST_VERSION: '1.57.0'
+      JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
