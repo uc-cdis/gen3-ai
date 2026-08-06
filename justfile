@@ -8,6 +8,11 @@ set dotenv-load
 SERVICES := "gen3_embeddings gen3_inference gen3_ai_model_repo"
 LIBRARIES := "common"
 PARALLEL := "true"
+# Services type-checked by `just typecheck` and `just lint`. gen3_inference is omitted
+# until its openresponses_types dependency drift is resolved (the service does not
+# currently import) or we adjust the service entirely.
+# FIXME: add it back here once it does.
+TYPECHECK_SERVICES := "gen3_embeddings gen3_ai_model_repo"
 
 # List all commands
 default:
@@ -403,6 +408,37 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         uv run --directory "$TARGET" ruff check ./src --fix {{EXTRA_ARG}}
 
         just sql_lint "{{SERVICE}}"
+
+        # `lint` recurses per-service, so this branch would type-check every service by
+        # explicit name. Only run it for the targets we've opted in.
+        if [[ " {{TYPECHECK_SERVICES}} {{LIBRARIES}} " == *" $(basename "$TARGET") "* ]]; then
+            just typecheck "{{SERVICE}}"
+        fi
+    fi
+
+# Type check service(s)
+[group('linting')]
+typecheck SERVICE="all" EXTRA_ARG="": _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{SERVICE}}" = "all" ]; then
+        if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck libraries/{} "{{EXTRA_ARG}}"
+            echo "{{TYPECHECK_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck {} "{{EXTRA_ARG}}"
+            just _warn
+        else
+            for lib in {{LIBRARIES}}; do just typecheck "libraries/$lib" "{{EXTRA_ARG}}"; done
+            for service in {{TYPECHECK_SERVICES}}; do just typecheck "$service" "{{EXTRA_ARG}}"; done
+        fi
+    else
+        source scripts/.justfile_helpers.bash
+        TARGET="{{SERVICE}}"
+        if [ ! -d "$TARGET" ] && [ -d "services/{{SERVICE}}" ]; then TARGET="services/{{SERVICE}}"; fi
+
+        if [[ "$TARGET" == *services* ]]; then just install "{{SERVICE}}"; fi
+
+        print_header "just typecheck:" "ty check" "$TARGET" "..."
+        uv run --directory "$TARGET" ty check ./src {{EXTRA_ARG}}
     fi
 
 # Lint .sql files

@@ -1,3 +1,5 @@
+"""Service routes: docs redirect, version, and health status."""
+
 import time
 from importlib.metadata import version
 
@@ -14,6 +16,12 @@ basic_router = APIRouter()
     summary="Get swagger docs",
 )
 async def redirect_to_docs():
+    """
+    Redirect the service root to the Swagger docs.
+
+    Returns:
+        RedirectResponse: A redirect to `/docs`.
+    """
     return RedirectResponse(url="/docs")
 
 
@@ -25,6 +33,12 @@ async def redirect_to_docs():
 )
 @basic_router.get("/_version", include_in_schema=False, dependencies=[])
 async def get_version() -> dict:
+    """
+    Report the installed version of this service.
+
+    Returns:
+        dict: A mapping with a single `version` key.
+    """
     return {"version": version("gen3_embeddings")}
 
 

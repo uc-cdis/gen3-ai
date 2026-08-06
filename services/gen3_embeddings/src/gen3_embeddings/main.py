@@ -1,3 +1,7 @@
+"""
+FastAPI app creation, general entrypoint into the service.
+"""
+
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
@@ -21,6 +25,19 @@ route_aggregator.include_router(basic_router)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Validate external dependencies at startup and hold them for the app's lifetime.
+
+    Startup fails loudly rather than serving traffic against a database or policy engine
+    the service cannot safely use.
+
+    Args:
+        app (FastAPI): The application being started.
+
+    Raises:
+        Exception: If the database is unreachable, the database role can bypass row-level
+            security, or the policy engine is unhealthy.
+    """
     # Startup logic
     await check_db_connection()
 

@@ -1,4 +1,8 @@
-# this is the config module
+"""
+Configuration handling, should use common config and overlay service-specific
+configuration.
+"""
+
 from starlette.datastructures import Secret
 
 from common import config as common_config

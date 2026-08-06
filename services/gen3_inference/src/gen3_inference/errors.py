@@ -1,3 +1,5 @@
+"""Open Responses error type constants used across the service."""
+
 ERROR_TYPE_SERVER_ERROR = "server_error"
 ERROR_TYPE_INVALID_REQUEST = "invalid_request"
 ERROR_TYPE_NOT_FOUND = "not_found"

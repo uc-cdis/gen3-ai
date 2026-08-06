@@ -1,3 +1,5 @@
+"""Pydantic request and response schemas for the public API."""
+
 from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
@@ -6,16 +8,29 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class VectorPrecision(StrEnum):
+    """Floating-point precision of the vectors in a binary embedding response."""
+
     float16 = "float16"
     float32 = "float32"
 
 
 class VectorType(StrEnum):
+    """pgvector column type backing a collection, which fixes its storage precision."""
+
     vector = "vector"
     halfvec = "halfvec"
 
     @property
     def precision(self) -> VectorPrecision:
+        """
+        Return the precision that vectors of this type are stored at.
+
+        Returns:
+            VectorPrecision: float32 for `vector`, float16 for `halfvec`.
+
+        Raises:
+            ValueError: If the enum gains a member without a mapped precision.
+        """
         if self == VectorType.vector:
             return VectorPrecision.float32
         if self == VectorType.halfvec:
@@ -24,6 +39,12 @@ class VectorType(StrEnum):
 
 
 class DistanceMetric(StrEnum):
+    """
+    Metric used to rank search results.
+
+    All but `cosine_similarity` are distances, where smaller is closer.
+    """
+
     l2_distance = "l2_distance"
     inner_product = "inner_product"
     cosine_distance = "cosine_distance"
@@ -48,6 +69,8 @@ class CollectionModel(BaseModel):
 
 
 class PaginatedCollectionsResponse(BaseModel):
+    """A page of collections the caller is authorized to see."""
+
     collections: list[CollectionModel]
     page: int
     page_size: int
@@ -56,6 +79,8 @@ class PaginatedCollectionsResponse(BaseModel):
 
 
 class EmbeddingInfo(BaseModel):
+    """Metadata about an embedding, omitted from responses when `exclude_info` is set."""
+
     collection_id: int
     authz: str
     metadata: dict | None = None
@@ -63,6 +88,8 @@ class EmbeddingInfo(BaseModel):
 
 
 class SingleEmbeddingResult(BaseModel):
+    """One embedding returned as a JSON array of floats."""
+
     vector: list[float]  # TODO: try to switch to Vector / HalfVector
     input_index: int | None = None
     embedding_id: UUID
@@ -73,6 +100,12 @@ class SingleEmbeddingResult(BaseModel):
 
 
 class SingleEmbeddingResultBinary(BaseModel):
+    """
+    One embedding returned as base64-encoded raw bytes.
+
+    Cheaper than the JSON float array for large vectors. Decode according to `precision`.
+    """
+
     vector_base64: bytes
     precision: VectorPrecision
     input_index: int | None = None
@@ -83,25 +116,35 @@ class SingleEmbeddingResultBinary(BaseModel):
 
 
 class EmbeddingResponseWithCollections(BaseModel):
+    """Embeddings plus the collections they came from, for cross-collection reads."""
+
     embeddings: list[SingleEmbeddingResult]
     collections: list[CollectionModel] | None = None
 
 
 class EmbeddingResponseBinaryWithCollections(BaseModel):
+    """Binary embeddings plus the collections they came from, for cross-collection reads."""
+
     embeddings: list[SingleEmbeddingResultBinary]
     collections: list[CollectionModel] | None = None
 
 
 class EmbeddingResponse(BaseModel):
+    """Embeddings from a single, already-known collection."""
+
     embeddings: list[SingleEmbeddingResult]
 
 
 class EmbeddingResponseBinary(BaseModel):
+    """Binary embeddings from a single, already-known collection."""
+
     embeddings: list[SingleEmbeddingResultBinary]
     count: int
 
 
 class PaginatedEmbeddingResponse(BaseModel):
+    """A page of embeddings from one collection."""
+
     embeddings: list[SingleEmbeddingResult]
     page: int
     page_size: int
@@ -135,6 +178,8 @@ class SingleSearchResult(BaseModel):
 
 
 class SearchResponse(BaseModel):
+    """Ranked search hits, with the collections they were found in."""
+
     embeddings: list[SingleSearchResult]
     collections: list[CollectionModel] | None = None
 

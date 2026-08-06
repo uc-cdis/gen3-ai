@@ -1,4 +1,5 @@
-# this is the config module
+"""Configuration for the Gen3 AI Model Repo service."""
+
 from common import config as common_config
 
 # this is the starlette.config.Config() class instance

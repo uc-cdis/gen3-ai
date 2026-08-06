@@ -1,3 +1,5 @@
+"""Configuration for the Gen3 Inference service."""
+
 # this is the config module
 from starlette.datastructures import CommaSeparatedStrings
 

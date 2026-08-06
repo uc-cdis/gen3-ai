@@ -1,3 +1,5 @@
+"""Validation and conversion helpers between database rows and API schemas."""
+
 import re
 from uuid import UUID
 

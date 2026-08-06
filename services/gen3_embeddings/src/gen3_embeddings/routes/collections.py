@@ -1,3 +1,5 @@
+"""Routes for creating, reading, updating, and deleting vector collections."""
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.auth import parse_and_auth_request

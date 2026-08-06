@@ -1,3 +1,5 @@
+"""Routes for creating, reading, updating, and deleting embeddings within collections."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -600,7 +602,7 @@ async def get_embeddings_bulk_unknown_collections(
             collection=col,
             input_index=input_index,
             exclude_info=exclude_info,
-            precision="float16" if col.vector_type == "halfvec" else "float32",
+            precision=col.vector_type.precision,
         )
         results.append(res)
 

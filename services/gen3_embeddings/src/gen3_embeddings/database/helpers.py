@@ -1,3 +1,5 @@
+"""SQL construction helpers for the embeddings tables."""
+
 from typing import Any
 
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType

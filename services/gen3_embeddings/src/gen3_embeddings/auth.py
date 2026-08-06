@@ -1,3 +1,5 @@
+"""Authentication and Gen3 policy-engine (Arborist) authorization for this service."""
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -396,6 +398,23 @@ async def get_allowed_authz_for_request(request: Request) -> list[str]:
 
 
 async def get_allowed_authz_for_request_with_method(request: Request, method: str) -> list[str]:
+    """
+    Return the resource paths this caller may act on with a specific access method.
+
+    The result is cached per (request, method), since a single request may need more than
+    one method's resource set and each miss costs a call to the policy engine.
+
+    Args:
+        request (Request): The incoming request.
+        method (str): Access method to filter by, e.g. "read", "create", "update", "delete".
+
+    Returns:
+        list[str]: Authz resource paths the caller holds `method` on. Empty if none, which
+        is a valid fail-closed result.
+
+    Raises:
+        HTTPException: 401 if no valid token is present, 500 if the policy engine errors.
+    """
     cache_attr = f"allowed_authz_{method}"
     cached = getattr(request.state, cache_attr, None)
     if cached is not None:

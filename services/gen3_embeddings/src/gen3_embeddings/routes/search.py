@@ -1,3 +1,5 @@
+"""Routes for vector similarity search within and across collections."""
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from gen3_embeddings.database.db import (
