@@ -17,36 +17,36 @@ See the [interactable documentation](./docs/api.html) or [the OpenAPI specificat
 ## Services Powering the API
 
 - **Gen3 Embeddings**
-    - Collections and embeddings as first-class objects
-    - Bulk support for efficient creation and retrieval
-    - Similarity search over embeddings
-    - Row-level authorization
-    - Authorization and access control using Gen3 tokens
+  - Collections and embeddings as first-class objects
+  - Bulk support for efficient creation and retrieval
+  - Similarity search over embeddings
+  - Row-level authorization
+  - Authorization and access control using Gen3 tokens
 - **Gen3 Inference**
-    - Adopts [Open Responses](https://openresponses.org) standard interface for AI Model inference (both non-streaming and streaming support)
-    - Supports mesh-like connections to other Gen3 instances to proxy requests
-    - Highly configurable, can also connect to public cloud services
-    - Authorization and access control using Gen3 tokens
+  - Adopts [Open Responses](https://openresponses.org) standard interface for AI Model inference (both non-streaming and streaming support)
+  - Supports mesh-like connections to other Gen3 instances to proxy requests
+  - Highly configurable, can also connect to public cloud services
+  - Authorization and access control using Gen3 tokens
 - **Gen3 AI Model Repository**
-    - AI model management in your own infrastructure (no relying on Hugging Face)
-    - API exposed is compatible with tools that interact with Hugging Face
-        - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
-    - Authorization and access control using Gen3 tokens
+  - AI model management in your own infrastructure (no relying on Hugging Face)
+  - API exposed is compatible with tools that interact with Hugging Face
+    - e.g. you can cleanly drop this into existing tools like `transformers` with proper endpoint and creds
+  - Authorization and access control using Gen3 tokens
 
 ## Layout
 
 * `docs`
-    - Additional documentation, including OpenAPI spec
+  - Additional documentation, including OpenAPI spec
 * `libraries/common`
-    - The common library and dependencies shared across all services
+  - The common library and dependencies shared across all services
 * `services/{{name}}`
-    - The individual services (all import `common`)
+  - The individual services (all import `common`)
 * `Dockerfile.k8s`
-    - Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
+  - Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
 * `justfile`
-    - Simplified setup, building, running
-    - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint` `just run gen3_embeddings`, `just build`
-    - For all commands and descriptions, simply run `just` in this repo
+  - Simplified setup, building, running
+  - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint` `just run gen3_embeddings`, `just build`
+  - For all commands and descriptions, simply run `just` in this repo
 
 Services (and libraries) have folder structure:
 
@@ -84,7 +84,7 @@ PGPASSWORD=postgres
 PGDATABASE={service}
 ```
 
-You can also configure a** global config **which overrides common configuration
+You can also configure a **global config** which overrides common configuration
 in a `.env` in the root of the repo `cloned-gen3-ai-repo/.env`:
 
 ```bash
@@ -141,10 +141,10 @@ Note that the pre-commit in this repo relies on `just` commands and is relativel
 ## Implementation Details
 
 * FastAPI
-    - Accurate documentation of endpoints directly in the code in their routes (so automatically created OpenAPI documentation can be used)
+  - Accurate documentation of endpoints directly in the code in their routes (so automatically created OpenAPI documentation can be used)
 * PostgreSQL for services that need a database
-    - RLS for row-level security
-    - Prepared statements for extra security and parsing of inputs
+  - RLS for row-level security
+  - Prepared statements for extra security and parsing of inputs
 * No ORM. `asyncpg` with shared code in `libraries/common`
 
 ### Metrics
