@@ -294,7 +294,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
-    { name = "authutils", specifier = ">=7.2.5" },
+    { name = "authutils", specifier = ">=8.0.0" },
     { name = "cdislogging", specifier = ">=1.2.0" },
     { name = "cdispyutils", specifier = ">=2.5.1" },
     { name = "click", specifier = ">=8.3.1" },

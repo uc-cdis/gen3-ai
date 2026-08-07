@@ -73,9 +73,9 @@ def build_search_sql(
     # 3) filters on metadata (after the first 3 parameters)
     param_index = 4
     for k, v in filters.items():
-        where_clauses.append(f"metadata->>$${k}$$ = ${param_index}")
-        params.append(v)
-        param_index += 1
+        where_clauses.append(f"metadata->>(${param_index}::text) = ${param_index + 1}::text")
+        params.extend((k, v))
+        param_index += 2
 
     # 4) min/max constraints on the expression
     if min_value is not None:

@@ -124,6 +124,18 @@ async def get_pool():
     return _pool
 
 
+async def close_pool() -> None:
+    """
+    Close the global connection pool and reset it.
+
+    Safe to call when the pool was never created.
+    """
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
+
+
 async def get_data_access_layer(request: Request):
     """
     Yield a DAL scoped to the authz the caller holds for this request's HTTP method.
@@ -198,10 +210,8 @@ class DataAccessLayer:
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # Make RLS safe even if user has no allowed resources
-                allowed_array = "{" + ",".join(self.allowed_authz) + "}"
                 # the true value means is_local is set to true, the new value will only apply during the current transaction.
-                await conn.execute("SELECT set_config('app.allowed_authz', $1::text, true)", allowed_array)
+                await conn.execute("SELECT set_config('app.allowed_authz', $1::text[]::text, true)", self.allowed_authz)
                 return await fn(conn, *args, **kwargs)
 
     def _get_allowed_collection_names_from_allowed_authz(self) -> set[str]:

@@ -10,7 +10,7 @@ from gen3authz.client.arborist.async_client import ArboristClient
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
-from gen3_embeddings.database.db import get_pool
+from gen3_embeddings.database.db import close_pool, get_pool
 from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
@@ -48,7 +48,10 @@ async def lifespan(app: FastAPI):
     if not config.DEBUG_SKIP_AUTH:
         await check_arborist_is_healthy(app)
 
-    yield
+    try:
+        yield
+    finally:
+        await close_pool()
 
 
 async def check_arborist_is_healthy(app):

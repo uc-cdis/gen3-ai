@@ -228,7 +228,7 @@ async def _get_token_claims(
     # So don't bother setting it, b/c it doesn't add any additional security. Services
     # sometimes will add the URL of the Gen3 Auth service and look for that, but that does
     # nothing to validate themselves as recipients and we're already validating the signature.
-    audience = None
+    audience = "gen3"
 
     try:
         # NOTE: token can be None if no Authorization header was provided, we expect

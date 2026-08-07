@@ -9,7 +9,7 @@ requires-python = "~=3.13.0"
 #     "cdispyutils @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/metrics-improvements",
 dependencies = [
   "asyncpg>=0.31.0",
-  "authutils>=7.2.5",
+  "authutils>=8.0.0",
   "cdislogging>=1.2.0",
   "cdispyutils>=2.5.1",
   "click>=8.3.1",

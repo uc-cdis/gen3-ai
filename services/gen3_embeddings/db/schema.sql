@@ -1,7 +1,7 @@
 \restrict dbmate
 
--- Dumped from database version 18.1 (Homebrew)
--- Dumped by pg_dump version 18.1 (Homebrew)
+-- Dumped from database version 18.3 (Debian 18.3-1.pgdg13+1)
+-- Dumped by pg_dump version 18.4 (Homebrew)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -14,20 +14,6 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: ltree; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS ltree WITH SCHEMA public;
-
-
---
--- Name: EXTENSION ltree; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION ltree IS 'data type for hierarchical tree-like structures';
-
 
 --
 -- Name: vector; Type: EXTENSION; Schema: -; Owner: -
@@ -85,8 +71,10 @@ CREATE TABLE public.embeddings_halfvec (
     collection_id bigint,
     embedding_id uuid DEFAULT gen_random_uuid() NOT NULL,
     embedding public.halfvec NOT NULL,
-    authz text[] NOT NULL,
+    embedding_hash uuid NOT NULL,
+    authz text NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb,
+    metadata_hash uuid,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );
@@ -100,8 +88,10 @@ CREATE TABLE public.embeddings_vector (
     collection_id bigint,
     embedding_id uuid DEFAULT gen_random_uuid() NOT NULL,
     embedding public.vector NOT NULL,
-    authz text[] NOT NULL,
+    embedding_hash uuid NOT NULL,
+    authz text NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb,
+    metadata_hash uuid,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );
@@ -141,6 +131,14 @@ ALTER TABLE ONLY public.embeddings_halfvec
 
 
 --
+-- Name: embeddings_halfvec embeddings_halfvec_uniq_collection_embhash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings_halfvec
+    ADD CONSTRAINT embeddings_halfvec_uniq_collection_embhash UNIQUE (collection_id, embedding_hash, metadata_hash, authz);
+
+
+--
 -- Name: embeddings_halfvec embeddings_halfvec_uniq_collection_uuid; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -154,6 +152,14 @@ ALTER TABLE ONLY public.embeddings_halfvec
 
 ALTER TABLE ONLY public.embeddings_vector
     ADD CONSTRAINT embeddings_vector_pkey PRIMARY KEY (embedding_id);
+
+
+--
+-- Name: embeddings_vector embeddings_vector_uniq_collection_embhash; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings_vector
+    ADD CONSTRAINT embeddings_vector_uniq_collection_embhash UNIQUE (collection_id, embedding_hash, metadata_hash, authz);
 
 
 --
@@ -173,10 +179,10 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
--- Name: idx_embeddings_halfvec_authz_gin; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_embeddings_halfvec_authz; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_embeddings_halfvec_authz_gin ON public.embeddings_halfvec USING gin (authz);
+CREATE INDEX idx_embeddings_halfvec_authz ON public.embeddings_halfvec USING btree (authz);
 
 
 --
@@ -187,10 +193,10 @@ CREATE INDEX idx_embeddings_halfvec_metadata_gin ON public.embeddings_halfvec US
 
 
 --
--- Name: idx_embeddings_vector_authz_gin; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_embeddings_vector_authz; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_embeddings_vector_authz_gin ON public.embeddings_vector USING gin (authz);
+CREATE INDEX idx_embeddings_vector_authz ON public.embeddings_vector USING btree (authz);
 
 
 --
@@ -220,14 +226,14 @@ ALTER TABLE ONLY public.embeddings_vector
 -- Name: embeddings_halfvec authz_policy_halfvec; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY authz_policy_halfvec ON public.embeddings_halfvec USING ((authz && (current_setting('app.allowed_authz'::text, true))::text[])) WITH CHECK ((authz && (current_setting('app.allowed_authz'::text, true))::text[]));
+CREATE POLICY authz_policy_halfvec ON public.embeddings_halfvec USING ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[]))) WITH CHECK ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[])));
 
 
 --
 -- Name: embeddings_vector authz_policy_vector; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY authz_policy_vector ON public.embeddings_vector USING ((authz && (current_setting('app.allowed_authz'::text, true))::text[])) WITH CHECK ((authz && (current_setting('app.allowed_authz'::text, true))::text[]));
+CREATE POLICY authz_policy_vector ON public.embeddings_vector USING ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[]))) WITH CHECK ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[])));
 
 
 --
