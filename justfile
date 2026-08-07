@@ -62,7 +62,6 @@ install SERVICE="all": _check_dependencies
 
         print_header "just install:" "installing" "$TARGET" "..."
         cd "$TARGET"
-        uv add "common @ file://../../libraries/common"
         echo "uv sync-ing {{SERVICE}} service..."
         uv sync --all-packages --group dev --all-extras
     fi
@@ -543,13 +542,12 @@ _check_uv_modified_files:
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
-    echo "Modifications"
+    echo
     echo "Modified files:"
     MODIFIED=0
     for file in $(git diff --name-only | grep -E 'uv\.lock|pyproject\.toml' || true); do
         echo "$file"
         MODIFIED=1
-        git diff "$file"
     done
     if [ "$MODIFIED" -eq 1 ]; then
         echo -e "\n${RED}** WARNING: Local uv files modified! Check them in! **${RESET}\n"
