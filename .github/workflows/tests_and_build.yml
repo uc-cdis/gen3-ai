@@ -25,10 +25,11 @@ jobs:
     # consistency with linting/formatting in addition to yet another
     # barrier for any security issues)
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
-    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@feat/dbmate
     with:
       UV_VERSION: '0.12.2'
       JUST_VERSION: '1.58.0'
+      DBMATE_VERSION: 'latest'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
@@ -72,6 +73,12 @@ jobs:
         with:
           tool: just@${{ env.JUST_VERSION }}
 
+      - name: Install dbmate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+          /usr/local/bin/dbmate --help
+
       - name: just install
         run: |
           just install
@@ -110,6 +117,12 @@ jobs:
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+
+      - name: Install dbmate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+          /usr/local/bin/dbmate --help
 
       - uses: taiki-e/install-action@v2
         with:
