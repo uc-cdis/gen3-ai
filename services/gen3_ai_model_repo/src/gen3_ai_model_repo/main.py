@@ -1,9 +1,14 @@
+"""Gen3 AI Model Repo service application setup."""
+
 from importlib.metadata import version
 
 from fastapi import FastAPI
 
 
 def get_app():
+    """
+    WIP
+    """
     app = FastAPI(
         title="Gen3 AI Model Repository Service",
         version=version("gen3_ai_model_repo"),

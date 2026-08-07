@@ -18,7 +18,7 @@ Go to the "Run and Debug" pane and you should see each of the services available
 
 ## Importing Common Libraries
 
-You may need to add this to your .vscode/settings.json for intellisense to pick up the common libraries:
+You may need to add this to your `.vscode/settings.json` for intellisense to pick up the common libraries:
 
 ```
 "python.analysis.extraPaths": [

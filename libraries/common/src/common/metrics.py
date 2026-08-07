@@ -1,3 +1,7 @@
+"""
+Common handling for metrics
+"""
+
 from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
 from fastapi import FastAPI
 
@@ -10,6 +14,9 @@ class ServiceMetrics:
     """
 
     def __init__(self, metrics_client) -> None:
+        """
+        Create instance of metrics class with client
+        """
         self.metrics_client = metrics_client
 
     def add_to_api_interaction_counter(self, name, description, **kwargs) -> None:

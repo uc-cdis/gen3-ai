@@ -1,3 +1,5 @@
+"""Translation from Open Responses requests into Chat Completions requests."""
+
 from typing import Any
 
 from openresponses_types import (

@@ -9,7 +9,7 @@ requires-python = "~=3.13.0"
 #     "cdispyutils @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/metrics-improvements",
 dependencies = [
   "asyncpg>=0.31.0",
-  "authutils>=7.2.5",
+  "authutils>=8.0.0",
   "cdislogging>=1.2.0",
   "cdispyutils>=2.5.1",
   "click>=8.3.1",
@@ -41,9 +41,11 @@ dependencies = [
   "pytest-asyncio",
   "ruff",
   "pytest-xdist",
-  "pyright",
   "pylint>=4.0.5",
   "dotenv>=0.9.9",
+  "sqlfluff>=4.2.2",
+  # pinned tightly: ty is pre-1.0 and rules change between releases
+  "ty>=0.0.69,<0.1",
 ]
 
 [dependency-groups]

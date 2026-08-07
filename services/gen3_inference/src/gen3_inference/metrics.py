@@ -1,8 +1,16 @@
+"""Prometheus metrics for the Gen3 Inference service."""
+
 from common.metrics import ServiceMetrics
 
 
 class InferenceServiceMetrics(ServiceMetrics):
+    """Metrics this service records, on top of the shared Gen3 service metrics."""
+
     def __init__(self, metrics_client) -> None:
+        """
+        Args:
+            metrics_client: Backing metrics client used to emit measurements.
+        """
         self.metrics_client = metrics_client
 
     def add_to_api_interaction_counter(self, **kwargs) -> None:

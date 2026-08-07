@@ -1,3 +1,5 @@
+"""Routes implementing the Open Responses inference API."""
+
 from typing import Union
 from urllib.parse import urlparse
 

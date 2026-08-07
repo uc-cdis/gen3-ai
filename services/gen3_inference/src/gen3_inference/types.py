@@ -1,3 +1,5 @@
+"""Shared types for Open Responses request and error payloads."""
+
 import json
 from typing import Annotated
 
@@ -29,4 +31,10 @@ class OpenResponsesError(Error):
     ]
 
     def to_json(self) -> dict:
+        """
+        Render this error in the envelope the Open Responses spec requires.
+
+        Returns:
+            dict: The error wrapped under a single top-level `error` key.
+        """
         return {"error": json.loads(self.model_dump_json())}
