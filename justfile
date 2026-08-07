@@ -543,11 +543,13 @@ _check_uv_modified_files:
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
+    echo "Modifications"
     echo "Modified files:"
     MODIFIED=0
     for file in $(git diff --name-only | grep -E 'uv\.lock|pyproject\.toml' || true); do
         echo "$file"
         MODIFIED=1
+        git diff "$file"
     done
     if [ "$MODIFIED" -eq 1 ]; then
         echo -e "\n${RED}** WARNING: Local uv files modified! Check them in! **${RESET}\n"
