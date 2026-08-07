@@ -164,6 +164,83 @@
       }
     },
     "/vectorstore/collections/{collection_name}/embeddings": {
+      "put": {
+        "tags": [
+          "Embeddings"
+        ],
+        "summary": "Create or update embeddings in collection",
+        "description": "TODO: implementaion for StringArrayInput and ai_model\n\nCreate or update one or more embeddings in a specific collection.\n\nThis minimal implementation only accepts raw numeric vectors.\n\n- If `body.authz` is provided, use the authz path for all embeddings.\n- If not provided, default authz is `/vectorstore/collections/{collection_name}`.\n- Check `create` and `update` permissions on:\n    - the collection authz path, and\n    - the embedding authz paths.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    body: Request body containing a list of embedding vectors.\n    ai_model: Optional model name; not used in this minimal version.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponse containing the created embeddings.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if dimensions mismatch.",
+        "operationId": "put_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_put",
+        "parameters": [
+          {
+            "name": "collection_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Collection Name"
+            }
+          },
+          {
+            "name": "ai_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ai Model"
+            }
+          },
+          {
+            "name": "exclude_info",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Exclude Info"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmbeddingsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "Embeddings"
@@ -457,7 +534,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read all collections",
-        "description": "List all existing collections.\n\nArgs:\n    request: The request object\n    dal: Data access layer dependency.\n\nReturns:\n    PaginatedCollectionsResponse containing all collections.",
+        "description": "List all existing collections.\n\nArgs:\n    request: The request object\n    dal: Data access layer dependency.\n    counts: Whether to include available embeddings count.\n\nReturns:\n    PaginatedCollectionsResponse containing all collections.",
         "operationId": "list_collections_vectorstore_collections_get",
         "parameters": [
           {
@@ -481,6 +558,16 @@
               "minimum": 1,
               "default": 100,
               "title": "Page Size"
+            }
+          },
+          {
+            "name": "counts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Counts"
             }
           }
         ],
@@ -564,6 +651,16 @@
             "schema": {
               "type": "string",
               "title": "Collection Name"
+            }
+          },
+          {
+            "name": "counts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Counts"
             }
           }
         ],
@@ -968,6 +1065,17 @@
               }
             ],
             "title": "Self"
+          },
+          "available_embeddings_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Embeddings Count"
           }
         },
         "type": "object",
@@ -1019,10 +1127,7 @@
           "authz": {
             "anyOf": [
               {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1043,7 +1148,7 @@
           "embeddings"
         ],
         "title": "CreateEmbeddingsBody",
-        "description": "Data for creating embeddings in a collection.\nauthz example: \"authz\": [\"/vectorstore/collections/my_collection\", \"/my/custom/path\"]"
+        "description": "Data for creating embeddings in a collection.\nauthz example: \"authz\": \"/vectorstore/collections/my_collection\""
       },
       "DistanceMetric": {
         "type": "string",
@@ -1054,7 +1159,8 @@
           "l1_distance",
           "cosine_similarity"
         ],
-        "title": "DistanceMetric"
+        "title": "DistanceMetric",
+        "description": "Metric used to rank search results.\n\nAll but `cosine_similarity` are distances, where smaller is closer."
       },
       "EmbeddingInfo": {
         "properties": {
@@ -1063,10 +1169,7 @@
             "title": "Collection Id"
           },
           "authz": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "type": "string",
             "title": "Authz"
           },
           "metadata": {
@@ -1092,7 +1195,8 @@
           "authz",
           "self"
         ],
-        "title": "EmbeddingInfo"
+        "title": "EmbeddingInfo",
+        "description": "Metadata about an embedding, omitted from responses when `exclude_info` is set."
       },
       "EmbeddingResponse": {
         "properties": {
@@ -1108,7 +1212,8 @@
         "required": [
           "embeddings"
         ],
-        "title": "EmbeddingResponse"
+        "title": "EmbeddingResponse",
+        "description": "Embeddings from a single, already-known collection."
       },
       "EmbeddingResponseBinary": {
         "properties": {
@@ -1129,7 +1234,8 @@
           "embeddings",
           "count"
         ],
-        "title": "EmbeddingResponseBinary"
+        "title": "EmbeddingResponseBinary",
+        "description": "Binary embeddings from a single, already-known collection."
       },
       "EmbeddingResponseBinaryWithCollections": {
         "properties": {
@@ -1159,7 +1265,8 @@
         "required": [
           "embeddings"
         ],
-        "title": "EmbeddingResponseBinaryWithCollections"
+        "title": "EmbeddingResponseBinaryWithCollections",
+        "description": "Binary embeddings plus the collections they came from, for cross-collection reads."
       },
       "EmbeddingToCreate": {
         "properties": {
@@ -1191,6 +1298,18 @@
               }
             ],
             "title": "Metadata"
+          },
+          "embedding_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Id"
           }
         },
         "type": "object",
@@ -1205,6 +1324,7 @@
             0.2,
             0.3
           ],
+          "embedding_id": "00000000-0000-0000-0000-000000000000",
           "metadata": {
             "chunk_size": "1000",
             "source": "some_file.md"
@@ -1270,7 +1390,8 @@
           "page",
           "page_size"
         ],
-        "title": "PaginatedCollectionsResponse"
+        "title": "PaginatedCollectionsResponse",
+        "description": "A page of collections the caller is authorized to see."
       },
       "PaginatedEmbeddingResponse": {
         "properties": {
@@ -1318,7 +1439,8 @@
           "page",
           "page_size"
         ],
-        "title": "PaginatedEmbeddingResponse"
+        "title": "PaginatedEmbeddingResponse",
+        "description": "A page of embeddings from one collection."
       },
       "SearchRequestBody": {
         "properties": {
@@ -1417,7 +1539,8 @@
         "required": [
           "embeddings"
         ],
-        "title": "SearchResponse"
+        "title": "SearchResponse",
+        "description": "Ranked search hits, with the collections they were found in."
       },
       "SingleEmbeddingResult": {
         "properties": {
@@ -1460,7 +1583,8 @@
           "vector",
           "embedding_id"
         ],
-        "title": "SingleEmbeddingResult"
+        "title": "SingleEmbeddingResult",
+        "description": "One embedding returned as a JSON array of floats."
       },
       "SingleEmbeddingResultBinary": {
         "properties": {
@@ -1506,7 +1630,8 @@
           "precision",
           "embedding_id"
         ],
-        "title": "SingleEmbeddingResultBinary"
+        "title": "SingleEmbeddingResultBinary",
+        "description": "One embedding returned as base64-encoded raw bytes.\n\nCheaper than the JSON float array for large vectors. Decode according to `precision`."
       },
       "SingleSearchResult": {
         "properties": {
@@ -1587,10 +1712,7 @@
           "authz": {
             "anyOf": [
               {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1649,7 +1771,8 @@
           "float16",
           "float32"
         ],
-        "title": "VectorPrecision"
+        "title": "VectorPrecision",
+        "description": "Floating-point precision of the vectors in a binary embedding response."
       },
       "VectorType": {
         "type": "string",
@@ -1657,7 +1780,8 @@
           "vector",
           "halfvec"
         ],
-        "title": "VectorType"
+        "title": "VectorType",
+        "description": "pgvector column type backing a collection, which fixes its storage precision."
       }
     }
   }
