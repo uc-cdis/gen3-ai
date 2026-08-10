@@ -1,4 +1,4 @@
-# Gen3 AI Monorepo
+# Gen3 AI Monorepos
 
 Contains services for AI features in Gen3.
 
