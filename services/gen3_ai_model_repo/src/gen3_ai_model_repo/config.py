@@ -2,7 +2,7 @@
 
 from common import config as common_config
 
-# this is the starlette.config.Config() class instance
+# this is the starlette.config.Config() class instances
 from common.config import starlette_config
 
 # common logger, don't change this
