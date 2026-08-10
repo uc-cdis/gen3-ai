@@ -3,7 +3,14 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from starlette import status
 
+from common.fastapi.responses import (
+    AUTH_RESPONSES,
+    BAD_REQUEST_RESPONSE,
+    NO_CONTENT_RESPONSE,
+    not_found_response,
+)
 from gen3_embeddings.auth import (
     authorize_request,
     get_authz_resource_path_from_collection_name,
@@ -41,6 +48,11 @@ embeddings_router = APIRouter()
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
     summary="Read embedding from collection",
+    description="Returns a single embedding from a collection, looked up by its UUID.",
+    responses={
+        **AUTH_RESPONSES,
+        **not_found_response("Collection or embedding"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -89,6 +101,15 @@ async def get_embedding_from_collection(
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
     summary="Update embedding in collection",
+    description=(
+        "Replaces the vector and/or metadata of an existing embedding, looked up by its UUID. "
+        "A new vector must match the collection's dimensions."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection or embedding"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -157,6 +178,22 @@ async def update_embedding_in_collection(
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create or update embeddings in collection",
+    description=(
+        "Creates one or more embeddings in a collection, replacing any that already exist with the "
+        "same UUID. Every vector must match the collection's dimensions.\n\n"
+        "Authorization is resolved per request:\n\n"
+        "- If `authz` is set on the request body, that path is applied to all embeddings in the "
+        "request.\n"
+        "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
+        "used.\n"
+        "- You need both `create` and `update` permission on the collection path and on the "
+        "resulting embedding paths."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -318,8 +355,16 @@ async def put_embeddings_in_collection(
 
 @embeddings_router.delete(
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
-    status_code=204,
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete embedding from collection",
+    description=(
+        "Permanently deletes a single embedding from a collection, looked up by its UUID. This cannot be undone."
+    ),
+    responses={
+        **NO_CONTENT_RESPONSE,
+        **AUTH_RESPONSES,
+        **not_found_response("Collection or embedding"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -367,6 +412,14 @@ async def delete_embedding(
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=PaginatedEmbeddingResponse,
     summary="Read all embeddings from collection",
+    description=(
+        "Returns the embeddings in a collection, one page at a time. "
+        "Set `exclude_info=true` to omit the `info` block from each result."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **not_found_response("Collection"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -435,6 +488,23 @@ async def list_embeddings_in_collection(
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create embeddings in collection",
+    description=(
+        "Creates one or more embeddings in a collection. Every vector must match the collection's "
+        "dimensions. Use `PUT` on this path instead if you want existing embeddings to be "
+        "replaced rather than rejected.\n\n"
+        "Authorization is resolved per request:\n\n"
+        "- If `authz` is set on the request body, those paths are applied to all embeddings in the "
+        "request.\n"
+        "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
+        "used.\n"
+        "- You need `create` permission on the collection path and on the resulting embedding "
+        "paths."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection"),
+    },
     tags=["Embeddings"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -545,6 +615,15 @@ async def create_embeddings_in_collection(
     "/embeddings/bulk",
     tags=["Embeddings (Bulk Read)"],
     summary="Read select embeddings from unknown collections",
+    description=(
+        "Returns the requested embeddings by UUID without needing to know which collection each "
+        "one belongs to, along with the metadata for every collection involved. Vectors are "
+        "returned in a binary encoding. UUIDs that do not resolve are omitted from the response "
+        "rather than raising an error.\n\n"
+        "This uses `POST` so the UUID list can be sent in the request body, but it does not "
+        "create anything."
+    ),
+    responses={**AUTH_RESPONSES},
 )
 @embeddings_router.post(
     "/embeddings/bulk/",
@@ -617,6 +696,17 @@ async def get_embeddings_bulk_unknown_collections(
     # do NOT add a response model class in this path operation decorator
     # just rely on it in the typed return. FastAPI docs say this is more performant
     summary="Read select embeddings from collection",
+    description=(
+        "Returns the requested embeddings by UUID from a single known collection. Vectors are "
+        "returned in a binary encoding. UUIDs that do not resolve within the collection are "
+        "omitted from the response rather than raising an error.\n\n"
+        "This uses `POST` so the UUID list can be sent in the request body, but it does not "
+        "create anything."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **not_found_response("Collection"),
+    },
     tags=["Embeddings (Bulk Read)"],
 )
 @embeddings_router.post(
