@@ -104,9 +104,6 @@ AllResponseTypes = Union[
         status.HTTP_400_BAD_REQUEST: {"description": "Bad request, unable to get response"},
         status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
         status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {
-            "description": "Something went wrong internally when processing the request"
-        },
     },
     tags=["Inference"],
 )

@@ -2,6 +2,11 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from common.fastapi.responses import (
+    AUTH_RESPONSES,
+    BAD_REQUEST_RESPONSE,
+    not_found_response,
+)
 from gen3_embeddings.database.db import (
     DataAccessLayer,
     get_data_access_layer_for_read_operations,
@@ -23,6 +28,16 @@ vectorstore_search_router = APIRouter()
     "/vectorstore/collections/{collection_name}/search",
     response_model=SearchResponse,
     summary="Search embeddings in collection",
+    description=(
+        "Finds the embeddings in a collection nearest to the query vector you provide, ordered by "
+        "similarity. The query vector must have the same number of dimensions as the collection. "
+        "Set `exclude_info=true` to omit the `info` block from each result."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection"),
+    },
     tags=["Vectorstore Search"],
 )
 @vectorstore_search_router.post(
@@ -107,6 +122,16 @@ async def search_in_collection(
     "/vectorstore/search",
     response_model=SearchResponse,
     summary="Search embeddings across unknown collections",
+    description=(
+        "Finds the embeddings nearest to the query vector across every collection you have access "
+        "to, ordered by similarity. Pass a comma-separated `collections` list to restrict the "
+        "search to specific collections. Only collections matching the requested `vector_type` and "
+        "the query vector's dimensions are searched."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+    },
     tags=["Vectorstore Search"],
 )
 @vectorstore_search_router.post(

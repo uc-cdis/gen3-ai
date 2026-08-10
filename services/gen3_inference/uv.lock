@@ -260,7 +260,7 @@ wheels = [
 
 [[package]]
 name = "common"
-version = "0.1.3"
+version = "0.1.4"
 source = { directory = "../../libraries/common" }
 dependencies = [
     { name = "asyncpg" },
@@ -463,7 +463,7 @@ dependencies = [
 requires-dist = [
     { name = "common", directory = "../../libraries/common" },
     { name = "openai", specifier = ">=2.30.0" },
-    { name = "openresponses-types", specifier = ">=2.3.0.post1" },
+    { name = "openresponses-types", specifier = ">=2.3.0.post1,<2.4.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -709,14 +709,14 @@ wheels = [
 
 [[package]]
 name = "openresponses-types"
-version = "2.4.0"
+version = "2.3.0.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/eb/cb4a855a27c6cf04af2d47c896b6549040a86bb75e6a59cb687a8bcf19aa/openresponses_types-2.4.0.tar.gz", hash = "sha256:cd55e7fa17230d8edd46e254ef34666ca6f250b7efa3712a110aac546c7dc8d5", size = 22101, upload-time = "2026-08-05T12:22:46.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/26/b612c3215f5599714fa94d63eb5ee59b4eb66dbdeeaf86bb4d848359484d/openresponses_types-2.3.0.post1.tar.gz", hash = "sha256:11b8896d3621d2ac2439f6ff106f34ddcb1bbd517c317a6c852a9df2e98a0753", size = 19254, upload-time = "2026-01-22T20:02:03.933Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/ef/2605d7219b0fa648e66ab15043bae492f4e8d3c4de4fdad85fc5eadb95a3/openresponses_types-2.4.0-py3-none-any.whl", hash = "sha256:186406592bc115bf12d9ee88320f8051ab1ade0a8fa8941fd1e44b0be16684f1", size = 15097, upload-time = "2026-08-05T12:22:45.044Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/5f/e16dad89ed24f586da5b01b9b206d3adbf21fe1af8e4dc55d5b93158fde6/openresponses_types-2.3.0.post1-py3-none-any.whl", hash = "sha256:88f6abcef9cad839203abff420dd080978bf6eb33cc06ddc5d78da4ccdba7613", size = 13847, upload-time = "2026-01-22T20:02:02.582Z" },
 ]
 
 [[package]]
