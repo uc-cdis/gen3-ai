@@ -414,6 +414,8 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         # useful precisely when a lint failed, so they must still print
         MARKDOWN_STATUS=0
         just markdown_lint || MARKDOWN_STATUS=$?
+        # last, so it also cleans up after the fixers above
+        just whitespace_lint
         just _check_uv_modified_files
 
         just PARALLEL="{{PARALLEL}}" _warn
@@ -517,6 +519,36 @@ markdown_lint EXTRA_ARG="": _check_dependencies
         --ignore-path .gitignore \
         --ignore '**/services/gen3_ai_model_repo/src/gen3_ai_model_repo/routes/testfiles/**' \
         --fix {{EXTRA_ARG}} -- '**/*.md'
+
+# Strip trailing whitespace and fix end-of-file newlines (repo-wide)
+[group('linting')]
+whitespace_lint: _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+
+    print_header "just whitespace_lint:" "fixing" "trailing whitespace and EOF newlines" "..."
+    # Doing this here avoids an annoying developer experience where you stage changes, commit,
+    # then pre-commit updates files and you have to re-stage. This avoids that.
+    #
+    # Same work as the trailing-whitespace and end-of-file-fixer pre-commit hooks.
+    #
+    # A file is covered as soon as it is `git add`ed.
+    # Untracked files are not, matching pre-commit.
+    { git grep -zI --name-only -e '' -- . || true; } | while IFS= read -r -d '' file; do
+        [ -f "$file" ] || continue
+        CONTENT="$(sed 's/[[:blank:]]*$//' "$file")"
+        if [ -n "$CONTENT" ]; then
+            printf '%s\n' "$CONTENT" | cmp -s - "$file" || {
+                printf '%s\n' "$CONTENT" > "$file"
+                echo "fixed: $file"
+            }
+        elif [ -s "$file" ]; then
+            # a file of nothing but whitespace becomes empty, as the hooks do
+            : > "$file"
+            echo "fixed: $file"
+        fi
+    done
 
 # Run a service in docker
 [group('run')]
