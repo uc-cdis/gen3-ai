@@ -540,8 +540,9 @@ markdown_lint EXTRA_ARG="": _check_dependencies
     uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
 
 _warn:
-    @if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then \
-        echo -e "\n\033[33mNote: just PARALLEL=\"true\" so above logs may be jumbled. Run again with \`just s <command>\` to run sequentially with colorization.\033[0m"; \
+    #!/usr/bin/env bash
+    if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+        echo -e "\n\033[33mNote: just PARALLEL=\"true\" so above logs may be jumbled. Run again with \`just s <command>\` to run sequentially with colorization.\033[0m"
     fi
 
 _check_dependencies:
@@ -590,13 +591,11 @@ _check_uv_modified_files:
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
-    echo
-    echo "Modified files:"
-    MODIFIED=0
-    for file in $(git diff --name-only | grep -E 'uv\.lock|pyproject\.toml' || true); do
-        echo "$file"
-        MODIFIED=1
-    done
-    if [ "$MODIFIED" -eq 1 ]; then
+    # diff against HEAD so staged changes count
+    MODIFIED=$(git diff --name-only HEAD | grep -E 'uv\.lock|pyproject\.toml' || true)
+    if [ -n "$MODIFIED" ]; then
+        echo
+        echo "Modified files:"
+        echo "$MODIFIED"
         echo -e "\n${RED}** WARNING: Local uv files modified! Check them in! **${RESET}\n"
     fi
