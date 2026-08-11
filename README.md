@@ -70,7 +70,7 @@ just setup
 
 You may recieve some errors about missing tools. Install them, then rerun until it passes.
 
-You also need **config****** in a `.env` per service.**
+You also need **config in a `.env` per service**.
 
 To get started, we need database info:
 
