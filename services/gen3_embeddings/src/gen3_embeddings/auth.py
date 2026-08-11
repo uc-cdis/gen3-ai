@@ -224,10 +224,6 @@ async def _get_token_claims(
     if not token:
         raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
 
-    # Audience is not used within Gen3 AuthN/Z service to individually represent Gen3 services
-    # So don't bother setting it, b/c it doesn't add any additional security. Services
-    # sometimes will add the URL of the Gen3 Auth service and look for that, but that does
-    # nothing to validate themselves as recipients and we're already validating the signature.
     audience = "gen3"
 
     try:

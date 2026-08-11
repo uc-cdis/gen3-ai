@@ -1,7 +1,14 @@
 """Routes for creating, reading, updating, and deleting vector collections."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette import status
 
+from common.fastapi.responses import (
+    AUTH_RESPONSES,
+    BAD_REQUEST_RESPONSE,
+    NO_CONTENT_RESPONSE,
+    not_found_response,
+)
 from gen3_embeddings.auth import parse_and_auth_request
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
 from gen3_embeddings.database.db import DataAccessLayer, get_data_access_layer
@@ -21,6 +28,11 @@ collections_router = APIRouter()
     response_model=PaginatedCollectionsResponse,
     response_model_exclude_none=True,
     summary="Read all collections",
+    description=(
+        "Returns every vector collection you have access to, one page at a time. "
+        "Set `counts=true` to also get the number of embeddings available in each collection."
+    ),
+    responses={**AUTH_RESPONSES},
     tags=["Vectorstore Collections"],
 )
 @collections_router.get(
@@ -76,6 +88,11 @@ async def list_collections(
     response_model=CollectionModel,
     response_model_exclude_none=True,
     summary="Create collection",
+    description=(
+        "Creates a new vector collection. The collection name is normalized before it is stored, "
+        "and the dimensions you supply here are enforced on every embedding added to the collection."
+    ),
+    responses={**AUTH_RESPONSES, **BAD_REQUEST_RESPONSE},
     tags=["Vectorstore Collections"],
 )
 @collections_router.post(
@@ -119,6 +136,14 @@ async def create_collection(
     response_model=CollectionModel,
     response_model_exclude_none=True,
     summary="Read collection info",
+    description=(
+        "Returns the metadata for a single collection, including its dimensions and vector type. "
+        "Set `counts=true` to also get the number of embeddings available in it."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **not_found_response("Collection"),
+    },
     tags=["Vectorstore Collections"],
     dependencies=[Depends(parse_and_auth_request)],
 )
@@ -161,6 +186,15 @@ async def get_collection(
 @collections_router.patch(
     "/vectorstore/collections/{collection_name}",
     summary="Update collection info",
+    description=(
+        "Updates the mutable metadata on a collection, such as its description. "
+        "The collection's name, dimensions, and vector type cannot be changed after creation."
+    ),
+    responses={
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection"),
+    },
     tags=["Vectorstore Collections"],
     response_model_exclude_none=True,
     dependencies=[Depends(parse_and_auth_request)],
@@ -203,8 +237,15 @@ async def update_collection(
 
 @collections_router.delete(
     "/vectorstore/collections/{collection_name}",
-    status_code=204,
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete collection",
+    description=("Permanently deletes a collection and every embedding stored in it. This cannot be undone."),
+    responses={
+        **NO_CONTENT_RESPONSE,
+        **AUTH_RESPONSES,
+        **BAD_REQUEST_RESPONSE,
+        **not_found_response("Collection"),
+    },
     tags=["Vectorstore Collections"],
     dependencies=[Depends(parse_and_auth_request)],
 )

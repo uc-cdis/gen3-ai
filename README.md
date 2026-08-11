@@ -45,7 +45,7 @@ See the [interact-able API documentation](https://uc-cdis.github.io/gen3-ai/api.
   - Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
 * `justfile`
   - Simplified setup, building, running
-  - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint` `just run gen3_embeddings`, `just build`
+  - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint`, `just run gen3_embeddings`, `just build`
   - For all commands and descriptions, simply run `just` in this repo
 
 Services (and libraries) have folder structure:

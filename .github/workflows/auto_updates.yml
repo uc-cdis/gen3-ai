@@ -5,10 +5,10 @@ on:
 
   # also schedule weekly
   schedule:
-    # 9:17AM central time Monday
+    # 8:17AM central time Monday
     # why so specific? probably a lot of people have things scheduled
-    # on the half-hour so this avoids load times at 9 / 9:30
-    - cron: '17 9 * * 1'
+    # on the half-hour so this avoids load times at 8 / 8:30
+    - cron: '17 8 * * 1'
       timezone: "America/Chicago"
 permissions:
   contents: write
@@ -46,7 +46,7 @@ jobs:
             pr_title: "chore(uv-lock): update uv.lock files"
 
     env:
-      UV_VERSION: '0.12.2'
+      UV_VERSION: '0.12.3'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'

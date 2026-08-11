@@ -11,17 +11,17 @@ By default:
 * We use a variable `vector`-type column which supports vectors of up to 2,000 dimensions
 * If you have a collection with embedding dimensionality of >2000, we use pgvector's `halfvec`
 * We create a HNSW index for optimizing L2 distance for every service-level "Vectorstore Collection"
-    - A "Vectorstore Collection" practically is a metadata table + a group of similarly dimensioned vectors
+  - A "Vectorstore Collection" practically is a metadata table + a group of similarly dimensioned vectors
       in the embedding table
 * Modifications to queries are possible through the API (e.g. sacrificing time for more accuracy), see the API specification for more details
 
 ## Startup
 
 * Log current index size and available memory:
-    - SHOW config_file;
-    - SHOW shared_buffers;
-    - SELECT pg_size_pretty(pg_relation_size('index_name'));
-    - https://github.com/pgvector/pgvector?tab=readme-ov-file#do-indexes-need-to-fit-into-memory
+  - SHOW config_file;
+  - SHOW shared_buffers;
+  - SELECT pg_size_pretty(pg_relation_size('index_name'));
+  - https://github.com/pgvector/pgvector?tab=readme-ov-file#do-indexes-need-to-fit-into-memory
 
 ## Querying
 

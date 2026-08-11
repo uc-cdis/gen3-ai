@@ -11,7 +11,7 @@
           "Embeddings"
         ],
         "summary": "Read embedding from collection",
-        "description": "Read a single embedding from a specific collection.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    embedding_uuid: UUID of the embedding.\n    dal: Data access layer dependency.\n\nReturns:\n    SingleEmbeddingResult\n\nRaises:\n    HTTPException: 404 if the collection or embedding is not found.",
+        "description": "Returns a single embedding from a collection, looked up by its UUID.",
         "operationId": "get_embedding_from_collection_vectorstore_collections__collection_name__embeddings__embedding_uuid__get",
         "parameters": [
           {
@@ -45,6 +45,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -62,7 +71,7 @@
           "Embeddings"
         ],
         "summary": "Update embedding in collection",
-        "description": "Update the embedding vector for a given collection and embedding ID.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    embedding_uuid: UUID of the embedding.\n    body: Request body containing the new embedding vector and/or metadata.\n    dal: Data access layer dependency.\n\nReturns:\n    SingleEmbeddingResult containing the updated embedding.\n\nRaises:\n    HTTPException: 404 if the collection is not found; 400 if update fails.",
+        "description": "Replaces the vector and/or metadata of an existing embedding, looked up by its UUID. A new vector must match the collection's dimensions.",
         "operationId": "update_embedding_in_collection_vectorstore_collections__collection_name__embeddings__embedding_uuid__put",
         "parameters": [
           {
@@ -106,6 +115,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -123,7 +144,7 @@
           "Embeddings"
         ],
         "summary": "Delete embedding from collection",
-        "description": "Delete an embedding from a specific collection.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    embedding_uuid: UUID of the embedding to delete.\n    dal: Data access layer dependency.\n\nReturns:\n    None on success.\n\nRaises:\n    HTTPException: 404 if the collection or embedding is not found.",
+        "description": "Permanently deletes a single embedding from a collection, looked up by its UUID. This cannot be undone.",
         "operationId": "delete_embedding_vectorstore_collections__collection_name__embeddings__embedding_uuid__delete",
         "parameters": [
           {
@@ -148,7 +169,16 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Successful operation, no content returned"
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
           },
           "422": {
             "description": "Validation Error",
@@ -169,7 +199,7 @@
           "Embeddings"
         ],
         "summary": "Create or update embeddings in collection",
-        "description": "TODO: implementaion for StringArrayInput and ai_model\n\nCreate or update one or more embeddings in a specific collection.\n\nThis minimal implementation only accepts raw numeric vectors.\n\n- If `body.authz` is provided, use the authz path for all embeddings.\n- If not provided, default authz is `/vectorstore/collections/{collection_name}`.\n- Check `create` and `update` permissions on:\n    - the collection authz path, and\n    - the embedding authz paths.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    body: Request body containing a list of embedding vectors.\n    ai_model: Optional model name; not used in this minimal version.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponse containing the created embeddings.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if dimensions mismatch.",
+        "description": "Creates one or more embeddings in a collection, replacing any that already exist with the same UUID. Every vector must match the collection's dimensions.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, that path is applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need both `create` and `update` permission on the collection path and on the resulting embedding paths.",
         "operationId": "put_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_put",
         "parameters": [
           {
@@ -229,6 +259,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -246,7 +288,7 @@
           "Embeddings"
         ],
         "summary": "Read all embeddings from collection",
-        "description": "List all embeddings within a specific collection.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    page: Page number for pagination (1-based).\n    page_size: Number of items per page.\n    dal: Data access layer dependency.\n\nReturns:\n    PaginatedEmbeddingResponse containing all embeddings in the collection.\n\nRaises:\n    HTTPException: 404 if the collection is not found.",
+        "description": "Returns the embeddings in a collection, one page at a time. Set `exclude_info=true` to omit the `info` block from each result.",
         "operationId": "list_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_get",
         "parameters": [
           {
@@ -303,6 +345,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -320,7 +371,7 @@
           "Embeddings"
         ],
         "summary": "Create embeddings in collection",
-        "description": "TODO: implementaion for StringArrayInput and ai_model\n\nCreate one or more embeddings in a specific collection.\n\nThis minimal implementation only accepts raw numeric vectors.\n\n- If `body.authz` is provided (list of authz paths), use those authz paths for all embeddings.\n- If not provided, default authz is `/vectorstore/collections/{collection_name}`.\n- Check `create` on:\n    - the collection authz path, and\n    - the embedding authz paths.\n\nArgs:\n    request: The request object.\n    collection_name: Name of the collection.\n    body: Request body containing a list of embedding vectors.\n    ai_model: Optional model name; not used in this minimal version.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponse containing the created embeddings.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if dimensions mismatch.",
+        "description": "Creates one or more embeddings in a collection. Every vector must match the collection's dimensions. Use `PUT` on this path instead if you want existing embeddings to be replaced rather than rejected.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, those paths are applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need `create` permission on the collection path and on the resulting embedding paths.",
         "operationId": "create_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_post",
         "parameters": [
           {
@@ -380,6 +431,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -399,7 +462,7 @@
           "Embeddings (Bulk Read)"
         ],
         "summary": "Read select embeddings from unknown collections",
-        "description": "Read a selection of embeddings by UUID across any collection.\n\nArgs:\n    request (Request): The request object.\n    embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.\n    exclude_info (bool): If True, exclude the 'info' block for each embedding.\n    dal (DataAccessLayer): Data access layer dependency.\n\nReturns:\n    EmbeddingResponseBinaryWithCollections including collection metadata\n    for each embedding.",
+        "description": "Returns the requested embeddings by UUID without needing to know which collection each one belongs to, along with the metadata for every collection involved. Vectors are returned in a binary encoding. UUIDs that do not resolve are omitted from the response rather than raising an error.\n\nThis uses `POST` so the UUID list can be sent in the request body, but it does not create anything.",
         "operationId": "get_embeddings_bulk_unknown_collections_embeddings_bulk_post",
         "parameters": [
           {
@@ -443,6 +506,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -462,7 +531,7 @@
           "Embeddings (Bulk Read)"
         ],
         "summary": "Read select embeddings from collection",
-        "description": "TODO: post here but actually reading, how to hanle authz here?\n\nRead a selection of embeddings by UUID from a specific collection.\n\nArgs:\n    request (Request): The request object.\n    collection_name (str): Name of the collection to read from.\n    embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.\n    exclude_info (bool): If True, exclude the 'info' block for each embedding.\n    dal (DataAccessLayer): Data access layer dependency.\n\nReturns:\n    EmbeddingResponse containing the embeddings found in the specified collection.\n\nRaises:\n    HTTPException: 404 if the collection is not found.",
+        "description": "Returns the requested embeddings by UUID from a single known collection. Vectors are returned in a binary encoding. UUIDs that do not resolve within the collection are omitted from the response rather than raising an error.\n\nThis uses `POST` so the UUID list can be sent in the request body, but it does not create anything.",
         "operationId": "get_embeddings_bulk_from_collection_vectorstore_collections__collection_name__embeddings_bulk_post",
         "parameters": [
           {
@@ -515,6 +584,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -534,7 +612,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read all collections",
-        "description": "List all existing collections.\n\nArgs:\n    request: The request object\n    dal: Data access layer dependency.\n    counts: Whether to include available embeddings count.\n\nReturns:\n    PaginatedCollectionsResponse containing all collections.",
+        "description": "Returns every vector collection you have access to, one page at a time. Set `counts=true` to also get the number of embeddings available in each collection.",
         "operationId": "list_collections_vectorstore_collections_get",
         "parameters": [
           {
@@ -582,6 +660,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -599,7 +683,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Create collection",
-        "description": "Create a new collection.\n\nArgs:\n    request: The request object\n    body: Request body containing collection_name, description, and dimensions.\n    dal: Data access layer dependency.\n\nReturns:\n    CollectionModel for the created collection.",
+        "description": "Creates a new vector collection. The collection name is normalized before it is stored, and the dimensions you supply here are enforced on every embedding added to the collection.",
         "operationId": "create_collection_vectorstore_collections_post",
         "requestBody": {
           "required": true,
@@ -622,6 +706,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -641,7 +734,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read collection info",
-        "description": "Read information about a specific collection.\n\nArgs:\n    collection_name: Name of the collection.\n    dal: Data access layer dependency.\n\nReturns:\n    CollectionModel representing the collection.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Returns the metadata for a single collection, including its dimensions and vector type. Set `counts=true` to also get the number of embeddings available in it.",
         "operationId": "get_collection_vectorstore_collections__collection_name__get",
         "parameters": [
           {
@@ -675,6 +768,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -692,7 +794,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Update collection info",
-        "description": "Update mutable metadata fields for a collection.\n\nArgs:\n    collection_name: Name of the collection to update.\n    body: Request body containing fields to update (e.g., description).\n    dal: Data access layer dependency.\n\nReturns:\n    A simple success status dict.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Updates the mutable metadata on a collection, such as its description. The collection's name, dimensions, and vector type cannot be changed after creation.",
         "operationId": "update_collection_vectorstore_collections__collection_name__patch",
         "parameters": [
           {
@@ -724,6 +826,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -741,7 +855,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Delete collection",
-        "description": "Delete a collection by name.\n\nArgs:\n    collection_name: Name of the collection to delete.\n    dal: Data access layer dependency.\n\nReturns:\n    None on success.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Permanently deletes a collection and every embedding stored in it. This cannot be undone.",
         "operationId": "delete_collection_vectorstore_collections__collection_name__delete",
         "parameters": [
           {
@@ -756,7 +870,19 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Successful operation, no content returned"
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
           },
           "422": {
             "description": "Validation Error",
@@ -777,7 +903,7 @@
           "Vectorstore Search"
         ],
         "summary": "Search embeddings in collection",
-        "description": "TODO: support for ai_model\nTODO: raw text search\n\nPerform a vector search within a specific collection.\n\nArgs:\n    request: The request object.\n    body: SearchRequestBody containing the query vector and parameters.\n    collection_name: Name of the collection to search.\n    ai_model: Optional model name; not used in this minimal implementation.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    SearchResponse containing search hits for this collection.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if input is invalid.",
+        "description": "Finds the embeddings in a collection nearest to the query vector you provide, ordered by similarity. The query vector must have the same number of dimensions as the collection. Set `exclude_info=true` to omit the `info` block from each result.",
         "operationId": "search_in_collection_vectorstore_collections__collection_name__search_post",
         "parameters": [
           {
@@ -837,6 +963,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -856,7 +994,7 @@
           "Vectorstore Search"
         ],
         "summary": "Search embeddings across unknown collections",
-        "description": "TODO: support for ai_model\n\nPerform a vector search across multiple collections.\n\nArgs:\n    request: The request object.\n    body: SearchRequestBody containing the query vector and parameters.\n    collections: Optional comma-separated list of collection names to restrict the search.\n    ai_model: Optional model name; not used in this minimal implementation.\n    vector_type: The type of vector (vector or halfvec) to search against.\n    exclude_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    SearchResponse containing search hits across collections.\n\nRaises:\n    HTTPException: 400 if invalid collections are specified or input is invalid.",
+        "description": "Finds the embeddings nearest to the query vector across every collection you have access to, ordered by similarity. Pass a comma-separated `collections` list to restrict the search to specific collections. Only collections matching the requested `vector_type` and the query vector's dimensions are searched.",
         "operationId": "search_across_collections_vectorstore_search_post",
         "parameters": [
           {
@@ -931,6 +1069,15 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
           },
           "422": {
             "description": "Validation Error",
