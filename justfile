@@ -416,6 +416,7 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         just markdown_lint || MARKDOWN_STATUS=$?
         # last, so it also cleans up after the fixers above
         just whitespace_lint
+
         just _check_uv_modified_files
 
         just PARALLEL="{{PARALLEL}}" _warn
