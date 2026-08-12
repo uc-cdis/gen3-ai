@@ -1,6 +1,6 @@
 [project]
 name = "gen3_embeddings"
-version = "0.1.0"
+version = "0.1.1"
 description = "Gen3 Embeddings"
 dependencies = [
     "asyncpg",
