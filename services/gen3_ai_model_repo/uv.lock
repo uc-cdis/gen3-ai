@@ -331,7 +331,6 @@ dependencies = [
     { name = "cdispyutils" },
     { name = "click" },
     { name = "cryptography" },
-    { name = "dotenv" },
     { name = "fastapi" },
     { name = "gen3authz" },
     { name = "gunicorn" },
@@ -362,7 +361,6 @@ requires-dist = [
     { name = "cdispyutils", specifier = ">=2.5.1" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "gen3authz", specifier = ">=3.0.1" },
     { name = "gunicorn", specifier = ">=25.1.0" },
@@ -449,17 +447,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/81/e1/56027a71e31b02ddc53c7d65b01e68edf64dea2932122fe7746a516f75d5/dill-0.4.1.tar.gz", hash = "sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa", size = 187315, upload-time = "2026-01-19T02:36:56.85Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/77/dc8c558f7593132cf8fefec57c4f60c83b16941c574ac5f619abb3ae7933/dill-0.4.1-py3-none-any.whl", hash = "sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d", size = 120019, upload-time = "2026-01-19T02:36:55.663Z" },
-]
-
-[[package]]
-name = "dotenv"
-version = "0.9.9"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "python-dotenv" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/b7/545d2c10c1fc15e48653c91efde329a790f2eecfbbf2bd16003b5db2bab0/dotenv-0.9.9-py2.py3-none-any.whl", hash = "sha256:29cf74a087b31dafdb5a446b6d7e11cbce8ed2741540e2339c69fbef92c94ce9", size = 1892, upload-time = "2025-02-19T22:15:01.647Z" },
 ]
 
 [[package]]

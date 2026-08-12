@@ -1,7 +1,8 @@
 -- ===========================================================================
 -- IMPORTANT! READ! DO NOT SKIP THIS!!
 -- ===========================================================================
--- We need to follow an expand/contract pattern for db migrations for safety.
+-- We need to follow an expand/contract pattern for db migrations
+-- for safety.
 -- e.g. if you are replacing a column or doing anything that would BREAK running
 --      services, stop. Do not do that. Instead, _expand_ the current schema to ONLY ADD
 --      new things which are not breaking. Then, once everyone has completed that migration,
@@ -56,7 +57,7 @@ CREATE TABLE IF NOT EXISTS models (
 
     description TEXT,
 
-    tags TEXT [] DEFAULT '{}',
+    tags TEXT[] DEFAULT '{}',
 
     current_revision TEXT NOT NULL DEFAULT 'main',
 
