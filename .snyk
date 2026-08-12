@@ -14,4 +14,8 @@ ignore:
     - '*':
         reason: False Positive license issue
         created: 2026-04-16T13:44:53.120Z
+  'snyk:lic:pip:pathspec:MPL-2.0':
+    - '*':
+        reason: False Positive license issue
+        created: 2026-08-12T00:00:00.000Z
 patch: {}
