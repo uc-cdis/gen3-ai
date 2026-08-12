@@ -461,7 +461,7 @@ class DataAccessLayer:
                 SELECT *
                 FROM collections
                 WHERE collection_name = ANY($1::text[])
-                ORDER BY created_at
+                ORDER BY collection_name
                 LIMIT $3::int
                 OFFSET $2::int
                 """
@@ -871,7 +871,7 @@ class DataAccessLayer:
                 f"""
                 SELECT * FROM {table}
                 WHERE collection_id = $1::bigint
-                ORDER BY created_at
+                ORDER BY embedding_id
                 OFFSET $2::int
                 LIMIT $3::int
                 """
