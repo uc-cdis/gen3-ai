@@ -128,11 +128,11 @@ def embedding_to_binary_result(
             metadata=emb.metadata,
         )
 
-    if hasattr(emb.embedding, "to_binary"):
-        # works for both Vector and HalfVector classes
-        emb_bytes = emb.embedding.to_binary()
+    if hasattr(emb.embedding, "to_numpy"):
+        # to_numpy() is a zero-copy native-byte-order view we can serialize directly.
+        emb_bytes = emb.embedding.to_numpy().tobytes()
     else:
-        # works for the numpy arrays
+        # already a numpy array
         emb_bytes = emb.embedding.tobytes()
 
     return SingleEmbeddingResultBinary(
