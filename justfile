@@ -553,7 +553,7 @@ whitespace_lint: _check_dependencies
 
 # Run a service in docker
 [group('run')]
-@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="4141": _check_dependencies
+@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
@@ -562,15 +562,14 @@ whitespace_lint: _check_dependencies
     docker rm "{{SERVICE}}" 2>/dev/null || true
     docker run --name "{{SERVICE}}" --env-file "services/{{SERVICE}}/.env" -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} "{{SERVICE}}:latest"
 
-# Run a service using gunicorn
+# Run a service using uvicorn (pass PORT to run more than one service at once)
 [group('run')]
-@run SERVICE: _check_dependencies
+@run SERVICE PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
-    print_header "just run:" "running" "{{SERVICE}}" "service..."
-    export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
-    uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
+    print_header "just run:" "running" "{{SERVICE}}" "service on port {{PORT}}..."
+    uv run --directory "./services/{{SERVICE}}" uvicorn {{SERVICE}}.main:app_instance --host 0.0.0.0 --port {{PORT}}
 
 _warn:
     #!/usr/bin/env bash

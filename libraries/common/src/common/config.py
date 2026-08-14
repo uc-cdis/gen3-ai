@@ -31,16 +31,23 @@ def get_venv_root() -> Path | None:
 CURRENT_DIR = get_venv_root() or os.path.dirname(os.path.realpath(__file__))
 CONFIG_PATH = os.path.abspath(os.getenv("CONFIG_PATH", f"{CURRENT_DIR}/.env"))
 
-starlette_config = Config(CONFIG_PATH)
+# Containers configure everything through environment variables and ship no .env, and
+# starlette emits a UserWarning for a missing env_file, so only pass one that exists.
+CONFIG_FILE_EXISTS = os.path.isfile(CONFIG_PATH)
+
+starlette_config = Config(CONFIG_PATH if CONFIG_FILE_EXISTS else None)
 DEBUG = starlette_config("DEBUG", cast=bool, default=False)
 
 # this turns on debug logging for certain noisy internal libraries
-# Note: the list of libraries is in the gunicorn.conf.py
+# Note: the list of libraries is in common/logging_setup.py
 VERBOSE_INTERNAL_LOGS = starlette_config("VERBOSE_INTERNAL_LOGS", cast=bool, default=False)
 
 logging = cdislogging.get_logger(__name__, log_level="debug" if DEBUG else "info")
 
-logging.info(f"Using configuration file: {CONFIG_PATH}")
+if CONFIG_FILE_EXISTS:
+    logging.info(f"Using configuration file: {CONFIG_PATH}")
+else:
+    logging.info(f"No configuration file at {CONFIG_PATH}, using environment variables only")
 
 # will skip authorization when a token is not provided. note that if a token is provided, then
 # auth will still occur
@@ -92,10 +99,13 @@ ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | PUBLIC_ROUTES
 
 # This app exports traces using OpenTelemetry. By default in Gen3, we use Alloy for collection.
 ENABLE_OPENTELEMETRY_TRACES = starlette_config("ENABLE_OPENTELEMETRY_TRACES", cast=bool, default=True)
-# For local development, set this to an EMPTY STRING and it will output to console. See gunicorn.conf.py
+# For local development, set this to an EMPTY STRING and it will output to console. See common/telemetry.py
 OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config(
-    "OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring.4318", cast=str
+    "OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring:4318", cast=str
 )
+# Alloy accepts both. `http/protobuf` pairs with port 4318 and `grpc` with 4317; a mismatched
+# pair fails at export time, not at startup.
+OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf", cast=str)
 
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
 

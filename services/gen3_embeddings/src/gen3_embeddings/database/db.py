@@ -861,8 +861,7 @@ class DataAccessLayer:
             limit (int): Maximum number of rows to return.
 
         Returns:
-            list[Embedding]: Embeddings visible to this caller under RLS. Ordering is by
-            `created_at`, which is not unique, so rows can shift between pages.
+            list[Embedding]: Embeddings visible to this caller under RLS.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 

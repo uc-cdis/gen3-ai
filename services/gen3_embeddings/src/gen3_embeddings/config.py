@@ -16,9 +16,6 @@ logging = common_config.logging
 # name of the top-level package in this service
 logging.name = "gen3_embeddings"
 
-# gunicorn setting for the number of workers to spawn, see https://docs.gunicorn.org/en/stable/settings.html#workers
-GUNICORN_WORKERS = starlette_config("GUNICORN_WORKERS", cast=int, default="1")
-
 DEFAULT_PAGE_SIZE = starlette_config("DEFAULT_PAGE_SIZE", default=100)
 MAX_PAGE_SIZE = starlette_config("MAX_PAGE_SIZE", default=1000)
 

@@ -8,6 +8,8 @@ from importlib.metadata import version
 from fastapi import APIRouter, FastAPI
 from gen3authz.client.arborist.async_client import ArboristClient
 
+from common.logging_setup import configure_logging
+from common.telemetry import configure_tracing
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.database.db import close_pool, get_pool
@@ -156,6 +158,9 @@ def get_app() -> FastAPI:
         root_path=config.URL_PREFIX,
         lifespan=lifespan,
     )
+    configure_logging()
+    configure_tracing(app, "gen3_embeddings")
+
     app.include_router(route_aggregator)
 
     return app
