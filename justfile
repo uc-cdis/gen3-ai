@@ -346,9 +346,15 @@ update_versions: _check_dependencies
 
     UV_LATEST=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name)
     JUST_LATEST=$(curl -s https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
+    DBMATE_LATEST=$(curl -s https://api.github.com/repos/amacneil/dbmate/releases/latest | jq -r .tag_name)
 
     if [[ ! $UV_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid UV tag${RESET}"; exit 1; fi
     if [[ ! $JUST_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid JUST tag${RESET}"; exit 1; fi
+    if [[ ! $DBMATE_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid DBMATE tag${RESET}"; exit 1; fi
+
+    # the workflows build a GitHub release download URL (tag keeps the "v"), while Dockerfile.k8s
+    # pulls a ghcr image tag (no "v"). Both must resolve to the same dbmate build.
+    DBMATE_LATEST_NO_V="${DBMATE_LATEST#v}"
 
     for file in .github/workflows/*.yml; do
         if grep -E "UV_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
@@ -362,8 +368,23 @@ update_versions: _check_dependencies
         else
             sed -i.bak -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file"
         fi
+
+        if grep -E "DBMATE_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
+            echo "Skipping DBMATE in $file"
+        else
+            sed -i.bak -E "s/(DBMATE_VERSION:[[:space:]]*')[^']*'/\\1${DBMATE_LATEST}'/g" "$file"
+        fi
         rm -f "$file.bak"
     done
+
+    if [ -f Dockerfile.k8s ]; then
+        if grep -E "ARG DBMATE_VERSION=.*#[[:space:]]*allow-old-version" Dockerfile.k8s > /dev/null; then
+            echo "Skipping DBMATE in Dockerfile.k8s"
+        else
+            sed -i.bak -E "s/(ARG DBMATE_VERSION=)[^[:space:]]*/\\1${DBMATE_LATEST_NO_V}/" Dockerfile.k8s
+            rm -f Dockerfile.k8s.bak
+        fi
+    fi
     echo "Up to date!"
 
 # Delete all .venv and .lock files (irreversible)
