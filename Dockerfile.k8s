@@ -6,6 +6,13 @@ ARG AZLINUX_BASE_VERSION=feat_pythonuv-3.13-pythonuv
 ARG SERVICE_NAME
 # Pinned to match DBMATE_VERSION in .github/workflows/tests_and_build.yml, so the binary that
 # runs migrations in the init container is the one CI validated them against.
+#
+# Kept current by `just update_versions`. To hold it back when the latest is broken, put
+# `# allow-old-version` on its own line above the ARG; Docker treats a mid-line `#` as an
+# argument, not a comment, so it cannot go inline the way it does in the workflows.
+#
+# IMPORTANT: If you are reading this and `# allow-old-version` is present, try removing it and
+# running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
 ARG DBMATE_VERSION=2.35.0
 
 # Named stage because --from does not expand build arguments inline.

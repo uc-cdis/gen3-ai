@@ -378,7 +378,7 @@ update_versions: _check_dependencies
     done
 
     if [ -f Dockerfile.k8s ]; then
-        if grep -E "ARG DBMATE_VERSION=.*#[[:space:]]*allow-old-version" Dockerfile.k8s > /dev/null; then
+        if grep -E "^#[[:space:]]*allow-old-version" Dockerfile.k8s > /dev/null; then
             echo "Skipping DBMATE in Dockerfile.k8s"
         else
             sed -i.bak -E "s/(ARG DBMATE_VERSION=)[^[:space:]]*/\\1${DBMATE_LATEST_NO_V}/" Dockerfile.k8s
