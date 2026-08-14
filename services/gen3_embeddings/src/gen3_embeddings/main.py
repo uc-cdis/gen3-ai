@@ -14,10 +14,12 @@ from gen3_embeddings.database.db import close_pool, get_pool
 from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
+from gen3_embeddings.routes.embeddings_bulk import embeddings_bulk_router
 from gen3_embeddings.routes.search import vectorstore_search_router
 
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
+route_aggregator.include_router(embeddings_bulk_router)
 route_aggregator.include_router(collections_router)
 route_aggregator.include_router(vectorstore_search_router)
 route_aggregator.include_router(basic_router)

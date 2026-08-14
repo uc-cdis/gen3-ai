@@ -107,6 +107,10 @@ jobs:
     services:
       postgres:
         image: quay.io/cdis/docker-bitnami-pgvector:16
+        env:
+          # not a credential: trust auth for a throwaway CI container, so there is no
+          # password to commit. detect-secrets flags any key containing "PASSWORD".
+          ALLOW_EMPTY_PASSWORD: 'yes'  # pragma: allowlist secret
         ports:
           - 5432:5432
         options: >-
