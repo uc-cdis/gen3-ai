@@ -110,8 +110,12 @@ OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", de
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
 
 # Metrics provider, at the moment we only support "prometheus". If you want to use a different one,
-# you will need to implement the common interface in common/metrics/base.py.
-# Note: default is no metrics.
+# you will need to implement the common interface in common/metrics.py.
 ENABLE_METRICS = starlette_config("ENABLE_METRICS", default=True, cast=bool)
 METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default="prometheus", cast=str)
 PROMETHEUS_MULTIPROC_DIR = starlette_config("PROMETHEUS_MULTIPROC_DIR", default="/var/tmp/prometheus_metrics", cast=str)
+# prometheus_client decides between its in-memory and its multiprocess value class once, when it
+# is first imported, based on this env var. Anything that sets the var later - including
+# cdispyutils' BaseMetrics, which sets it in its constructor - leaves counters in memory while
+# /metrics serves a multiprocess registry reading an empty directory, i.e. a 200 with no data.
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", PROMETHEUS_MULTIPROC_DIR)

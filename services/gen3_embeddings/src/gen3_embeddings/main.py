@@ -5,10 +5,12 @@ FastAPI app creation, general entrypoint into the service.
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from gen3authz.client.arborist.async_client import ArboristClient
 
+from common.auth import get_user_id
 from common.logging_setup import configure_logging
+from common.metrics import ServiceMetrics, get_metrics_client
 from common.telemetry import configure_tracing
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
@@ -17,6 +19,9 @@ from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
 from gen3_embeddings.routes.search import vectorstore_search_router
+
+API_REQUESTS_COUNTER = "gen3_embeddings_api_requests"
+API_REQUESTS_COUNTER_DESCRIPTION = "API requests for Gen3 Embeddings."
 
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
@@ -160,6 +165,47 @@ def get_app() -> FastAPI:
     )
     configure_logging()
     configure_tracing(app, "gen3_embeddings")
+
+    # Mounts /metrics on the app as a side effect, so it has to run before the app serves traffic.
+    app.state.metrics = ServiceMetrics(metrics_client=get_metrics_client(app))
+
+    @app.middleware("http")
+    async def middleware_record_api_metric(request: Request, call_next):
+        """
+        Count every request that reaches a metered endpoint.
+
+        Args:
+            request (Request): the incoming HTTP request.
+            call_next (Callable): the rest of the middleware stack, called by FastAPI.
+
+        Returns:
+            Response: the response produced downstream, unchanged.
+        """
+        response = await call_next(request)
+
+        if request.url.path in config.ENDPOINTS_WITHOUT_METRICS:
+            return response
+
+        metrics = getattr(app.state, "metrics", None)
+        if not metrics or not metrics.metrics_client:
+            return response
+
+        try:
+            user_id = await get_user_id(request=request)
+        except HTTPException as exc:
+            logging.debug(f"Could not retrieve user_id. Error: '{exc}'. Setting user_id to 'Unknown' for metrics")
+            user_id = "Unknown"
+
+        metrics.add_to_api_interaction_counter(
+            name=API_REQUESTS_COUNTER,
+            description=API_REQUESTS_COUNTER_DESCRIPTION,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            user_id=user_id,
+        )
+
+        return response
 
     app.include_router(route_aggregator)
 
