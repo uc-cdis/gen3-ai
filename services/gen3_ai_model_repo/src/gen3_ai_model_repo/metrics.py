@@ -1,3 +1,5 @@
+"""Metrics helpers for the Gen3 AI model repo service."""
+
 from common.metrics import ServiceMetrics
 
 
@@ -5,6 +7,7 @@ class AiModelRepoServiceMetrics(ServiceMetrics):
     """Service metrics collector for the Gen3 AI model repo service."""
 
     def __init__(self, metrics_client) -> None:
+        """Initialize the metrics collector with a backing client."""
         self.metrics_client = metrics_client
 
     def add_to_api_interaction_counter(

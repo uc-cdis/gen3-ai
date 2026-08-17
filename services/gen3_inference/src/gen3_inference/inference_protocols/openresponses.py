@@ -1,3 +1,5 @@
+"""Inference client for the Open Responses protocol."""
+
 from urllib.parse import urlparse
 
 import openai
@@ -21,30 +23,44 @@ from gen3_inference.types import OpenResponsesError
 
 
 class OpenResponsesClient(InferenceProtocolClient):
-    """OpenResponses inference protocol client.
+    """
+    Talks to an upstream server that already speaks Open Responses.
 
-    generate_non_streaming_response: Generate a non-streaming response.
-    generate_streaming_response: Generate a streaming response.
+    No protocol translation is needed, so requests are passed through largely unchanged.
     """
 
     NAME = "openresponses"
 
     def __init__(self, base_url: str | None = None):
+        """
+        Args:
+            base_url (str | None): Base URL of the upstream Open Responses server.
+        """
         super().__init__(base_url=base_url)
 
     async def generate_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
-        """Generate a non-streaming response.
+        """
+        Generate a complete response in a single reply.
 
-        body: The request payload to send to the inference provider.
-        model_info: Metadata describing the target model.
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            JSONResponse: The full response.
         """
         return self._create_non_streaming_response(body, model_info)
 
     def generate_streaming_response(self, body: CreateResponseBody, model_info: dict) -> StreamingResponse:
-        """Generate a streaming response.
+        """
+        Generate a response as a stream of Open Responses events.
 
-        body: The request payload to send to the inference provider.
-        model_info: Metadata describing the target model.
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            StreamingResponse: The streamed response.
         """
         return self._create_streaming_response(body, model_info)
 

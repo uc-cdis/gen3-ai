@@ -1,3 +1,5 @@
+"""Authorization helpers for the Gen3 AI model repo service."""
+
 from fastapi import Request
 
 from common.auth import authorize_request

@@ -23,7 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-common = { path = "../../libraries/common" }
+common = { path = "/Users/sairamkova/workspace/gen3-ai/libraries/common" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen3_ai_model_repo"]

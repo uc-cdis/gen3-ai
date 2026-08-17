@@ -1,3 +1,5 @@
+"""Generic storage provider interfaces for the Gen3 AI model repo service."""
+
 from abc import ABC, abstractmethod
 
 

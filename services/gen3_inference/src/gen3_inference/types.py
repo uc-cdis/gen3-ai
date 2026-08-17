@@ -1,3 +1,5 @@
+"""Shared types for Open Responses request and error payloads."""
+
 import json
 from typing import Annotated
 
@@ -29,7 +31,8 @@ class OpenResponsesError(Error):
     ]
 
     def to_json(self) -> dict:
-        """Convert the error to a JSON-compatible dictionary.
+        """
+        Convert the error to a JSON-compatible dictionary.
 
         Returns:
             dict: A dictionary containing the serialized error payload.

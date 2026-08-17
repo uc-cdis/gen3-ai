@@ -1,3 +1,5 @@
+"""Shared route helpers for the Gen3 AI model repo service."""
+
 from pydantic import BaseModel, Field
 
 

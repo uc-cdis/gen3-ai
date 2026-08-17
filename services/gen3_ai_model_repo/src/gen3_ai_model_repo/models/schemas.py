@@ -1,3 +1,5 @@
+"""Schema models for the Gen3 AI model repo service."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field

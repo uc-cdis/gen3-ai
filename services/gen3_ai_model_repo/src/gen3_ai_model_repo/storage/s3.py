@@ -1,3 +1,5 @@
+"""S3 storage for the Gen3 AI model repo service."""
+
 from gen3_ai_model_repo.storage.provider import StorageProvider
 
 

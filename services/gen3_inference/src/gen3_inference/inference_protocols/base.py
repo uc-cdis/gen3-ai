@@ -17,29 +17,44 @@ generate_streaming_response: Generate a streaming response from the request body
 
 
 class InferenceProtocolClient(ABC):
-    """Base class for inference protocol clients.
+    """
+    Interface every upstream inference protocol client must implement.
 
-    generate_non_streaming_response: Generate a non-streaming response from the request body.
-    generate_streaming_response: Generate a streaming response from the request body.
+    Subclasses adapt one wire protocol (OpenAI Chat, Open Responses, ...) so the routes can
+    stay protocol-agnostic.
     """
 
     def __init__(self, base_url: str | None = None):
+        """
+        Args:
+            base_url (str | None): Base URL of the upstream inference server.
+        """
         self.base_url = base_url
 
     @abstractmethod
     async def generate_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
-        """Generate a non-streaming response.
+        """
+        Generate a complete response in a single reply.
 
-        body: The request payload to send to the inference provider.
-        model_info: Metadata describing the target model.
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            JSONResponse: The full response.
         """
         raise NotImplementedError()
 
     @abstractmethod
     def generate_streaming_response(self, body: CreateResponseBody, model_info: dict) -> StreamingResponse:
-        """Generate a streaming response.
+        """
+        Generate a response as a stream of Open Responses events.
 
-        body: The request payload to send to the inference provider.
-        model_info: Metadata describing the target model.
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            StreamingResponse: The streamed response.
         """
         raise NotImplementedError()

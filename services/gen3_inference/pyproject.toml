@@ -5,7 +5,10 @@ description = "Gen3 Inference"
 dependencies = [
     "common",
     "openai>=2.30.0",
-    "openresponses-types>=2.3.0.post1",
+    # Upper bound is load-bearing: this package's enums are code-generated with positional
+    # names (Type1, Type34, ...) that get renumbered between minor releases. 2.4.0 dropped
+    # Type36 and repurposed Type34 from "text" to "compaction"... etc.
+    "openresponses-types>=2.3.0.post1,<2.4.0",
 ]
 requires-python = "~=3.13.0"
 
@@ -20,7 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-common = { path = "../../libraries/common" }
+common = { path = "/Users/sairamkova/workspace/gen3-ai/libraries/common" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen3_inference"]

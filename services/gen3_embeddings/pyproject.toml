@@ -1,10 +1,12 @@
 [project]
 name = "gen3_embeddings"
-version = "0.1.0"
+version = "0.1.2"
 description = "Gen3 Embeddings"
 dependencies = [
     "asyncpg",
     "common",
+    "pgvector>=0.4.2",
+    "numpy",
 ]
 requires-python = "~=3.13.0"
 
@@ -19,7 +21,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-common = { path = "../../libraries/common" }
+common = { path = "/Users/sairamkova/workspace/gen3-ai/libraries/common" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen3_embeddings"]

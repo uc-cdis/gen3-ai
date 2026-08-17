@@ -1,3 +1,5 @@
+"""Database connectivity helpers for the Gen3 AI model repo service."""
+
 from dataclasses import dataclass
 from datetime import datetime
 

@@ -1,3 +1,5 @@
+"""Model helper utilities for the Gen3 AI model repo service."""
+
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.database.revisions import get_revision_identifier_column
 from gen3_ai_model_repo.models.schemas import (
@@ -11,9 +13,15 @@ def repository_metadata_to_model(data: dict) -> RepositoryMetadataModel:
     """
     Convert repository metadata dict into schema model.
     """
+    repo_name = data.get("repo")
+    if repo_name is None:
+        repo_name = data.get("repo_name")
+    if repo_name is None:
+        raise KeyError("Repository metadata is missing a repo name")
+
     return RepositoryMetadataModel(
         namespace=data["namespace"],
-        repo=data.get("repo") or data.get("repo_name"),
+        repo=str(repo_name),
         description=data["description"],
         tags=data.get("tags", []),
         created_at=data.get("created_at", ""),

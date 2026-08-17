@@ -1,3 +1,5 @@
+"""Database helper utilities for the Gen3 AI model repo service."""
+
 from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.db import get_db_pool
 

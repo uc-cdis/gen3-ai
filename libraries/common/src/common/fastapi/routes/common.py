@@ -1,3 +1,8 @@
+"""
+Common router with general endpoints to be used the same way
+across all Gen3 AI services.
+"""
+
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 

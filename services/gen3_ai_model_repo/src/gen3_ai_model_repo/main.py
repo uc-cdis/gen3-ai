@@ -1,3 +1,5 @@
+"""Gen3 AI Model Repo service application setup."""
+
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 

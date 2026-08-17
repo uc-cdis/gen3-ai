@@ -1,3 +1,5 @@
+"""File routes for the Gen3 AI model repo service."""
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from starlette import status

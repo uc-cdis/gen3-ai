@@ -1,3 +1,5 @@
+"""Repository routes for the Gen3 AI model repo service."""
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette import status
 
@@ -107,7 +109,7 @@ async def create_repository(
     return await create_model_metadata(
         namespace=namespace,
         model_name=repo,
-        description=request.description,
+        description=request.description or "",
         tags=request.tags,
     )
 

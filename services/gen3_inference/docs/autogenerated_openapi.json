@@ -168,9 +168,6 @@
           "403": {
             "description": "User does not have access"
           },
-          "500": {
-            "description": "Something went wrong internally when processing the request"
-          },
           "422": {
             "description": "Validation Error",
             "content": {

@@ -1,3 +1,5 @@
+"""URL helpers for the Gen3 AI model repo service."""
+
 from urllib.parse import urljoin
 
 from gen3_ai_model_repo.config import GEN3_AI_MODEL_REPO_URL

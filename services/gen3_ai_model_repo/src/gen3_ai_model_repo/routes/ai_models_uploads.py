@@ -1,3 +1,5 @@
+"""Upload routes for the Gen3 AI model repo service."""
+
 import hashlib
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile

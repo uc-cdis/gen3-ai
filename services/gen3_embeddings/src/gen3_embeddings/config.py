@@ -1,4 +1,10 @@
-# this is the config module
+"""
+Configuration handling, should use common config and overlay service-specific
+configuration.
+"""
+
+from starlette.datastructures import Secret
+
 from common import config as common_config
 
 # this is the starlette.config.Config() class instance
@@ -7,7 +13,32 @@ from common.config import starlette_config
 # common logger, don't change this
 logging = common_config.logging
 
-URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", cast=str)
+# name of the top-level package in this service
+logging.name = "gen3_embeddings"
+
+# gunicorn setting for the number of workers to spawn, see https://docs.gunicorn.org/en/stable/settings.html#workers
+GUNICORN_WORKERS = starlette_config("GUNICORN_WORKERS", cast=int, default="1")
+
+DEFAULT_PAGE_SIZE = starlette_config("DEFAULT_PAGE_SIZE", default=100)
+MAX_PAGE_SIZE = starlette_config("MAX_PAGE_SIZE", default=1000)
+
+PGDRIVER = starlette_config("PGDRIVER", default="postgresql")
+PGUSER = starlette_config("PGUSER", default="postgres")
+PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default=None)
+PGHOST = starlette_config("PGHOST", default="localhost")
+PGPORT = starlette_config("PGPORT", cast=int, default="5432")
+PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
+
+PGPOOL_MIN_SIZE = starlette_config("PGPOOL_MIN_SIZE", cast=int, default="1")
+PGPOOL_MAX_SIZE = starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5")
+
+DB_CONNECTION_STRING = starlette_config(
+    "DB_CONNECTION_STRING",
+    cast=Secret,
+    default=f"{PGDRIVER}://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}",
+)
+
+URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_URL_PREFIX", default="", cast=str)
 
 # WARNING: Careful changing these, they require close sync with the authorization source
 #          of truth. This is the "service" passed to Gen3 Authz for authorization checks
@@ -15,12 +46,12 @@ URL_PREFIX = starlette_config("GEN3_EMBEDDINGS_PROXY_URL_PREFIX", default="", ca
 #          Additional authorization is applied on a per-EMBEDDINGS Resource level within
 #          this proxy service, these are a first gate for API-level access. See the
 #          rest of the docs/service for more info on EMBEDDINGS authz.
-AUTHZ_SERVICE_NAME = starlette_config("GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_NAME", default="gen3-embeddings", cast=str)
-AUTHZ_SERVICE_RESOURCE = starlette_config(
-    "GEN3_EMBEDDINGS_PROXY_AUTHZ_SERVICE_RESOURCE",
-    default="/services/gen3-embeddings",
-    cast=str,
-)
+AUTHZ_SERVICE_NAME = starlette_config("GEN3_EMBEDDINGS_AUTHZ_SERVICE_NAME", default="gen3-embeddings", cast=str)
+# AUTHZ_SERVICE_RESOURCE = starlette_config(
+#    "GEN3_EMBEDDINGS_AUTHZ_SERVICE_RESOURCE",
+#    default="/services/gen3-embeddings",
+#    cast=str,
+# )
 
 ##### Common Config - DO NOT EDIT #####
 # DON'T EDIT THESE *VALUES* IN THIS FILE.

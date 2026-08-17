@@ -54,10 +54,13 @@ async def create_model_metadata(
         )
         await stmt.fetch(namespace, model_name, description, tags)
 
-    return await get_model_metadata(
+    metadata = await get_model_metadata(
         namespace,
         model_name,
     )
+    if metadata is None:
+        raise RuntimeError(f"Failed to reload metadata for repository {namespace}/{model_name}")
+    return metadata
 
 
 async def get_model_metadata(
@@ -282,10 +285,13 @@ async def update_model_metadata(
         set_clauses.append(f"tags = ${len(values)}")
 
     if not set_clauses:
-        return await get_model_metadata(
+        metadata = await get_model_metadata(
             namespace,
             model_name,
         )
+        if metadata is None:
+            return None
+        return metadata
 
     values.extend([namespace, model_name])
 

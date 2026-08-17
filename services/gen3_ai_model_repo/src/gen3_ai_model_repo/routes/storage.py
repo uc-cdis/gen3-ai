@@ -1,3 +1,5 @@
+"""Storage routes for the Gen3 AI model repo service."""
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 

@@ -1,3 +1,5 @@
+"""MinIO storage for the Gen3 AI model repo service."""
+
 from datetime import timedelta
 
 from minio import Minio

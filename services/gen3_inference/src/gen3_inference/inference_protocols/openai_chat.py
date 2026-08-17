@@ -1,3 +1,5 @@
+"""Inference client for the OpenAI Chat Completions protocol."""
+
 from urllib.parse import urlparse
 
 import openai
@@ -22,15 +24,15 @@ from gen3_inference.types import OpenResponsesError
 
 
 class OpenaiChat(InferenceProtocolClient):
-    """OpenAI chat inference protocol client.
-
-    generate_non_streaming_response: Generate a non-streaming chat completion response.
-    generate_streaming_response: Generate a streaming chat completion response.
-    """
+    """Talks to an upstream server that speaks the OpenAI Chat Completions protocol."""
 
     NAME = "openai_chat"
 
     def __init__(self, base_url: str | None = None):
+        """
+        Args:
+            base_url (str | None): Base URL of the upstream Chat Completions server.
+        """
         super().__init__(base_url=base_url)
 
     async def generate_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:

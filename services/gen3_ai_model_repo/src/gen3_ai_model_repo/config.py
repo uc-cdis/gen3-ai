@@ -1,15 +1,16 @@
+"""Configuration for the Gen3 AI Model Repo service."""
+
 import os
 
 from starlette.datastructures import Secret
 
-# this is the config module
 from common import config as common_config
-
-# this is the starlette.config.Config() class instance
 from common.config import starlette_config
 
 # common logger, don't change this
 logging = common_config.logging
+
+# name of the top-level package in this service
 logging.name = "gen3_ai_model_repo"
 
 

@@ -78,10 +78,15 @@ def openai_streaming_response_to_openresponses(
     openai_response_stream: Stream[ResponseStreamEvent],
     metadata: dict[str, Any] | None = None,
 ):
-    """Convert an OpenAI streaming response into an Open Responses event stream.
+    """
+    Adapt an OpenAI streaming response into an Open Responses event stream.
 
-    openai_response_stream: The streaming response events from the OpenAI SDK.
-    metadata: Optional metadata to include with the converted events.
+    Args:
+        openai_response_stream (Stream[ResponseStreamEvent]): Upstream OpenAI event stream.
+        metadata (dict[str, Any] | None): Extra metadata to associate with the response.
+
+    Returns:
+        StreamingResponse: Open Responses events, server-sent-event encoded.
     """
 
     # TODO: add metadata to some event?

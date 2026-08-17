@@ -1,3 +1,7 @@
+"""
+Common utilities that are service-agnostic
+"""
+
 from logging import Logger
 
 

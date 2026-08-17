@@ -1,3 +1,5 @@
+"""Router configuration for the Gen3 AI model repo service."""
+
 from fastapi import APIRouter
 
 from common.fastapi.routes.common import common_router

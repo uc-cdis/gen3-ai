@@ -1,7 +1,12 @@
 # Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+#
 version: v1.25.1
 # ignores vulnerabilities
 ignore:
+  'snyk:lic:pip:pathspec:MPL-2.0':
+    - '*':
+        reason: False Positive license issue
+        created: 2026-07-06T13:44:44.806Z
   'snyk:lic:pip:certifi:MPL-2.0':
     - '*':
         reason: False Positive license issue

@@ -1,15 +1,22 @@
+"""Prometheus metrics for the Gen3 Inference service."""
+
 from common.metrics import ServiceMetrics
 
 """Metrics for the Gen3 Inference service."""
 
 
 class InferenceServiceMetrics(ServiceMetrics):
-    """Metrics for the Gen3 inference service.
+    """
+    Metrics for the Gen3 inference service.
 
     add_to_api_interaction_counter: Increment the API interaction counter with labels.
     """
 
     def __init__(self, metrics_client) -> None:
+        """
+        Args:
+            metrics_client: Backing metrics client used to emit measurements.
+        """
         self.metrics_client = metrics_client
 
     def add_to_api_interaction_counter(self, **kwargs) -> None:
