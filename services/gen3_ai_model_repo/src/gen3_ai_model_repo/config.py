@@ -1,3 +1,6 @@
+from starlette.datastructures import Secret
+
+# this is the config module
 """Configuration for the Gen3 AI Model Repo service."""
 
 from common import config as common_config
@@ -5,11 +8,68 @@ from common import config as common_config
 # this is the starlette.config.Config() class instance
 from common.config import starlette_config
 
-# common logger, don't change this
 logging = common_config.logging
 
 # name of the top-level package in this service
 logging.name = "gen3_ai_model_repo"
+
+MODEL_REPO_TOKEN = starlette_config(
+    "MODEL_REPO_TOKEN",
+    default="mock-token-123456",
+    cast=str,
+)
+
+DB_DRIVER = starlette_config(
+    "DB_DRIVER",
+    default="postgresql",
+)
+
+DB_USER = starlette_config(
+    "DB_USER",
+    default="postgres",
+)
+
+DB_PASSWORD = starlette_config(
+    "DB_PASSWORD",
+    default="postgres",
+)
+
+DB_HOST = starlette_config(
+    "DB_HOST",
+    default="localhost",
+)
+
+DB_PORT = starlette_config(
+    "DB_PORT",
+    cast=int,
+    default="5432",
+)
+
+DB_DATABASE = starlette_config(
+    "DB_DATABASE",
+    default="gen3_model_repo",
+)
+
+DB_CONNECTION_STRING = starlette_config(
+    "DB_CONNECTION_STRING",
+    cast=Secret,
+    default=(f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}"),
+)
+
+URL_PREFIX = starlette_config(
+    "GEN3_AI_MODEL_REPO_URL_PREFIX",
+    default="",
+    cast=str,
+)
+
+AUTHZ_SERVICE_NAME = starlette_config(
+    "GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_NAME",
+    default="gen3-ai-model-repo",
+    cast=str,
+)
+
+# common logger, don't change this
+
 
 URL_PREFIX = starlette_config("GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX", default="", cast=str)
 
@@ -59,3 +119,4 @@ GEN3_AI_MODEL_REPO_URL = common_config.GEN3_AI_MODEL_REPO_URL
 GEN3_EMBEDDINGS_URL = common_config.GEN3_EMBEDDINGS_URL
 GEN3_INFERENCE_URL = common_config.GEN3_INFERENCE_URL
 # DO NOT EDIT THE ABOVE
+MODEL_REPO_TOKEN = "Bearer mock-token-123456"
