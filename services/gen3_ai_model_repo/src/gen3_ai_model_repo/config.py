@@ -1,12 +1,16 @@
 from starlette.datastructures import Secret
 
 # this is the config module
+"""Configuration for the Gen3 AI Model Repo service."""
+
 from common import config as common_config
 
 # this is the starlette.config.Config() class instance
 from common.config import starlette_config
 
 logging = common_config.logging
+
+# name of the top-level package in this service
 logging.name = "gen3_ai_model_repo"
 
 MODEL_REPO_TOKEN = starlette_config(

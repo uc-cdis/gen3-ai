@@ -1,3 +1,5 @@
+"""Inference client for the Open Responses protocol."""
+
 from urllib.parse import urlparse
 
 import openai
@@ -19,15 +21,45 @@ from gen3_inference.types import OpenResponsesError
 
 
 class OpenResponsesClient(InferenceProtocolClient):
+    """
+    Talks to an upstream server that already speaks Open Responses.
+
+    No protocol translation is needed, so requests are passed through largely unchanged.
+    """
+
     NAME = "openresponses"
 
     def __init__(self, base_url: str | None = None):
+        """
+        Args:
+            base_url (str | None): Base URL of the upstream Open Responses server.
+        """
         super().__init__(base_url=base_url)
 
     async def generate_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:
+        """
+        Generate a complete response in a single reply.
+
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            JSONResponse: The full response.
+        """
         return self._create_non_streaming_response(body, model_info)
 
     def generate_streaming_response(self, body: CreateResponseBody, model_info: dict) -> StreamingResponse:
+        """
+        Generate a response as a stream of Open Responses events.
+
+        Args:
+            body (CreateResponseBody): The Open Responses request.
+            model_info (dict): Metadata about the target model.
+
+        Returns:
+            StreamingResponse: The streamed response.
+        """
         return self._create_streaming_response(body, model_info)
 
     def _create_non_streaming_response(self, body: CreateResponseBody, model_info: dict) -> JSONResponse:

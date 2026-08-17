@@ -1,3 +1,7 @@
+"""
+Common configuration which is used by all services.
+"""
+
 import os
 import sys
 from pathlib import Path

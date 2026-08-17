@@ -1,3 +1,7 @@
+"""
+Common auth utilities and handling
+"""
+
 from authutils.token.fastapi import access_token
 from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer

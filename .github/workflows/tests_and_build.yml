@@ -27,8 +27,11 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.12.3'
+      JUST_VERSION: '1.58.0'
+      DBMATE_VERSION: 'latest'
+      # Note: skipping updating versions b/c workflows can't edit workflow files easily
+      COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
 
   security:
@@ -42,8 +45,8 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.12.3'
+      JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
@@ -70,6 +73,12 @@ jobs:
         with:
           tool: just@${{ env.JUST_VERSION }}
 
+      - name: Install dbmate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+          /usr/local/bin/dbmate --help
+
       - name: just install
         run: |
           just install
@@ -84,8 +93,8 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.11.8'
-      JUST_VERSION: '1.50.0'
+      UV_VERSION: '0.12.3'
+      JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
@@ -109,6 +118,12 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
 
+      - name: Install dbmate
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+          /usr/local/bin/dbmate --help
+
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ env.JUST_VERSION }}
@@ -128,10 +143,9 @@ jobs:
   image-build-push-1:
     name: Build Image and Push - Gen3 Embeddings
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [post-commit-check, security, unit-test]
+    needs: [security]
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
-      BUILD_PLATFORMS: "linux/amd64"
       DOCKERFILE_BUILD_CONTEXT: '.'
       BUILD_ARGS: SERVICE_NAME=gen3_embeddings
       OVERRIDE_REPO_NAME: gen3_embeddings

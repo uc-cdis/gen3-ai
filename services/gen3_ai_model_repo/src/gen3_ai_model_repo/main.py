@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+"""Gen3 AI Model Repo service application setup."""
+
 from importlib.metadata import version
 
 from fastapi import APIRouter, FastAPI
@@ -49,7 +51,6 @@ def get_app() -> FastAPI:
     """
     Return configured FastAPI app.
     """
-
     app = FastAPI(
         title="Gen3 AI Model Repository Service",
         version=version("gen3_ai_model_repo"),

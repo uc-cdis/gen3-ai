@@ -1,3 +1,5 @@
+"""Gen3 Inference service application setup: routes, metrics, and error handling."""
+
 import time
 from importlib.metadata import version
 

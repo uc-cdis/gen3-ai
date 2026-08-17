@@ -1,3 +1,5 @@
+"""Unauthenticated service routes: docs redirect, version, and health status."""
+
 import time
 from importlib.metadata import version
 

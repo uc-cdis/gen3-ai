@@ -30,7 +30,7 @@
           "Embeddings"
         ],
         "summary": "Read embedding from collection",
-        "description": "Read a single embedding from a specific collection.\n\nArgs:\n    collection_name: Name of the collection.\n    embedding_uuid: UUID of the embedding.\n    dal: Data access layer dependency.\n\nReturns:\n    SingleEmbeddingResult\n\nRaises:\n    HTTPException: 404 if the collection or embedding is not found.",
+        "description": "Returns a single embedding from a collection, looked up by its UUID.",
         "operationId": "get_embedding_from_collection_vectorstore_collections__collection_name__embeddings__embedding_uuid__get",
         "parameters": [
           {
@@ -64,6 +64,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -81,7 +90,7 @@
           "Embeddings"
         ],
         "summary": "Update embedding in collection",
-        "description": "Update the embedding vector for a given collection and embedding ID.\n\nArgs:\n    request: The request object\n    collection_name: Name of the collections.\n    embedding_uuid: UUID of the embedding.\n    body: Request body containing the new embedding vector.\n    dal: Data access layer dependency.\n\nReturns:\n    SingleEmbeddingResult containing the updated embedding.\n\nRaises:\n    HTTPException: 404 if the collection is not found; 400 if update fails.",
+        "description": "Replaces the vector and/or metadata of an existing embedding, looked up by its UUID. A new vector must match the collection's dimensions.",
         "operationId": "update_embedding_in_collection_vectorstore_collections__collection_name__embeddings__embedding_uuid__put",
         "parameters": [
           {
@@ -125,6 +134,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -142,7 +163,7 @@
           "Embeddings"
         ],
         "summary": "Delete embedding from collection",
-        "description": "Delete an embedding from a specific collection.\n\nArgs:\n    request: The request object\n    collection_name: Name of the collections.\n    embedding_uuid: UUID of the embedding to delete.\n    dal: Data access layer dependency.\n\nReturns:\n    None on success.\n\nRaises:\n    HTTPException: 404 if the collection or embedding is not found.",
+        "description": "Permanently deletes a single embedding from a collection, looked up by its UUID. This cannot be undone.",
         "operationId": "delete_embedding_vectorstore_collections__collection_name__embeddings__embedding_uuid__delete",
         "parameters": [
           {
@@ -167,7 +188,16 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Successful operation, no content returned"
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection or embedding not found"
           },
           "422": {
             "description": "Validation Error",
@@ -183,12 +213,101 @@
       }
     },
     "/vectorstore/collections/{collection_name}/embeddings": {
+      "put": {
+        "tags": [
+          "Embeddings"
+        ],
+        "summary": "Create or update embeddings in collection",
+        "description": "Creates one or more embeddings in a collection, replacing any that already exist with the same UUID. Every vector must match the collection's dimensions.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, that path is applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need both `create` and `update` permission on the collection path and on the resulting embedding paths.",
+        "operationId": "put_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_put",
+        "parameters": [
+          {
+            "name": "collection_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Collection Name"
+            }
+          },
+          {
+            "name": "ai_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ai Model"
+            }
+          },
+          {
+            "name": "exclude_info",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Exclude Info"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmbeddingsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "Embeddings"
         ],
         "summary": "Read all embeddings from collection",
-        "description": "List all embeddings within a specific collection.\n\nArgs:\n    request: The request object\n    collection_name: Name of the collections.\n    no_embeddings_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponseNoCollection containing all embeddings in the collection.\n\nRaises:\n    HTTPException: 404 if the collection is not found.",
+        "description": "Returns the embeddings in a collection, one page at a time. Set `exclude_info=true` to omit the `info` block from each result.",
         "operationId": "list_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_get",
         "parameters": [
           {
@@ -201,13 +320,13 @@
             }
           },
           {
-            "name": "no_embeddings_info",
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           },
           {
@@ -245,6 +364,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -262,7 +390,7 @@
           "Embeddings"
         ],
         "summary": "Create embeddings in collection",
-        "description": "TODO: implementaion for StringArrayInput and ai_model\nTODO: auth related\nTODO: work for authz_version\n\nCreate one or more embeddings in a specific collection.\n\nThis minimal implementation only accepts raw numeric vectors.\n\nArgs:\n    request: The request object\n    collection_name: Name of the collection.\n    body: Request body containing a list of embedding vectors.\n    ai_model: Optional model name; not used in this minimal version.\n    no_embeddings_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponseNoCollection containing the created embeddings.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if dimensions mismatch.",
+        "description": "Creates one or more embeddings in a collection. Every vector must match the collection's dimensions. Use `PUT` on this path instead if you want existing embeddings to be replaced rather than rejected.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, those paths are applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need `create` permission on the collection path and on the resulting embedding paths.",
         "operationId": "create_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_post",
         "parameters": [
           {
@@ -291,13 +419,13 @@
             }
           },
           {
-            "name": "no_embeddings_info",
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           }
         ],
@@ -322,6 +450,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -341,17 +481,17 @@
           "Embeddings (Bulk Read)"
         ],
         "summary": "Read select embeddings from unknown collections",
-        "description": "TODO: collections list is needed as return?\nTODO: update dal.get_collection_by_id_bulk. remove duplicates?\n\nRead a selection of embeddings by UUID across any collection.\n\nArgs:\n    request: The request object\n    embedding_uuids: List of embedding UUIDs to fetch.\n    no_embeddings_info: If True, omit the 'info' block for each embedding.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponse including collection metadata for each embedding.",
+        "description": "Returns the requested embeddings by UUID without needing to know which collection each one belongs to, along with the metadata for every collection involved. Vectors are returned in a binary encoding. UUIDs that do not resolve are omitted from the response rather than raising an error.\n\nThis uses `POST` so the UUID list can be sent in the request body, but it does not create anything.",
         "operationId": "get_embeddings_bulk_unknown_collections_embeddings_bulk_post",
         "parameters": [
           {
-            "name": "no_embeddings_info",
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           }
         ],
@@ -380,10 +520,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EmbeddingResponseWithCollections"
+                  "$ref": "#/components/schemas/EmbeddingResponseBinaryWithCollections"
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -404,7 +550,7 @@
           "Embeddings (Bulk Read)"
         ],
         "summary": "Read select embeddings from collection",
-        "description": "Read a selection of embeddings by UUID from a specific collection.\n\nArgs:\n    request: The request object\n    collection_name: Name of the collections.\n    embedding_uuids: List of embedding UUIDs to fetch.\n    no_embeddings_info: If True, omit the 'info' block for each embedding.\n    dal: Data access layer dependency.\n\nReturns:\n    EmbeddingResponse containing the embeddings found in the specified collection.\n\nRaises:\n    HTTPException: 404 if the collection is not found.",
+        "description": "Returns the requested embeddings by UUID from a single known collection. Vectors are returned in a binary encoding. UUIDs that do not resolve within the collection are omitted from the response rather than raising an error.\n\nThis uses `POST` so the UUID list can be sent in the request body, but it does not create anything.",
         "operationId": "get_embeddings_bulk_from_collection_vectorstore_collections__collection_name__embeddings_bulk_post",
         "parameters": [
           {
@@ -417,13 +563,13 @@
             }
           },
           {
-            "name": "no_embeddings_info",
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           }
         ],
@@ -452,10 +598,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EmbeddingResponse"
+                  "$ref": "#/components/schemas/EmbeddingResponseBinary"
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
           },
           "422": {
             "description": "Validation Error",
@@ -476,7 +631,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read all collections",
-        "description": "List all existing collections.\n\nArgs:\n    request: The request object\n    dal: Data access layer dependency.\n\nReturns:\n    PaginatedCollectionsResponse containing all collections.",
+        "description": "Returns every vector collection you have access to, one page at a time. Set `counts=true` to also get the number of embeddings available in each collection.",
         "operationId": "list_collections_vectorstore_collections_get",
         "parameters": [
           {
@@ -503,12 +658,13 @@
             }
           },
           {
-            "name": "collection_name",
+            "name": "counts",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "title": "Collection Name"
+              "type": "boolean",
+              "default": false,
+              "title": "Counts"
             }
           }
         ],
@@ -522,6 +678,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -540,7 +702,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Create collection",
-        "description": "Create a new collection.\n\nArgs:\n    request: The request object\n    body: Request body containing collection_name, description, and dimensions.\n    dal: Data access layer dependency.\n\nReturns:\n    CollectionModel for the created collection.",
+        "description": "Creates a new vector collection. The collection name is normalized before it is stored, and the dimensions you supply here are enforced on every embedding added to the collection.",
         "operationId": "create_collection_vectorstore_collections_post",
         "requestBody": {
           "required": true,
@@ -563,6 +725,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -582,7 +753,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read collection info",
-        "description": "Read information about a specific collection.\n\nArgs:\n    collection_name: Name of the collection.\n    dal: Data access layer dependency.\n\nReturns:\n    CollectionModel representing the collection.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Returns the metadata for a single collection, including its dimensions and vector type. Set `counts=true` to also get the number of embeddings available in it.",
         "operationId": "get_collection_vectorstore_collections__collection_name__get",
         "parameters": [
           {
@@ -592,6 +763,16 @@
             "schema": {
               "type": "string",
               "title": "Collection Name"
+            }
+          },
+          {
+            "name": "counts",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Counts"
             }
           }
         ],
@@ -605,6 +786,15 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "404": {
+            "description": "Collection not found"
           },
           "422": {
             "description": "Validation Error",
@@ -623,7 +813,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Update collection info",
-        "description": "Update mutable metadata fields for a collection.\n\nArgs:\n    collection_name: Name of the collection to update.\n    body: Request body containing fields to update (e.g., description).\n    dal: Data access layer dependency.\n\nReturns:\n    A simple success status dict.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Updates the mutable metadata on a collection, such as its description. The collection's name, dimensions, and vector type cannot be changed after creation.",
         "operationId": "update_collection_vectorstore_collections__collection_name__patch",
         "parameters": [
           {
@@ -655,6 +845,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -672,7 +874,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Delete collection",
-        "description": "Delete a collection by name.\n\nArgs:\n    collection_name: Name of the collection to delete.\n    dal: Data access layer dependency.\n\nReturns:\n    None on success.\n\nRaises:\n    HTTPException: 404 if collection is not found.",
+        "description": "Permanently deletes a collection and every embedding stored in it. This cannot be undone.",
         "operationId": "delete_collection_vectorstore_collections__collection_name__delete",
         "parameters": [
           {
@@ -687,7 +889,19 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful Response"
+            "description": "Successful operation, no content returned"
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
           },
           "422": {
             "description": "Validation Error",
@@ -708,7 +922,7 @@
           "Vectorstore Search"
         ],
         "summary": "Search embeddings in collection",
-        "description": "TODO: support for ai_model\nTODO: raw text search\n\nPerform a vector search within a specific collection.\n\nArgs:\n    request: The request object\n    body: SearchRequestBody containing the query vector and parameters.\n    collection_name: Name of the collection to search.\n    ai_model: Optional model name; not used in this minimal implementation.\n    no_embeddings_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    SearchResponseNocollection containing search hits for this collection.\n\nRaises:\n    HTTPException: 404 if collection is not found; 400 if input is invalid.",
+        "description": "Finds the embeddings in a collection nearest to the query vector you provide, ordered by similarity. The query vector must have the same number of dimensions as the collection. Set `exclude_info=true` to omit the `info` block from each result.",
         "operationId": "search_in_collection_vectorstore_collections__collection_name__search_post",
         "parameters": [
           {
@@ -737,13 +951,13 @@
             }
           },
           {
-            "name": "no_embeddings_info",
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           }
         ],
@@ -768,6 +982,18 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
+          "404": {
+            "description": "Collection not found"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -787,7 +1013,7 @@
           "Vectorstore Search"
         ],
         "summary": "Search embeddings across unknown collections",
-        "description": "TODO: support for ai_model\nTODO: how to handle diffs in dimensions? current logic is not sufficient.\n\nPerform a vector search across multiple collections.\n\nArgs:\n    request: The request object\n    body: SearchRequestBody containing the query vector and parameters.\n    collections: Optional comma-separated list of collection names to restrict the search.\n    ai_model: Optional model name; not used in this minimal implementation.\n    no_embeddings_info: If True, omit the 'info' block in each embedding result.\n    dal: Data access layer dependency.\n\nReturns:\n    SearchResponse containing search hits across collections.\n\nRaises:\n    HTTPException: 400 if invalid collections are specified or input is invalid.",
+        "description": "Finds the embeddings nearest to the query vector across every collection you have access to, ordered by similarity. Pass a comma-separated `collections` list to restrict the search to specific collections. Only collections matching the requested `vector_type` and the query vector's dimensions are searched.",
         "operationId": "search_across_collections_vectorstore_search_post",
         "parameters": [
           {
@@ -823,13 +1049,22 @@
             }
           },
           {
-            "name": "no_embeddings_info",
+            "name": "vector_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/VectorType",
+              "default": "vector"
+            }
+          },
+          {
+            "name": "exclude_info",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "No Embeddings Info"
+              "title": "Exclude Info"
             }
           }
         ],
@@ -854,6 +1089,15 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "400": {
+            "description": "Invalid request payload or parameters"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -861,6 +1105,23 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Get swagger docs",
+        "description": "Directs client to the docs",
+        "operationId": "redirect_to_docs__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -983,9 +1244,6 @@
           "403": {
             "description": "User does not have access"
           },
-          "500": {
-            "description": "Something went wrong internally when processing the request"
-          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1027,6 +1285,9 @@
             "type": "integer",
             "title": "Dimensions"
           },
+          "vector_type": {
+            "$ref": "#/components/schemas/VectorType"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -1061,13 +1322,25 @@
               }
             ],
             "title": "Self"
+          },
+          "available_embeddings_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Embeddings Count"
           }
         },
         "type": "object",
         "required": [
           "id",
           "collection_name",
-          "dimensions"
+          "dimensions",
+          "vector_type"
         ],
         "title": "CollectionModel",
         "description": "API schema representing a collection."
@@ -1092,6 +1365,10 @@
           "dimensions": {
             "type": "integer",
             "title": "Dimensions"
+          },
+          "vector_type": {
+            "$ref": "#/components/schemas/VectorType",
+            "default": "vector"
           }
         },
         "type": "object",
@@ -1104,6 +1381,17 @@
       },
       "CreateEmbeddingsBody": {
         "properties": {
+          "authz": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authz"
+          },
           "embeddings": {
             "items": {
               "$ref": "#/components/schemas/EmbeddingToCreate"
@@ -1117,7 +1405,19 @@
           "embeddings"
         ],
         "title": "CreateEmbeddingsBody",
-        "description": "Data for creating embeddings in a collection."
+        "description": "Data for creating embeddings in a collection.\nauthz example: \"authz\": \"/vectorstore/collections/my_collection\""
+      },
+      "DistanceMetric": {
+        "type": "string",
+        "enum": [
+          "l2_distance",
+          "inner_product",
+          "cosine_distance",
+          "l1_distance",
+          "cosine_similarity"
+        ],
+        "title": "DistanceMetric",
+        "description": "Metric used to rank search results.\n\nAll but `cosine_similarity` are distances, where smaller is closer."
       },
       "EmbeddingInfo": {
         "properties": {
@@ -1126,15 +1426,8 @@
             "title": "Collection Id"
           },
           "authz": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "type": "string",
             "title": "Authz"
-          },
-          "authz_version": {
-            "type": "integer",
-            "title": "Authz Version"
           },
           "metadata": {
             "anyOf": [
@@ -1157,10 +1450,10 @@
         "required": [
           "collection_id",
           "authz",
-          "authz_version",
           "self"
         ],
-        "title": "EmbeddingInfo"
+        "title": "EmbeddingInfo",
+        "description": "Metadata about an embedding, omitted from responses when `exclude_info` is set."
       },
       "EmbeddingResponse": {
         "properties": {
@@ -1176,13 +1469,36 @@
         "required": [
           "embeddings"
         ],
-        "title": "EmbeddingResponse"
+        "title": "EmbeddingResponse",
+        "description": "Embeddings from a single, already-known collection."
       },
-      "EmbeddingResponseWithCollections": {
+      "EmbeddingResponseBinary": {
         "properties": {
           "embeddings": {
             "items": {
-              "$ref": "#/components/schemas/SingleEmbeddingResult"
+              "$ref": "#/components/schemas/SingleEmbeddingResultBinary"
+            },
+            "type": "array",
+            "title": "Embeddings"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "embeddings",
+          "count"
+        ],
+        "title": "EmbeddingResponseBinary",
+        "description": "Binary embeddings from a single, already-known collection."
+      },
+      "EmbeddingResponseBinaryWithCollections": {
+        "properties": {
+          "embeddings": {
+            "items": {
+              "$ref": "#/components/schemas/SingleEmbeddingResultBinary"
             },
             "type": "array",
             "title": "Embeddings"
@@ -1206,7 +1522,8 @@
         "required": [
           "embeddings"
         ],
-        "title": "EmbeddingResponseWithCollections"
+        "title": "EmbeddingResponseBinaryWithCollections",
+        "description": "Binary embeddings plus the collections they came from, for cross-collection reads."
       },
       "EmbeddingToCreate": {
         "properties": {
@@ -1238,6 +1555,18 @@
               }
             ],
             "title": "Metadata"
+          },
+          "embedding_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Id"
           }
         },
         "type": "object",
@@ -1252,6 +1581,7 @@
             0.2,
             0.3
           ],
+          "embedding_id": "00000000-0000-0000-0000-000000000000",
           "metadata": {
             "chunk_size": "1000",
             "source": "some_file.md"
@@ -1317,7 +1647,8 @@
           "page",
           "page_size"
         ],
-        "title": "PaginatedCollectionsResponse"
+        "title": "PaginatedCollectionsResponse",
+        "description": "A page of collections the caller is authorized to see."
       },
       "PaginatedEmbeddingResponse": {
         "properties": {
@@ -1365,7 +1696,8 @@
           "page",
           "page_size"
         ],
-        "title": "PaginatedEmbeddingResponse"
+        "title": "PaginatedEmbeddingResponse",
+        "description": "A page of embeddings from one collection."
       },
       "SearchRequestBody": {
         "properties": {
@@ -1388,7 +1720,7 @@
             "title": "Top K",
             "default": 10
           },
-          "range": {
+          "min_value": {
             "anyOf": [
               {
                 "type": "number"
@@ -1397,7 +1729,22 @@
                 "type": "null"
               }
             ],
-            "title": "Range"
+            "title": "Min Value"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value"
+          },
+          "distance_metric": {
+            "$ref": "#/components/schemas/DistanceMetric",
+            "default": "cosine_similarity"
           },
           "filters": {
             "anyOf": [
@@ -1449,7 +1796,8 @@
         "required": [
           "embeddings"
         ],
-        "title": "SearchResponse"
+        "title": "SearchResponse",
+        "description": "Ranked search hits, with the collections they were found in."
       },
       "SingleEmbeddingResult": {
         "properties": {
@@ -1492,7 +1840,55 @@
           "vector",
           "embedding_id"
         ],
-        "title": "SingleEmbeddingResult"
+        "title": "SingleEmbeddingResult",
+        "description": "One embedding returned as a JSON array of floats."
+      },
+      "SingleEmbeddingResultBinary": {
+        "properties": {
+          "vector_base64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "contentMediaType": "application/octet-stream",
+            "title": "Vector Base64"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/VectorPrecision"
+          },
+          "input_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Index"
+          },
+          "embedding_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Embedding Id"
+          },
+          "info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddingInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "vector_base64",
+          "precision",
+          "embedding_id"
+        ],
+        "title": "SingleEmbeddingResultBinary",
+        "description": "One embedding returned as base64-encoded raw bytes.\n\nCheaper than the JSON float array for large vectors. Decode according to `precision`."
       },
       "SingleSearchResult": {
         "properties": {
@@ -1501,18 +1897,24 @@
             "format": "uuid",
             "title": "Id"
           },
-          "similarity_score": {
+          "distance_metric": {
+            "$ref": "#/components/schemas/DistanceMetric"
+          },
+          "value": {
             "type": "number",
-            "title": "Similarity Score"
+            "title": "Value"
           },
           "embedding": {
-            "$ref": "#/components/schemas/SingleEmbeddingResult"
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Embedding"
           }
         },
         "type": "object",
         "required": [
           "id",
-          "similarity_score",
+          "distance_metric",
+          "value",
           "embedding"
         ],
         "title": "SingleSearchResult",
@@ -1563,6 +1965,17 @@
               }
             ],
             "title": "Metadata"
+          },
+          "authz": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authz"
           }
         },
         "type": "object",
@@ -1608,6 +2021,24 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VectorPrecision": {
+        "type": "string",
+        "enum": [
+          "float16",
+          "float32"
+        ],
+        "title": "VectorPrecision",
+        "description": "Floating-point precision of the vectors in a binary embedding response."
+      },
+      "VectorType": {
+        "type": "string",
+        "enum": [
+          "vector",
+          "halfvec"
+        ],
+        "title": "VectorType",
+        "description": "pgvector column type backing a collection, which fixes its storage precision."
       },
       "AllowedToolChoice": {
         "properties": {
