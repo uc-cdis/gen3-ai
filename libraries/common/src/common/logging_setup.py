@@ -4,9 +4,9 @@ Application-wide logging setup shared by all services.
 
 import logging
 
-import cdislogging
+import gen3logging
 
-from common.config import DEBUG, VERBOSE_INTERNAL_LOGS
+from common.config import DEBUG, GEN3_JSON_LOGS, VERBOSE_INTERNAL_LOGS
 
 # Loggers that are chatty enough to drown out application logs at their own default
 # levels, so they get pinned to `warning` unless VERBOSE_INTERNAL_LOGS is on.
@@ -24,7 +24,7 @@ INTERNAL_LOGGERS = frozenset(
 
 def configure_logging() -> None:
     """
-    Route the root logger and noisy third-party loggers through cdislogging.
+    Route the root logger and noisy third-party loggers through gen3logging.
 
     Must run *after* uvicorn installs its own logging configuration, otherwise uvicorn
     overwrites these handlers. Uvicorn configures logging in `Config.__init__` and only
@@ -32,13 +32,13 @@ def configure_logging() -> None:
     factory satisfies the ordering.
     """
     _remove_handlers(logging.getLogger())
-    cdislogging.get_logger(None, log_level="debug" if DEBUG else "info")
+    gen3logging.get_logger(None, log_level="debug" if DEBUG else "info", json_logs=GEN3_JSON_LOGS)
 
     internal_log_level = "debug" if VERBOSE_INTERNAL_LOGS else "warning"
 
     for logger_name in sorted(INTERNAL_LOGGERS):
         _remove_handlers(logging.getLogger(logger_name))
-        cdislogging.get_logger(logger_name, log_level=internal_log_level)
+        gen3logging.get_logger(logger_name, log_level=internal_log_level, json_logs=GEN3_JSON_LOGS)
 
 
 def _remove_handlers(logger: logging.Logger) -> None:

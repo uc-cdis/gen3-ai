@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-import cdislogging
+import gen3logging
 from starlette.config import Config
 
 
@@ -42,7 +42,12 @@ DEBUG = starlette_config("DEBUG", cast=bool, default=False)
 # Note: the list of libraries is in common/logging_setup.py
 VERBOSE_INTERNAL_LOGS = starlette_config("VERBOSE_INTERNAL_LOGS", cast=bool, default=False)
 
-logging = cdislogging.get_logger(__name__, log_level="debug" if DEBUG else "info")
+# Emit one JSON object per log line instead of the human-readable text format. Named to match the
+# env var gen3logging reads on its own; passing it explicitly means this default wins over the
+# library's.
+GEN3_JSON_LOGS = starlette_config("GEN3_JSON_LOGS", cast=bool, default=True)
+
+logging = gen3logging.get_logger(__name__, log_level="debug" if DEBUG else "info", json_logs=GEN3_JSON_LOGS)
 
 if CONFIG_FILE_EXISTS:
     logging.info(f"Using configuration file: {CONFIG_PATH}")
@@ -59,6 +64,7 @@ ALLOW_ANONYMOUS_ACCESS = starlette_config("ALLOW_ANONYMOUS_ACCESS", cast=bool, d
 
 logging.info(f"DEBUG is {DEBUG}")
 logging.info(f"VERBOSE_INTERNAL_LOGS is {VERBOSE_INTERNAL_LOGS}")
+logging.info(f"GEN3_JSON_LOGS is {GEN3_JSON_LOGS}")
 
 if DEBUG_SKIP_AUTH:
     logging.warning(

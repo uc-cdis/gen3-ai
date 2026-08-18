@@ -6,7 +6,11 @@ from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GrpcSpanExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HttpSpanExporter
+from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SpanExporter
@@ -47,7 +51,21 @@ def configure_tracing(app: FastAPI, service_name: str) -> None:
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
 
+    # Incoming HTTP requests
     FastAPIInstrumentor.instrument_app(app)
+
+    # Outbound async HTTP calls
+    HTTPXClientInstrumentor().instrument()
+
+    # Outbound sync HTTP calls (captures requests made by libs that are not async)
+    RequestsInstrumentor().instrument()
+
+    # Database queries
+    AsyncPGInstrumentor().instrument()
+
+    # Log correlation: puts otelTraceID/otelSpanID/otelServiceName on every record, which
+    # gen3logging's formatters render.
+    LoggingInstrumentor().instrument(inject_trace_context=True)
 
 
 def _span_exporter() -> SpanExporter:

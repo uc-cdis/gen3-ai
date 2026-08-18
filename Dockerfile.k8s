@@ -1,8 +1,4 @@
-# Define build arguments
-# TEMPORARY: points at the base-images branch build (branch `feat/pythonuv`, where the workflow
-# tags `$BRANCH_NAME-3.13-pythonuv`). Revert to `3.13-pythonuv` before
-# merging, or main will build against a branch tag that eventually gets pruned.
-ARG AZLINUX_BASE_VERSION=feat_pythonuv-3.13-pythonuv
+ARG AZLINUX_BASE_VERSION=3.13-pythonuv
 ARG SERVICE_NAME
 # Pinned to match DBMATE_VERSION in .github/workflows/tests_and_build.yml, so the binary that
 # runs migrations in the init container is the one CI validated them against.

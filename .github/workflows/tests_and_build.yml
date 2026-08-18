@@ -25,7 +25,7 @@ jobs:
     # consistency with linting/formatting in addition to yet another
     # barrier for any security issues)
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
-    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@fix/dbmate
+    uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
       # Kept current by `just update_versions`. To hold one back when the latest is broken, add
       # `# allow-old-version` inline (once per file).
