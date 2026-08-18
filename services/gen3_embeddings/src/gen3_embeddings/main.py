@@ -17,6 +17,10 @@ from gen3_embeddings.routes.embeddings import embeddings_router
 from gen3_embeddings.routes.embeddings_bulk import embeddings_bulk_router
 from gen3_embeddings.routes.search import vectorstore_search_router
 
+# Tables whose authz enforcement depends on row-level security. Verified at startup by
+# check_rls_is_enabled, since nothing else would notice if RLS were turned off.
+RLS_PROTECTED_TABLES = ("embeddings_vector", "embeddings_halfvec")
+
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
 route_aggregator.include_router(embeddings_bulk_router)
@@ -74,10 +78,78 @@ async def check_arborist_is_healthy(app):
     logging.debug("Startup policy engine (Arborist) connection test PASSED.")
 
 
+async def check_rls_is_enabled(conn):
+    """
+    Ensure row-level security is enabled AND forced on the tables that rely on it.
+
+    The superuser/bypassrls checks only cover the ROLE side of RLS. They pass happily against
+    a database where RLS itself has been switched off (a stray
+    `ALTER TABLE ... DISABLE ROW LEVEL SECURITY`, or a migration that never ran), in which
+    case every row is visible to every caller with no warning. We otherwise rely solely on
+    the migrations for this, so verify it at startup rather than assuming.
+
+    Both conditions are required:
+
+    - ENABLED, or no policy is applied at all and every row is visible.
+    - FORCED, because a table's owner bypasses its own policies. Nothing else checks table
+      ownership, so without FORCE the service could silently see everything just by
+      connecting as the role that owns these tables.
+
+    Note that RLS enabled with NO policy is safe: Postgres then denies all rows by default.
+    So `relrowsecurity` is the condition worth enforcing, not the policy count.
+
+    Args:
+        conn: An open asyncpg connection.
+
+    Raises:
+        Exception: If a protected table is missing, has RLS disabled, or does not have RLS
+            forced, unless DEBUG_SKIP_AUTH is True, in which case it is a warning.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname = ANY($1::text[]);
+        """,
+        list(RLS_PROTECTED_TABLES),
+    )
+    by_table = {row["relname"]: row for row in rows}
+
+    missing = [table for table in RLS_PROTECTED_TABLES if table not in by_table]
+    disabled = sorted(table for table, row in by_table.items() if not row["relrowsecurity"])
+    not_forced = sorted(table for table, row in by_table.items() if not row["relforcerowsecurity"])
+
+    if not missing and not disabled and not not_forced:
+        logging.debug("Startup row-level security check PASSED for: %s", ", ".join(RLS_PROTECTED_TABLES))
+        return
+
+    problems = []
+    if disabled:
+        problems.append(f"row-level security is DISABLED on: {', '.join(disabled)}")
+    if not_forced:
+        problems.append(f"row-level security is not FORCED on: {', '.join(not_forced)}")
+    if missing:
+        problems.append(f"expected table(s) not found: {', '.join(missing)}")
+    detail = "; ".join(problems)
+
+    if config.DEBUG_SKIP_AUTH:
+        logging.warning(
+            "DEBUG_SKIP_AUTH is True, so continuing despite a row-level security problem: %s",
+            detail,
+        )
+        return
+
+    logging.error(f"Row-level security check failed: {detail}")
+    raise Exception(f"REQUIRED row-level security is not in effect ({detail}). Aborting...")
+
+
 async def check_db_connection():
     """
-    Simple check to ensure we can talk to the db (asyncpg pool test)
-    and ensure we are NOT using a superuser or bypassrls role.
+    Simple check to ensure we can talk to the db (asyncpg pool test),
+    ensure we are NOT using a superuser or bypassrls role, and ensure
+    row-level security is enabled and forced on the tables that depend on it.
 
     When DEBUG_SKIP_AUTH is True, we skip enforcing those checks, but
     emit a warning if the DB user cannot bypass RLS (i.e., is neither
@@ -136,6 +208,9 @@ async def check_db_connection():
                     raise Exception(
                         "Configured DB user has BYPASSRLS, which bypasses REQUIRED row-level security. Aborting..."
                     )
+
+            # The role checks above say nothing about whether RLS is actually switched on.
+            await check_rls_is_enabled(conn)
 
         logging.debug("Startup database connection test PASSED.")
     except Exception as exc:
