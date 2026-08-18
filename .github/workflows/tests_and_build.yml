@@ -75,7 +75,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
@@ -120,7 +120,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
@@ -130,7 +130,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          curl -fsSL "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64" -o dbmate
+          curl -fsSL "https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64" -o dbmate
           chmod +x dbmate
           sudo mv dbmate /usr/local/bin/dbmate
           dbmate --version
