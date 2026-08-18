@@ -66,7 +66,6 @@ install SERVICE="all": _check_dependencies
 
         print_header "just install:" "installing" "$TARGET" "..."
         cd "$TARGET"
-        uv add "common @ file://../../libraries/common"
         echo "uv sync-ing {{SERVICE}} service..."
         uv sync --all-packages --group dev --all-extras
     fi
