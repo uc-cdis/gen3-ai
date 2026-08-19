@@ -29,7 +29,9 @@ jobs:
     with:
       UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
-      DBMATE_VERSION: 'latest'
+      # must be a real release TAG, not 'latest': the reusable workflow interpolates this
+      # into .../releases/download/<TAG>/dbmate-linux-amd64, and there is no 'latest' tag
+      DBMATE_VERSION: 'v2.35.0'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
