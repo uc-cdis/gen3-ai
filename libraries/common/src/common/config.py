@@ -91,12 +91,15 @@ GEN3_AI_MODEL_REPO_URL = starlette_config(
 GEN3_EMBEDDINGS_URL = starlette_config("GEN3_EMBEDDINGS_URL", default="http://gen3-embeddings-service", cast=str)
 GEN3_INFERENCE_URL = starlette_config("GEN3_INFERENCE_URL", default="http://gen3-inference-service", cast=str)
 
-PUBLIC_ROUTES = {
-    "/",
-    "/docs",
-    "/docs/",
-    "/openapi.json",
-    "/openapi.json/",
+# Endpoints that exist to be polled or fetched by a browser, and are not worth observability
+# (metrics or tracing).
+#
+# Do NOT add "/" here. common/telemetry.py turns each of these into a regex anchored at the end
+# of the URL, so a bare "/" becomes "/$", which matches every URL ending in a slash and would
+# silently drop the trailing-slash form of every real route from tracing. The site root, the
+# docs and the OpenAPI spec are all left out deliberately: traffic to them is cheap to record
+# and worth seeing.
+UNMONITORED_ROUTES = {
     "/_status",
     "/_status/",
     "/_version",
@@ -104,7 +107,7 @@ PUBLIC_ROUTES = {
     "/favicon.ico",
     "/favicon.ico/",
 }
-ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | PUBLIC_ROUTES
+ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | UNMONITORED_ROUTES
 
 # This app exports traces using OpenTelemetry. By default in Gen3, we use Alloy for collection.
 ENABLE_OPENTELEMETRY_TRACES = starlette_config("ENABLE_OPENTELEMETRY_TRACES", cast=bool, default=True)

@@ -329,7 +329,6 @@ def test_disabled_tracing_wraps_nothing(
         "http://svc/_status",
         "http://svc/_status/",
         "http://svc/metrics",
-        "http://svc/docs",
         "http://svc/ai/embeddings/_status",
     ],
 )
@@ -342,6 +341,8 @@ def test_polled_endpoints_are_not_traced(url: str) -> None:
     "url",
     [
         "http://svc/",
+        "http://svc/docs",
+        "http://svc/openapi.json",
         "http://svc/vectorstore/collections",
         "http://svc/vectorstore/collections/",
         "http://svc/vectorstore/collections/a-collection",

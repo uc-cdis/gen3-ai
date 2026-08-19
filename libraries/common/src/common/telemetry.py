@@ -230,16 +230,12 @@ def excluded_url_patterns() -> str:
     rather than a full match, so each pattern is anchored at the end. The ASGI path already
     carries any root_path, which a suffix match tolerates.
 
-    The site root is deliberately left out, so requests to `/` are still traced: a `/$` pattern
-    would match every URL ending in a slash, silently dropping the trailing-slash form of every
-    real route. Traffic arriving at `/` on its way to the docs is worth seeing.
-
     Returns:
         str: A comma-separated list of regexes, in the form
             `opentelemetry.util.http.parse_excluded_urls` expects, covering the endpoints that
-            are exempt from metrics apart from the site root.
+            are exempt from metrics.
     """
-    return ",".join(sorted(re.escape(path) + "$" for path in ENDPOINTS_WITHOUT_METRICS - {"/"}))
+    return ",".join(sorted(re.escape(path) + "$" for path in ENDPOINTS_WITHOUT_METRICS))
 
 
 def _span_exporter() -> SpanExporter:

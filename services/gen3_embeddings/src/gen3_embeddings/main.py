@@ -24,6 +24,9 @@ API_REQUESTS_COUNTER = "gen3_embeddings_api_requests"
 # Stands in for the path of a request that matched no route, so that scanners and typos
 # share one time series instead of minting one per URL.
 UNMATCHED_PATH = "<unmatched>"
+# `/metrics` is a mounted sub-application rather than a route, so it has no template to label it
+# with. Mirrors the mount in common/metrics.py.
+METRICS_PATH = "/metrics"
 API_REQUESTS_COUNTER_DESCRIPTION = "API requests for Gen3 Embeddings."
 
 route_aggregator = APIRouter()
@@ -186,6 +189,11 @@ def get_app() -> FastAPI:
     # Mounts /metrics on the app as a side effect, so it has to run before the app serves traffic.
     app.state.metrics = ServiceMetrics(metrics_client=get_metrics_client(app))
 
+    # Endpoints FastAPI and Starlette serve without an API route: the docs, the spec, and the
+    # mounted metrics app. None of them leave a route on the request scope, so the middleware has
+    # to recognise them by path.
+    unrouted_paths = frozenset(path for path in (app.docs_url, app.redoc_url, app.openapi_url, METRICS_PATH) if path)
+
     @app.middleware("http")
     async def middleware_record_api_metric(request: Request, call_next):
         """
@@ -200,7 +208,7 @@ def get_app() -> FastAPI:
         """
         response = await call_next(request)
 
-        path = _metrics_path(request)
+        path = _get_path_label_for_metrics(request, unrouted_paths)
         if path in config.ENDPOINTS_WITHOUT_METRICS:
             return response
 
@@ -230,21 +238,35 @@ def get_app() -> FastAPI:
     return app
 
 
-def _metrics_path(request: Request) -> str:
+def _get_path_label_for_metrics(request: Request, unrouted_paths: frozenset[str]) -> str:
     """
     Return the label to record a request's path under.
 
     Args:
         request (Request): A request that has already been routed.
+        unrouted_paths (frozenset[str]): Paths served without an API route, which therefore have
+            no template to be labelled with.
 
     Returns:
         str: The matched route's template, for example
-            `/vectorstore/collections/{collection_name}`, or UNMATCHED_PATH when nothing
-            matched. Never the request's own URL, whose path parameters would each become a
-            separate Prometheus time series.
+            `/vectorstore/collections/{collection_name}`, one of `unrouted_paths`, or
+            UNMATCHED_PATH. Never the request's own URL unmatched, whose path parameters would
+            each become a separate Prometheus time series.
     """
-    route = request.scope.get("route")
-    return getattr(route, "path", None) or UNMATCHED_PATH
+    template = getattr(request.scope.get("route"), "path", None)
+    if template:
+        return template
+
+    # Starlette moves a mount's prefix from the path into root_path before handing the request to
+    # the sub-application, so `/metrics` arrives here as root_path="/metrics", path="/". Matching
+    # both, and only against known paths, keeps `/metrics` recognised - it would otherwise fall
+    # through to UNMATCHED_PATH, miss the ENDPOINTS_WITHOUT_METRICS check below, and count every
+    # single Prometheus scrape - while still collapsing anything unrouted into one series
+    for candidate in (request.url.path, request.scope.get("root_path", "")):
+        if candidate in unrouted_paths:
+            return candidate
+
+    return UNMATCHED_PATH
 
 
 app_instance = get_app()
