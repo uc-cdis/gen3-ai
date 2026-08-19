@@ -27,9 +27,9 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
-      DBMATE_VERSION: 'latest'
+      DBMATE_VERSION: 'v2.35.0'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
@@ -45,7 +45,7 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -75,7 +75,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
@@ -93,7 +93,7 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
@@ -120,13 +120,20 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ env.JUST_VERSION }}
+
+      - name: Install dbmate
+        run: |
+          curl -fsSL "https://github.com/amacneil/dbmate/releases/download/v2.35.0/dbmate-linux-amd64" -o dbmate
+          chmod +x dbmate
+          sudo mv dbmate /usr/local/bin/dbmate
+          dbmate --version
 
       - name: just setup
         run: |

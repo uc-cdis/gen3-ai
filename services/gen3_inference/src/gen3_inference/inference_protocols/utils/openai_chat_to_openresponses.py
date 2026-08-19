@@ -247,6 +247,11 @@ def convert_chat_completion_stream_to_sse(
     return StreamingResponse(_generator(), media_type="text/event-stream")
 
 
+"""
+Convert OpenAI Chat Completions response to Open Responses response format
+"""
+
+
 def chat_completion_to_openresponses_response(
     chat_response: ChatCompletion,
     metadata: dict[str, Any] | None = None,
@@ -256,6 +261,7 @@ def chat_completion_to_openresponses_response(
 
     Args:
         chat_response (ChatCompletion): Non-streaming chat completion response.
+        metadata (dict[str, Any] | None): Optional metadata to attach to the response conversion.
 
     Returns:
         ResponseResource: Open Responses response format

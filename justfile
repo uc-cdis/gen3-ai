@@ -119,8 +119,16 @@ setup:
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
     else
-        echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
-        exit 1
+        if [[ "${GITHUB_ACTIONS:-}" = "true" ]]; then
+            echo -e "${YELLOW}** WARNING: dbmate not found in CI. Installing... **${RESET}"
+            curl -fsSL "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64" -o dbmate
+            chmod +x dbmate
+            sudo mv dbmate /usr/local/bin/dbmate
+            echo "dbmate is installed. version: $(dbmate --version)"
+        else
+            echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
+            exit 1
+        fi
     fi
 
     print_header "just setup:" "verifying" "pre-commit" "installation..."
@@ -302,6 +310,12 @@ db_setup SERVICE="all": _check_dependencies
         fi
 
         service_name="{{SERVICE}}"
+        if [[ -z "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" ]]; then export PGDATABASE="${DB_DATABASE}"; fi
+        if [[ -z "${DB_DATABASE:-}" && -n "${PGDATABASE:-}" ]]; then export DB_DATABASE="${PGDATABASE}"; fi
+        if [[ -n "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" && "${PGDATABASE}" != "${DB_DATABASE}" ]]; then
+            echo -e "${RED}** ERROR: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Align them in services/{{SERVICE}}/.env **${RESET}"
+            exit 1
+        fi
         set_postgres_defaults
         psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" 2>/dev/null || echo "Database exists."
     fi
@@ -569,6 +583,7 @@ whitespace_lint: _check_dependencies
     set -euo pipefail
     source scripts/.justfile_helpers.bash
     print_header "just run:" "running" "{{SERVICE}}" "service..."
+    if [ "{{SERVICE}}" != "gen3_inference" ]; then just db_setup "{{SERVICE}}"; fi
     export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
     uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
 

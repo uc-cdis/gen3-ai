@@ -46,7 +46,7 @@ jobs:
             pr_title: "chore(uv-lock): update uv.lock files"
 
     env:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
