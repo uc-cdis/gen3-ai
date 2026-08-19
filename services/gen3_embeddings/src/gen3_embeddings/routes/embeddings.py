@@ -32,11 +32,14 @@ from gen3_embeddings.models.schemas import (
     SingleEmbeddingResult,
     UpdateEmbeddingBody,
 )
+from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_router = APIRouter()
 
 
-@embeddings_router.get(
+@dual_path(
+    embeddings_router,
+    "get",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
@@ -47,11 +50,6 @@ embeddings_router = APIRouter()
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.get(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embedding_from_collection(
@@ -89,7 +87,9 @@ async def get_embedding_from_collection(
     return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
-@embeddings_router.put(
+@dual_path(
+    embeddings_router,
+    "put",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
@@ -104,11 +104,6 @@ async def get_embedding_from_collection(
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.put(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_embedding_in_collection(
@@ -167,7 +162,9 @@ async def update_embedding_in_collection(
     return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
-@embeddings_router.put(
+@dual_path(
+    embeddings_router,
+    "put",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create or update embeddings in collection",
@@ -188,11 +185,6 @@ async def update_embedding_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.put(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def put_embeddings_in_collection(
@@ -346,7 +338,9 @@ async def put_embeddings_in_collection(
     return EmbeddingResponse(embeddings=results)
 
 
-@embeddings_router.delete(
+@dual_path(
+    embeddings_router,
+    "delete",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete embedding from collection",
@@ -359,11 +353,6 @@ async def put_embeddings_in_collection(
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.delete(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_embedding(
@@ -401,7 +390,9 @@ async def delete_embedding(
     return None
 
 
-@embeddings_router.get(
+@dual_path(
+    embeddings_router,
+    "get",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=PaginatedEmbeddingResponse,
     summary="Read all embeddings from collection",
@@ -414,11 +405,6 @@ async def delete_embedding(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.get(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def list_embeddings_in_collection(
@@ -477,7 +463,9 @@ async def list_embeddings_in_collection(
     )
 
 
-@embeddings_router.post(
+@dual_path(
+    embeddings_router,
+    "post",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create embeddings in collection",
@@ -499,11 +487,6 @@ async def list_embeddings_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.post(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def create_embeddings_in_collection(

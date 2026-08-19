@@ -19,11 +19,14 @@ from gen3_embeddings.models.schemas import (
     PaginatedCollectionsResponse,
     UpdateCollectionBody,
 )
+from gen3_embeddings.routes.helpers import dual_path
 
 collections_router = APIRouter()
 
 
-@collections_router.get(
+@dual_path(
+    collections_router,
+    "get",
     "/vectorstore/collections",
     response_model=PaginatedCollectionsResponse,
     response_model_exclude_none=True,
@@ -34,10 +37,6 @@ collections_router = APIRouter()
     ),
     responses={**AUTH_RESPONSES},
     tags=["Vectorstore Collections"],
-)
-@collections_router.get(
-    "/vectorstore/collections/",
-    include_in_schema=False,
 )
 async def list_collections(
     request: Request,
@@ -83,7 +82,9 @@ async def list_collections(
     )
 
 
-@collections_router.post(
+@dual_path(
+    collections_router,
+    "post",
     "/vectorstore/collections",
     response_model=CollectionModel,
     response_model_exclude_none=True,
@@ -94,10 +95,6 @@ async def list_collections(
     ),
     responses={**AUTH_RESPONSES, **BAD_REQUEST_RESPONSE},
     tags=["Vectorstore Collections"],
-)
-@collections_router.post(
-    "/vectorstore/collections/",
-    include_in_schema=False,
 )
 async def create_collection(
     request: Request,
@@ -131,7 +128,9 @@ async def create_collection(
     return collection_to_model(col)
 
 
-@collections_router.get(
+@dual_path(
+    collections_router,
+    "get",
     "/vectorstore/collections/{collection_name}",
     response_model=CollectionModel,
     response_model_exclude_none=True,
@@ -145,11 +144,6 @@ async def create_collection(
         **not_found_response("Collection"),
     },
     tags=["Vectorstore Collections"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@collections_router.get(
-    "/vectorstore/collections/{collection_name}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_collection(
@@ -183,7 +177,9 @@ async def get_collection(
     return collection_to_model(col, available_embeddings_count=available_embeddings_count)
 
 
-@collections_router.patch(
+@dual_path(
+    collections_router,
+    "patch",
     "/vectorstore/collections/{collection_name}",
     summary="Update collection info",
     description=(
@@ -197,11 +193,6 @@ async def get_collection(
     },
     tags=["Vectorstore Collections"],
     response_model_exclude_none=True,
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@collections_router.patch(
-    "/vectorstore/collections/{collection_name}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_collection(
@@ -235,7 +226,9 @@ async def update_collection(
     return collection_to_model(col)
 
 
-@collections_router.delete(
+@dual_path(
+    collections_router,
+    "delete",
     "/vectorstore/collections/{collection_name}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete collection",
@@ -247,11 +240,6 @@ async def update_collection(
         **not_found_response("Collection"),
     },
     tags=["Vectorstore Collections"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@collections_router.delete(
-    "/vectorstore/collections/{collection_name}/",
-    include_in_schema=False,
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_collection(collection_name: str, dal: DataAccessLayer = Depends(get_data_access_layer)):

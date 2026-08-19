@@ -28,11 +28,14 @@ from gen3_embeddings.models.schemas import (
     EmbeddingResponseBinaryWithCollections,
     SingleEmbeddingResultBinary,
 )
+from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_bulk_router = APIRouter()
 
 
-@embeddings_bulk_router.post(
+@dual_path(
+    embeddings_bulk_router,
+    "post",
     "/embeddings/bulk",
     tags=["Embeddings (Bulk Read)"],
     summary="Read select embeddings from unknown collections",
@@ -45,10 +48,6 @@ embeddings_bulk_router = APIRouter()
         "create anything."
     ),
     responses={**AUTH_RESPONSES},
-)
-@embeddings_bulk_router.post(
-    "/embeddings/bulk/",
-    include_in_schema=False,
 )
 async def get_embeddings_bulk_unknown_collections(
     request: Request,
@@ -112,7 +111,9 @@ async def get_embeddings_bulk_unknown_collections(
     )
 
 
-@embeddings_bulk_router.post(
+@dual_path(
+    embeddings_bulk_router,
+    "post",
     "/vectorstore/collections/{collection_name}/embeddings/bulk",
     # do NOT add a response model class in this path operation decorator
     # just rely on it in the typed return. FastAPI docs say this is more performant
@@ -129,10 +130,6 @@ async def get_embeddings_bulk_unknown_collections(
         **not_found_response("Collection"),
     },
     tags=["Embeddings (Bulk Read)"],
-)
-@embeddings_bulk_router.post(
-    "/vectorstore/collections/{collection_name}/embeddings/bulk/",
-    include_in_schema=False,
 )
 async def get_embeddings_bulk_from_collection(
     request: Request,

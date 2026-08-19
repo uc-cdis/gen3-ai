@@ -20,11 +20,14 @@ from gen3_embeddings.models.schemas import (
     SingleSearchResult,
     VectorType,
 )
+from gen3_embeddings.routes.helpers import dual_path
 
 vectorstore_search_router = APIRouter()
 
 
-@vectorstore_search_router.post(
+@dual_path(
+    vectorstore_search_router,
+    "post",
     "/vectorstore/collections/{collection_name}/search",
     response_model=SearchResponse,
     summary="Search embeddings in collection",
@@ -39,10 +42,6 @@ vectorstore_search_router = APIRouter()
         **not_found_response("Collection"),
     },
     tags=["Vectorstore Search"],
-)
-@vectorstore_search_router.post(
-    "/vectorstore/collections/{collection_name}/search/",
-    include_in_schema=False,
 )
 async def search_in_collection(
     request: Request,
@@ -118,7 +117,9 @@ async def search_in_collection(
     )
 
 
-@vectorstore_search_router.post(
+@dual_path(
+    vectorstore_search_router,
+    "post",
     "/vectorstore/search",
     response_model=SearchResponse,
     summary="Search embeddings across unknown collections",
@@ -133,10 +134,6 @@ async def search_in_collection(
         **BAD_REQUEST_RESPONSE,
     },
     tags=["Vectorstore Search"],
-)
-@vectorstore_search_router.post(
-    "/vectorstore/search/",
-    include_in_schema=False,
 )
 async def search_across_collections(
     request: Request,
