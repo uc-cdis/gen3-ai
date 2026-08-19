@@ -195,9 +195,11 @@ test SERVICE="all": _check_dependencies
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test libraries/{}
             echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test {}
             just _warn
         else
+            for lib in {{LIBRARIES}}; do just test "libraries/$lib"; done
             for service in {{SERVICES}}; do just test "$service"; done
         fi
     else
@@ -451,7 +453,7 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         just format "{{SERVICE}}"
 
         print_header "just lint:" "ruff check" "$TARGET" "..."
-        uv run --directory "$TARGET" ruff check ./src --fix {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ruff check . --fix {{EXTRA_ARG}}
 
         just sql_lint "{{SERVICE}}"
 
@@ -484,7 +486,7 @@ typecheck SERVICE="all" EXTRA_ARG="": _check_dependencies
         if [[ "$TARGET" == *services* ]]; then just install "{{SERVICE}}"; fi
 
         print_header "just typecheck:" "ty check" "$TARGET" "..."
-        uv run --directory "$TARGET" ty check ./src {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ty check . {{EXTRA_ARG}}
     fi
 
 # Lint .sql files

@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 from gen3_embeddings.main import get_app
 
 COUNTER = "gen3_embeddings_api_requests_total"
-# Any metered path works here. An unrouted one keeps the test off the database while still
-# going through the whole middleware stack.
-METERED_PATH = "/vectorstore/not-a-real-route"
+
+TEMPLATED_ROUTE = "/vectorstore/collections/{collection_name}"
+COLLECTION_NAME = "a-specific-collection"
 
 
 @pytest.fixture
@@ -23,52 +23,61 @@ def client() -> TestClient:
     return TestClient(get_app(), follow_redirects=True)
 
 
-def scrape(client: TestClient) -> str:
+def samples(client: TestClient, path: str) -> list[str]:
     """
-    Return the current contents of the metrics endpoint.
+    Return the counter samples currently recorded against a path label.
 
     Args:
-        client (TestClient): The client to scrape through.
+        client (TestClient): The client to scrape /metrics through.
+        path (str): The path label to look for.
 
     Returns:
-        str: The exposition-format body served at /metrics.
+        list[str]: Matching sample lines, empty when that path was never counted.
     """
-    return client.get("/metrics").text
-
-
-def series_for(body: str, path: str) -> list[str]:
-    """
-    Return the counter samples recorded against a request path.
-
-    Args:
-        body (str): An exposition-format metrics body.
-        path (str): The request path to look for.
-
-    Returns:
-        list[str]: Matching sample lines, empty when the path was never counted.
-    """
+    body = client.get("/metrics").text
     return [line for line in body.splitlines() if line.startswith(COUNTER) and f'path="{path}"' in line]
 
 
 def test_served_request_is_counted(client: TestClient) -> None:
     """A request to a metered endpoint shows up on /metrics labelled with how it was served."""
-    response = client.get(METERED_PATH)
+    response = client.patch(f"/vectorstore/collections/{COLLECTION_NAME}")
 
-    samples = series_for(scrape(client), METERED_PATH)
+    recorded = samples(client, TEMPLATED_ROUTE)
 
-    assert samples, f"no {COUNTER} sample for {METERED_PATH}"
-    assert 'method="GET"' in samples[0]
-    assert f'status_code="{response.status_code}"' in samples[0]
+    assert recorded, f"no {COUNTER} sample for {TEMPLATED_ROUTE}"
+    assert 'method="PATCH"' in recorded[0]
+    assert f'status_code="{response.status_code}"' in recorded[0]
+
+
+def test_path_parameter_is_not_recorded_as_a_label(client: TestClient) -> None:
+    """
+    A path parameter is recorded as its route template, not its value.
+
+    Recording the value would create a new time series per collection.
+    """
+    client.patch(f"/vectorstore/collections/{COLLECTION_NAME}")
+
+    assert samples(client, TEMPLATED_ROUTE)
+    assert not samples(client, f"/vectorstore/collections/{COLLECTION_NAME}")
+
+
+def test_unrouted_request_is_counted_under_one_shared_label(client: TestClient) -> None:
+    """Requests matching no route share a single path label rather than one per URL."""
+    client.get("/vectorstore/no-such-route")
+    client.get("/also-not-a-route")
+
+    assert samples(client, "<unmatched>")
+    assert not samples(client, "/vectorstore/no-such-route")
 
 
 def test_unauthenticated_request_is_counted_as_an_unknown_user(client: TestClient) -> None:
     """A request without a token is still counted, attributed to an unknown user."""
-    client.get(METERED_PATH)
+    client.patch(f"/vectorstore/collections/{COLLECTION_NAME}")
 
-    samples = series_for(scrape(client), METERED_PATH)
+    recorded = samples(client, TEMPLATED_ROUTE)
 
-    assert samples
-    assert 'user_id="Unknown"' in samples[0]
+    assert recorded
+    assert 'user_id="Unknown"' in recorded[0]
 
 
 @pytest.mark.parametrize("path", ["/metrics", "/_status", "/_version"])
@@ -76,4 +85,4 @@ def test_excluded_endpoint_is_not_counted(client: TestClient, path: str) -> None
     """Endpoints exempt from metrics never appear as a counted request path."""
     client.get(path)
 
-    assert not series_for(scrape(client), path)
+    assert not samples(client, path)

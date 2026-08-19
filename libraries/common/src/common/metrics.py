@@ -49,6 +49,12 @@ def get_metrics_client(fastapi_app: FastAPI):
     Args:
         fastapi_app: The FastAPI application to which the metrics
             endpoint should be added (if any)
+
+    Returns:
+        The metrics client, or None when metrics are disabled.
+
+    Raises:
+        Exception: If metrics are enabled but METRICS_PROVIDER names an unsupported provider.
     """
     metrics_client = None
     metrics_client_kwargs = {}

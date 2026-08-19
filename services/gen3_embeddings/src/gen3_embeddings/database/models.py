@@ -64,6 +64,9 @@ class Embedding:
 
         This normalizes:
         - metadata:  string -> dict (JSON)
+
+        Returns:
+            Embedding: The row as a dataclass, with metadata decoded from JSON.
         """
         return cls(
             collection_id=row["collection_id"],

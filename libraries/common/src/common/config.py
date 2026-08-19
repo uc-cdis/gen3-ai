@@ -12,8 +12,11 @@ from starlette.config import Config
 
 def get_venv_root() -> Path | None:
     """
-    Return the absolute Path to the root of the current virtual environment,
-    or None if the interpreter is running from the system Python.
+    Return the root of the current virtual environment.
+
+    Returns:
+        Path | None: The absolute path to the environment's root, or None when the interpreter
+            is running from the system Python.
     """
     if hasattr(sys, "base_prefix"):
         if sys.prefix != sys.base_prefix:
@@ -112,6 +115,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config(
 # Alloy accepts both. `http/protobuf` pairs with port 4318 and `grpc` with 4317; a mismatched
 # pair fails at export time, not at startup.
 OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf", cast=str)
+# Kill switch for the per-function spans that common/telemetry.py's `traced` and `instrument_*`
+# helpers add. Turning this on leaves the library instrumentation (FastAPI, asyncpg, httpx,
+# requests, logging) running, so requests and queries are still traced with less detail.
+FORCE_DISABLE_CUSTOM_TRACING = starlette_config("FORCE_DISABLE_CUSTOM_TRACING", cast=bool, default=False)
 
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
 
