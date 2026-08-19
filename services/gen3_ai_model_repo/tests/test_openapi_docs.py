@@ -9,9 +9,7 @@ from gen3_ai_model_repo.main import get_app as get_service_app
 class TestOpenApiDocs(OpenApiDocsContract):
     """Applies the shared OpenAPI docs contract to this service."""
 
-    # This service is still a stub with no routers mounted. The contract's other checks are
-    # already live, so they start enforcing the moment the first route lands.
-    expects_public_operations = False
+    expects_public_operations = True
 
     @staticmethod
     def get_app() -> FastAPI:

@@ -152,7 +152,6 @@ async def update_repository(
         status.HTTP_401_UNAUTHORIZED: {"description": "User unauthenticated"},
         status.HTTP_403_FORBIDDEN: {"description": "User does not have access"},
         status.HTTP_404_NOT_FOUND: {"description": "Repository not found"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Failed to delete repository"},
     },
     tags=["Models"],
 )

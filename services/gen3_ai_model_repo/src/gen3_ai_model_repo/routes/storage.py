@@ -57,24 +57,25 @@ class StorageDownloadUrlResponse(BaseModel):
     presigned_url: str
 
 
-@storage_router.post("/api/storage/verify", response_model=StorageVerifyResponse, tags=["Storage"])
-@storage_router.post("/storage/verify", response_model=StorageVerifyResponse, tags=["Storage"], include_in_schema=False)
+@storage_router.post(
+    "/api/storage/verify",
+    response_model=StorageVerifyResponse,
+    summary="Verify a storage prefix",
+    description="Check whether a storage prefix exists, count the files it contains, and total their sizes.",
+    tags=["Storage"],
+)
+@storage_router.post(
+    "/storage/verify",
+    response_model=StorageVerifyResponse,
+    summary="Verify a storage prefix",
+    description="Check whether a storage prefix exists, count the files it contains, and total their sizes.",
+    tags=["Storage"],
+    include_in_schema=False,
+)
 async def verify_storage(
     request: StorageVerifyRequest, _: None = Depends(verify_authorization)
 ) -> StorageVerifyResponse:
-    """
-    Verify the existence and size of files at a storage prefix.
-
-    Queries the configured storage backend for all files under the given prefix,
-    counts them, and sums their sizes.
-
-    Args:
-        request: Contains the storage_prefix to inspect.
-        _: Authorization dependency validated by FastAPI.
-
-    Returns:
-        StorageVerifyResponse with existence flag, file count, and total size.
-    """
+    """Check whether a storage prefix exists and how much data it contains."""
 
     provider = get_storage_provider()
     files = await provider.list_files(request.storage_prefix)
@@ -85,26 +86,25 @@ async def verify_storage(
     return StorageVerifyResponse(exists=bool(files), file_count=len(files), total_size=total_size)
 
 
-@storage_router.post("/api/storage/download-url", response_model=StorageDownloadUrlResponse, tags=["Storage"])
+@storage_router.post(
+    "/api/storage/download-url",
+    response_model=StorageDownloadUrlResponse,
+    summary="Generate a signed download URL",
+    description="Create a short-lived URL that allows an authenticated user to download a storage object.",
+    tags=["Storage"],
+)
 @storage_router.post(
     "/storage/download-url",
     response_model=StorageDownloadUrlResponse,
+    summary="Generate a signed download URL",
+    description="Create a short-lived URL that allows an authenticated user to download a storage object.",
     tags=["Storage"],
     include_in_schema=False,
 )
 async def storage_download_url(
     request: StorageDownloadUrlRequest, _: None = Depends(verify_authorization)
 ) -> StorageDownloadUrlResponse:
-    """
-    Generate a pre-signed download URL for a storage object.
-
-    Args:
-        request: Contains the object_key identifying the target file.
-        _: Authorization dependency validated by FastAPI.
-
-    Returns:
-        StorageDownloadUrlResponse containing the pre-signed URL.
-    """
+    """Create a pre-signed URL for downloading a stored object."""
 
     provider = get_storage_provider()
     return StorageDownloadUrlResponse(presigned_url=await provider.generate_signed_url(request.object_key))
