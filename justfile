@@ -157,9 +157,9 @@ snyk SERVICE="all": _check_dependencies
 
         print_header "just snyk:" "scanning" "{{SERVICE}}" "service..."
 
-        # export a requirements file without local imports
-        # since the local imports are reflected in the overall requirements and confuse snyk
-        uv --directory "$TARGET" export --no-emit-local --format requirements.txt > "{{SERVICE}}_requirements.txt"
+        # export a requirements file without local imports or hashes
+        # --no-hashes prevents pip from forcing strict hash verification on Git repos
+        uv --directory "$TARGET" export --no-emit-local --no-hashes --format requirements.txt > "{{SERVICE}}_requirements.txt"
 
         # snyk, at the moment, requires pip in an env to actually test things. uv envs don't depend on pip
         # so we need to create a new virtual env.
