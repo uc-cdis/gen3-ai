@@ -223,12 +223,12 @@ def client(app, reset_db):
 @pytest.fixture
 def allow_authz(monkeypatch):
     """
-    Patch DAL authz resolution to simulate the caller having access to specific collections.
+    Patch authz resolution to simulate the caller having access to specific collections.
 
     Example:
         allow_authz("alpha", "beta")
     """
-    from gen3_embeddings.database import db as db_module
+    from gen3_embeddings import dependencies as dependencies_module
 
     def _apply(*collection_names: str):
         allowed = [f"/vectorstore/collections/{name}" for name in collection_names]
@@ -239,9 +239,9 @@ def allow_authz(monkeypatch):
         async def fake_get_allowed_authz_for_request_with_method(request, method: str):
             return allowed
 
-        monkeypatch.setattr(db_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
         monkeypatch.setattr(
-            db_module,
+            dependencies_module,
             "get_allowed_authz_for_request_with_method",
             fake_get_allowed_authz_for_request_with_method,
         )

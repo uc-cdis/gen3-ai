@@ -11,6 +11,7 @@ from gen3authz.client.arborist.async_client import ArboristClient
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.database.db import close_pool, get_pool
+from gen3_embeddings.error_handlers import register_error_handlers
 from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
@@ -233,6 +234,7 @@ def get_app() -> FastAPI:
         root_path=config.URL_PREFIX,
         lifespan=lifespan,
     )
+    register_error_handlers(app)
     app.include_router(route_aggregator)
 
     return app

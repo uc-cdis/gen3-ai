@@ -17,10 +17,8 @@ from gen3_embeddings.auth import (
     parse_and_auth_request,
 )
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
-from gen3_embeddings.database.db import (
-    DataAccessLayer,
-    get_data_access_layer,
-)
+from gen3_embeddings.database.db import DataAccessLayer
+from gen3_embeddings.dependencies import get_allowed_collection_names, get_data_access_layer
 from gen3_embeddings.models.helpers import (
     embedding_to_result,
     normalize_authz,
@@ -57,6 +55,7 @@ async def get_embedding_from_collection(
     collection_name: str,
     embedding_uuid: UUID,
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Read a single embedding from a specific collection.
@@ -73,7 +72,7 @@ async def get_embedding_from_collection(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -112,6 +111,7 @@ async def update_embedding_in_collection(
     embedding_uuid: UUID,
     body: UpdateEmbeddingBody,
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Update the embedding vector for a given collection and embedding ID.
@@ -129,7 +129,7 @@ async def update_embedding_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found; 400 if update fails.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -194,6 +194,7 @@ async def put_embeddings_in_collection(
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     TODO: implementaion for StringArrayInput and ai_model
@@ -224,7 +225,7 @@ async def put_embeddings_in_collection(
 
     """
 
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -360,6 +361,7 @@ async def delete_embedding(
     collection_name: str,
     embedding_uuid: UUID,
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Delete an embedding from a specific collection.
@@ -376,7 +378,7 @@ async def delete_embedding(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -414,6 +416,7 @@ async def list_embeddings_in_collection(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     List all embeddings within a specific collection.
@@ -432,7 +435,7 @@ async def list_embeddings_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -496,6 +499,7 @@ async def create_embeddings_in_collection(
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
 
@@ -525,7 +529,7 @@ async def create_embeddings_in_collection(
     Raises:
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 

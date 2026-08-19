@@ -11,7 +11,8 @@ from common.fastapi.responses import (
 )
 from gen3_embeddings.auth import parse_and_auth_request
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
-from gen3_embeddings.database.db import DataAccessLayer, get_data_access_layer
+from gen3_embeddings.database.db import DataAccessLayer
+from gen3_embeddings.dependencies import get_allowed_collection_names, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model, normalize_collection_name
 from gen3_embeddings.models.schemas import (
     CollectionModel,
@@ -44,6 +45,7 @@ async def list_collections(
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     counts: bool = Query(False, alias="counts"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     List all existing collections.
@@ -60,7 +62,9 @@ async def list_collections(
     limit = page_size
 
     logging.debug(f"Listing collections, offset={offset}, limit={limit}")
-    collections = await dal.list_collections(offset=offset, limit=limit)
+    collections = await dal.list_collections(
+        allowed_collection_names=allowed_collection_names, offset=offset, limit=limit
+    )
 
     # If counts=true, compute per-collection embedding counts
     counts_by_id: dict[int, int] = {}
@@ -100,6 +104,7 @@ async def create_collection(
     request: Request,
     body: CreateCollectionBody,
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Create a new collection.
@@ -120,6 +125,7 @@ async def create_collection(
         raise HTTPException(status_code=400, detail=str(exc))
 
     col = await dal.create_collection(
+        allowed_collection_names=allowed_collection_names,
         collection_name=normalized_name,
         description=body.description,
         dimensions=body.dimensions,
@@ -150,6 +156,7 @@ async def get_collection(
     collection_name: str,
     counts: bool = Query(False, alias="counts"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Read information about a specific collection.
@@ -166,7 +173,7 @@ async def get_collection(
     """
     logging.debug(f"Getting collection: {collection_name}...")
 
-    col = await dal.get_collection_by_name(collection_name)
+    col = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
 
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -199,6 +206,7 @@ async def update_collection(
     collection_name: str,
     body: UpdateCollectionBody,
     dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
     """
     Update mutable metadata fields for a collection.
@@ -219,7 +227,9 @@ async def update_collection(
         collection_name = normalize_collection_name(collection_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    col = await dal.update_collection(collection_name=collection_name, description=body.description)
+    col = await dal.update_collection(
+        collection_name=collection_name, description=body.description, allowed_collection_names=allowed_collection_names
+    )
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -242,7 +252,11 @@ async def update_collection(
     tags=["Vectorstore Collections"],
     dependencies=[Depends(parse_and_auth_request)],
 )
-async def delete_collection(collection_name: str, dal: DataAccessLayer = Depends(get_data_access_layer)):
+async def delete_collection(
+    collection_name: str,
+    dal: DataAccessLayer = Depends(get_data_access_layer),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+):
     """
     Delete a collection by name.
 
@@ -260,7 +274,7 @@ async def delete_collection(collection_name: str, dal: DataAccessLayer = Depends
         collection_name = normalize_collection_name(collection_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    success = await dal.delete_collection(collection_name)
+    success = await dal.delete_collection(collection_name, allowed_collection_names=allowed_collection_names)
     logging.info(f"Deleted collection: {collection_name}.")
     if not success:
         raise HTTPException(status_code=404, detail="Collection not found")

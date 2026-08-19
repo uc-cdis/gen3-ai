@@ -301,6 +301,46 @@ def get_authz_resource_path_from_collection_name(collection_name: str) -> str:
         return f"{base}/{collection_name}"
 
 
+def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str]:
+    """
+    Derive the collection names a caller may act on from their allowed authz paths.
+
+    Follows the resource convention:
+
+      /vectorstore/collections
+      /vectorstore/collections/{collection_name}
+
+    Args:
+        allowed_authz (list[str]): Authz resource paths the caller holds.
+
+    Returns:
+        set[str]: Collection names the caller may act on. Empty is a valid fail-closed
+        result meaning "no collections", not "all collections".
+    """
+    base = "/vectorstore/collections"
+    allowed: set[str] = set()
+
+    for item in allowed_authz:
+        if not isinstance(item, str):
+            continue
+        if item == base:
+            # base resource: may mean "can access all collections", depending on policy
+            # for now, we'll pass
+            continue
+        if item.startswith(base + "/"):
+            # e.g. "/vectorstore/collections/my_collection"
+            parts = item.split("/")
+            if parts:
+                if len(parts) != 4:
+                    # # Expect exactly: ["", "vectorstore", "collections", "{collection_name}"]
+                    # This covers "/vectorstore/collections/a/b" (len=5), etc.
+                    continue
+                name = parts[-1]
+                if name:
+                    allowed.add(name)
+    return allowed
+
+
 def get_allowed_authz_from_mapping(
     authz_mapping: Mapping,
     method: str,

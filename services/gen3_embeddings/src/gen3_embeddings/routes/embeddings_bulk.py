@@ -14,11 +14,12 @@ from common.fastapi.responses import (
     AUTH_RESPONSES,
     not_found_response,
 )
-from gen3_embeddings.database.db import (
-    DataAccessLayer,
+from gen3_embeddings.database.db import DataAccessLayer
+from gen3_embeddings.database.models import Collection
+from gen3_embeddings.dependencies import (
+    get_allowed_collection_names_for_read_operations,
     get_data_access_layer_for_read_operations,
 )
-from gen3_embeddings.database.models import Collection
 from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_binary_result,
@@ -54,6 +55,7 @@ async def get_embeddings_bulk_unknown_collections(
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
 ) -> EmbeddingResponseBinaryWithCollections:
     """
     Read a selection of embeddings by UUID across any collection.
@@ -81,7 +83,7 @@ async def get_embeddings_bulk_unknown_collections(
     collection_ids = list({e.collection_id for e in embs})
     collections: dict[int, Collection] = {}
 
-    col_list = await dal.get_collection_by_id_bulk(collection_ids)
+    col_list = await dal.get_collection_by_id_bulk(collection_ids, allowed_collection_names=allowed_collection_names)
 
     for col in col_list:
         collections[col.id] = col
@@ -137,6 +139,7 @@ async def get_embeddings_bulk_from_collection(
     embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
 ) -> EmbeddingResponseBinary:
     """
     TODO: post here but actually reading, how to hanle authz here?
@@ -156,7 +159,7 @@ async def get_embeddings_bulk_from_collection(
     Raises:
         HTTPException: 404 if the collection is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
 
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
