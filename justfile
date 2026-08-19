@@ -157,9 +157,9 @@ snyk SERVICE="all": _check_dependencies
 
         print_header "just snyk:" "scanning" "{{SERVICE}}" "service..."
 
-        # export a requirements file without local imports
-        # since the local imports are reflected in the overall requirements and confuse snyk
-        uv --directory "$TARGET" export --no-emit-local --format requirements.txt > "{{SERVICE}}_requirements.txt"
+        # export a requirements file without local imports or hashes
+        # --no-hashes prevents pip from forcing strict hash verification on Git repos
+        uv --directory "$TARGET" export --no-emit-local --no-hashes --format requirements.txt > "{{SERVICE}}_requirements.txt"
 
         # snyk, at the moment, requires pip in an env to actually test things. uv envs don't depend on pip
         # so we need to create a new virtual env.
@@ -195,9 +195,11 @@ test SERVICE="all": _check_dependencies
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test libraries/{}
             echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test {}
             just _warn
         else
+            for lib in {{LIBRARIES}}; do just test "libraries/$lib"; done
             for service in {{SERVICES}}; do just test "$service"; done
         fi
     else
@@ -346,9 +348,15 @@ update_versions: _check_dependencies
 
     UV_LATEST=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name)
     JUST_LATEST=$(curl -s https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
+    DBMATE_LATEST=$(curl -s https://api.github.com/repos/amacneil/dbmate/releases/latest | jq -r .tag_name)
 
     if [[ ! $UV_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid UV tag${RESET}"; exit 1; fi
     if [[ ! $JUST_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid JUST tag${RESET}"; exit 1; fi
+    if [[ ! $DBMATE_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid DBMATE tag${RESET}"; exit 1; fi
+
+    # the workflows build a GitHub release download URL (tag keeps the "v"), while Dockerfile.k8s
+    # pulls a ghcr image tag (no "v"). Both must resolve to the same dbmate build.
+    DBMATE_LATEST_NO_V="${DBMATE_LATEST#v}"
 
     for file in .github/workflows/*.yml; do
         if grep -E "UV_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
@@ -362,8 +370,23 @@ update_versions: _check_dependencies
         else
             sed -i.bak -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file"
         fi
+
+        if grep -E "DBMATE_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
+            echo "Skipping DBMATE in $file"
+        else
+            sed -i.bak -E "s/(DBMATE_VERSION:[[:space:]]*')[^']*'/\\1${DBMATE_LATEST}'/g" "$file"
+        fi
         rm -f "$file.bak"
     done
+
+    if [ -f Dockerfile.k8s ]; then
+        if grep -E "^#[[:space:]]*allow-old-version" Dockerfile.k8s > /dev/null; then
+            echo "Skipping DBMATE in Dockerfile.k8s"
+        else
+            sed -i.bak -E "s/(ARG DBMATE_VERSION=)[^[:space:]]*/\\1${DBMATE_LATEST_NO_V}/" Dockerfile.k8s
+            rm -f Dockerfile.k8s.bak
+        fi
+    fi
     echo "Up to date!"
 
 # Delete all .venv and .lock files (irreversible)
@@ -430,7 +453,7 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         just format "{{SERVICE}}"
 
         print_header "just lint:" "ruff check" "$TARGET" "..."
-        uv run --directory "$TARGET" ruff check ./src --fix {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ruff check . --fix {{EXTRA_ARG}}
 
         just sql_lint "{{SERVICE}}"
 
@@ -463,7 +486,7 @@ typecheck SERVICE="all" EXTRA_ARG="": _check_dependencies
         if [[ "$TARGET" == *services* ]]; then just install "{{SERVICE}}"; fi
 
         print_header "just typecheck:" "ty check" "$TARGET" "..."
-        uv run --directory "$TARGET" ty check ./src {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ty check . {{EXTRA_ARG}}
     fi
 
 # Lint .sql files
@@ -553,7 +576,7 @@ whitespace_lint: _check_dependencies
 
 # Run a service in docker
 [group('run')]
-@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="4141": _check_dependencies
+@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
@@ -562,15 +585,14 @@ whitespace_lint: _check_dependencies
     docker rm "{{SERVICE}}" 2>/dev/null || true
     docker run --name "{{SERVICE}}" --env-file "services/{{SERVICE}}/.env" -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} "{{SERVICE}}:latest"
 
-# Run a service using gunicorn
+# Run a service using uvicorn (pass PORT to run more than one service at once)
 [group('run')]
-@run SERVICE: _check_dependencies
+@run SERVICE PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
-    print_header "just run:" "running" "{{SERVICE}}" "service..."
-    export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
-    uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
+    print_header "just run:" "running" "{{SERVICE}}" "service on port {{PORT}}..."
+    uv run --directory "./services/{{SERVICE}}" uvicorn {{SERVICE}}.main:app_instance --host 0.0.0.0 --port {{PORT}}
 
 _warn:
     #!/usr/bin/env bash

@@ -5,6 +5,14 @@ repos:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
         exclude: poetry.lock
+  - repo: local
+    hooks:
+    -   id: lint
+        name: run all lint checks and show fixes
+        entry: uv run just lint all --show-fixes
+        language: python
+        types: [file]
+        pass_filenames: false
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -12,14 +20,6 @@ repos:
       - id: end-of-file-fixer
       - id: no-commit-to-branch
         args: [--branch, develop, --branch, master, --branch, main, --pattern, release/.*]
-  - repo: local
-    hooks:
-    -   id: lint
-        name: run all lint checks and show fixes
-        entry: uv run just lint all --show-fixes
-        language: python
-        types: [python]
-        pass_filenames: false
   - repo: local
     hooks:
     -   id: update_versions

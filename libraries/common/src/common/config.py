@@ -6,14 +6,17 @@ import os
 import sys
 from pathlib import Path
 
-import cdislogging
+import gen3logging
 from starlette.config import Config
 
 
 def get_venv_root() -> Path | None:
     """
-    Return the absolute Path to the root of the current virtual environment,
-    or None if the interpreter is running from the system Python.
+    Return the root of the current virtual environment.
+
+    Returns:
+        Path | None: The absolute path to the environment's root, or None when the interpreter
+            is running from the system Python.
     """
     if hasattr(sys, "base_prefix"):
         if sys.prefix != sys.base_prefix:
@@ -31,16 +34,28 @@ def get_venv_root() -> Path | None:
 CURRENT_DIR = get_venv_root() or os.path.dirname(os.path.realpath(__file__))
 CONFIG_PATH = os.path.abspath(os.getenv("CONFIG_PATH", f"{CURRENT_DIR}/.env"))
 
-starlette_config = Config(CONFIG_PATH)
+# Containers configure everything through environment variables and ship no .env, and
+# starlette emits a UserWarning for a missing env_file, so only pass one that exists.
+CONFIG_FILE_EXISTS = os.path.isfile(CONFIG_PATH)
+
+starlette_config = Config(CONFIG_PATH if CONFIG_FILE_EXISTS else None)
 DEBUG = starlette_config("DEBUG", cast=bool, default=False)
 
 # this turns on debug logging for certain noisy internal libraries
-# Note: the list of libraries is in the gunicorn.conf.py
+# Note: the list of libraries is in common/logging_setup.py
 VERBOSE_INTERNAL_LOGS = starlette_config("VERBOSE_INTERNAL_LOGS", cast=bool, default=False)
 
-logging = cdislogging.get_logger(__name__, log_level="debug" if DEBUG else "info")
+# Emit one JSON object per log line instead of the human-readable text format. Named to match the
+# env var gen3logging reads on its own; passing it explicitly means this default wins over the
+# library's.
+GEN3_JSON_LOGS = starlette_config("GEN3_JSON_LOGS", cast=bool, default=True)
 
-logging.info(f"Using configuration file: {CONFIG_PATH}")
+logging = gen3logging.get_logger(__name__, log_level="debug" if DEBUG else "info", json_logs=GEN3_JSON_LOGS)
+
+if CONFIG_FILE_EXISTS:
+    logging.info(f"Using configuration file: {CONFIG_PATH}")
+else:
+    logging.info(f"No configuration file at {CONFIG_PATH}, using environment variables only")
 
 # will skip authorization when a token is not provided. note that if a token is provided, then
 # auth will still occur
@@ -52,6 +67,7 @@ ALLOW_ANONYMOUS_ACCESS = starlette_config("ALLOW_ANONYMOUS_ACCESS", cast=bool, d
 
 logging.info(f"DEBUG is {DEBUG}")
 logging.info(f"VERBOSE_INTERNAL_LOGS is {VERBOSE_INTERNAL_LOGS}")
+logging.info(f"GEN3_JSON_LOGS is {GEN3_JSON_LOGS}")
 
 if DEBUG_SKIP_AUTH:
     logging.warning(
@@ -75,12 +91,15 @@ GEN3_AI_MODEL_REPO_URL = starlette_config(
 GEN3_EMBEDDINGS_URL = starlette_config("GEN3_EMBEDDINGS_URL", default="http://gen3-embeddings-service", cast=str)
 GEN3_INFERENCE_URL = starlette_config("GEN3_INFERENCE_URL", default="http://gen3-inference-service", cast=str)
 
-PUBLIC_ROUTES = {
-    "/",
-    "/docs",
-    "/docs/",
-    "/openapi.json",
-    "/openapi.json/",
+# Endpoints that exist to be polled or fetched by a browser, and are not worth observability
+# (metrics or tracing).
+#
+# Do NOT add "/" here. common/telemetry.py turns each of these into a regex anchored at the end
+# of the URL, so a bare "/" becomes "/$", which matches every URL ending in a slash and would
+# silently drop the trailing-slash form of every real route from tracing. The site root, the
+# docs and the OpenAPI spec are all left out deliberately: traffic to them is cheap to record
+# and worth seeing.
+UNMONITORED_ROUTES = {
     "/_status",
     "/_status/",
     "/_version",
@@ -88,20 +107,31 @@ PUBLIC_ROUTES = {
     "/favicon.ico",
     "/favicon.ico/",
 }
-ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | PUBLIC_ROUTES
+ENDPOINTS_WITHOUT_METRICS = {"/metrics", "/metrics/"} | UNMONITORED_ROUTES
 
 # This app exports traces using OpenTelemetry. By default in Gen3, we use Alloy for collection.
 ENABLE_OPENTELEMETRY_TRACES = starlette_config("ENABLE_OPENTELEMETRY_TRACES", cast=bool, default=True)
-# For local development, set this to an EMPTY STRING and it will output to console. See gunicorn.conf.py
+# For local development, set this to an EMPTY STRING and it will output to console. See common/telemetry.py
 OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config(
-    "OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring.4318", cast=str
+    "OTEL_EXPORTER_OTLP_ENDPOINT", default="http://alloy.monitoring:4318", cast=str
 )
+# Alloy accepts both. `http/protobuf` pairs with port 4318 and `grpc` with 4317; a mismatched
+# pair fails at export time, not at startup.
+OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf", cast=str)
+# Kill switch for the per-function spans that common/telemetry.py's `traced` and `instrument_*`
+# helpers add. Turning this on leaves the library instrumentation (FastAPI, asyncpg, httpx,
+# requests, logging) running, so requests and queries are still traced with less detail.
+FORCE_DISABLE_CUSTOM_TRACING = starlette_config("FORCE_DISABLE_CUSTOM_TRACING", cast=bool, default=False)
 
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
 
 # Metrics provider, at the moment we only support "prometheus". If you want to use a different one,
-# you will need to implement the common interface in common/metrics/base.py.
-# Note: default is no metrics.
+# you will need to implement the common interface in common/metrics.py.
 ENABLE_METRICS = starlette_config("ENABLE_METRICS", default=True, cast=bool)
 METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default="prometheus", cast=str)
 PROMETHEUS_MULTIPROC_DIR = starlette_config("PROMETHEUS_MULTIPROC_DIR", default="/var/tmp/prometheus_metrics", cast=str)
+# prometheus_client decides between its in-memory and its multiprocess value class once, when it
+# is first imported, based on this env var. Anything that sets the var later - including
+# cdispyutils' BaseMetrics, which sets it in its constructor - leaves counters in memory while
+# /metrics serves a multiprocess registry reading an empty directory, i.e. a 200 with no data.
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", PROMETHEUS_MULTIPROC_DIR)
