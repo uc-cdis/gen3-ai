@@ -20,6 +20,7 @@ from gen3_embeddings.models.schemas import (
     PaginatedCollectionsResponse,
     UpdateCollectionBody,
 )
+from gen3_embeddings.params import CollectionName
 from gen3_embeddings.routes.helpers import dual_path
 
 collections_router = APIRouter()
@@ -153,7 +154,7 @@ async def create_collection(
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_collection(
-    collection_name: str,
+    collection_name: CollectionName,
     counts: bool = Query(False, alias="counts"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
@@ -203,7 +204,7 @@ async def get_collection(
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_collection(
-    collection_name: str,
+    collection_name: CollectionName,
     body: UpdateCollectionBody,
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
@@ -223,10 +224,6 @@ async def update_collection(
         HTTPException: 404 if collection is not found.
     """
     logging.debug(f"Updating collection: {collection_name} with description={body.description}...")
-    try:
-        collection_name = normalize_collection_name(collection_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     col = await dal.update_collection(
         collection_name=collection_name, description=body.description, allowed_collection_names=allowed_collection_names
     )
@@ -253,7 +250,7 @@ async def update_collection(
     dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_collection(
-    collection_name: str,
+    collection_name: CollectionName,
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
@@ -270,10 +267,6 @@ async def delete_collection(
     Raises:
         HTTPException: 404 if collection is not found.
     """
-    try:
-        collection_name = normalize_collection_name(collection_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     success = await dal.delete_collection(collection_name, allowed_collection_names=allowed_collection_names)
     logging.info(f"Deleted collection: {collection_name}.")
     if not success:

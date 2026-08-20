@@ -21,6 +21,7 @@ from gen3_embeddings.models.schemas import (
     SingleSearchResult,
     VectorType,
 )
+from gen3_embeddings.params import CollectionName
 from gen3_embeddings.routes.helpers import dual_path
 
 vectorstore_search_router = APIRouter()
@@ -47,7 +48,7 @@ vectorstore_search_router = APIRouter()
 async def search_in_collection(
     request: Request,
     body: SearchRequestBody,
-    collection_name: str,
+    collection_name: CollectionName,
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),

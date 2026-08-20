@@ -30,6 +30,7 @@ from gen3_embeddings.models.schemas import (
     SingleEmbeddingResult,
     UpdateEmbeddingBody,
 )
+from gen3_embeddings.params import CollectionName
 from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_router = APIRouter()
@@ -52,7 +53,7 @@ embeddings_router = APIRouter()
 )
 async def get_embedding_from_collection(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     embedding_uuid: UUID,
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
@@ -107,7 +108,7 @@ async def get_embedding_from_collection(
 )
 async def update_embedding_in_collection(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     embedding_uuid: UUID,
     body: UpdateEmbeddingBody,
     dal: DataAccessLayer = Depends(get_data_access_layer),
@@ -189,7 +190,7 @@ async def update_embedding_in_collection(
 )
 async def put_embeddings_in_collection(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),
@@ -358,7 +359,7 @@ async def put_embeddings_in_collection(
 )
 async def delete_embedding(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     embedding_uuid: UUID,
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
@@ -411,7 +412,7 @@ async def delete_embedding(
 )
 async def list_embeddings_in_collection(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     exclude_info: bool = Query(False, alias="exclude_info"),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
@@ -494,7 +495,7 @@ async def list_embeddings_in_collection(
 )
 async def create_embeddings_in_collection(
     request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),

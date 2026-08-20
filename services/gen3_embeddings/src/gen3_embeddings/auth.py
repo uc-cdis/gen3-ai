@@ -13,6 +13,7 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_500
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
+from gen3_embeddings.params import CollectionName
 
 get_bearer_token = HTTPBearer(auto_error=False)
 
@@ -310,6 +311,11 @@ def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str
       /vectorstore/collections
       /vectorstore/collections/{collection_name}
 
+    Names are taken from the policy engine verbatim, NOT normalized. Arborist resource paths
+    are case-sensitive, so rewriting them here would mean this service disagreed with the
+    policy engine about what a grant says. A policy must therefore name the collection
+    exactly as it is stored, which is its normalized form.
+
     Args:
         allowed_authz (list[str]): Authz resource paths the caller holds.
 
@@ -397,13 +403,18 @@ def _get_crud_action_from_request(request: Request) -> str:
     return action
 
 
-async def parse_and_auth_request(request: Request, collection_name: str):
+async def parse_and_auth_request(request: Request, collection_name: CollectionName):
     """
-    Authorize the request with arborist to ensure the request can be madefrom gen3_embeddings.auth import parse_and_auth_request
+    Authorize the request with arborist to ensure the request can be made.
+
+    `collection_name` arrives normalized (see `params.CollectionName`), so the resource path
+    checked here is the same string the data access layer compares against, and it matches
+    the collection as actually stored. Arborist resource paths are case-sensitive, so a
+    policy must name the collection in that same normalized form to grant access.
 
     Args:
         request: fastapi request entity.
-        collection_name: Name of the collection to authorize access to.
+        collection_name: Normalized name of the collection to authorize access to.
 
     Raises:
         HTTPException based on authorize_request outcome
