@@ -231,3 +231,39 @@ def test_upsert_embeddings(client, allow_authz):
     assert result["embedding_id"] == embedding_id
     assert result["vector"] == [4.0, 5.0, 6.0]
     assert result["info"]["metadata"] == {"v": "2"}
+
+
+def test_delete_embedding_that_does_not_exist_returns_404(client, allow_authz):
+    """
+    Deleting an embedding UUID that is not in the collection is a 404.
+    """
+    allow_authz("docs")
+
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "documents", "dimensions": 3, "vector_type": "vector"},
+    )
+
+    missing_id = "00000000-0000-0000-0000-000000000000"
+    response = client.delete(f"/vectorstore/collections/docs/embeddings/{missing_id}")
+    assert response.status_code == 404
+
+
+def test_delete_embedding_twice_returns_404_the_second_time(client, allow_authz):
+    """The first delete removes the embedding; the second has nothing left to remove."""
+    allow_authz("docs")
+
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "documents", "dimensions": 3, "vector_type": "vector"},
+    )
+    create_resp = client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [0.1, 0.2, 0.3], "metadata": {}}]},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    embedding_id = create_resp.json()["embeddings"][0]["embedding_id"]
+
+    path = f"/vectorstore/collections/docs/embeddings/{embedding_id}"
+    assert client.delete(path).status_code == 204
+    assert client.delete(path).status_code == 404

@@ -206,3 +206,27 @@ def test_delete_collection(client, allow_authz):
 
     get_resp = client.get("/vectorstore/collections/alpha")
     assert get_resp.status_code == 404
+
+
+def test_delete_collection_that_does_not_exist_returns_404(client, allow_authz):
+    """
+    Deleting a name that was never created.
+    """
+    allow_authz("alpha")
+
+    response = client.delete("/vectorstore/collections/alpha")
+    assert response.status_code == 404
+
+
+def test_delete_collection_twice_returns_404_the_second_time(client, allow_authz):
+    """The first delete removes the collection; the second has nothing left to remove."""
+    allow_authz("alpha")
+
+    create_resp = client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "alpha", "description": "to delete", "dimensions": 3, "vector_type": "vector"},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+
+    assert client.delete("/vectorstore/collections/alpha").status_code == 204
+    assert client.delete("/vectorstore/collections/alpha").status_code == 404

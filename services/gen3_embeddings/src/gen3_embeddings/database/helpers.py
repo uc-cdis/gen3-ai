@@ -5,6 +5,28 @@ from typing import Any
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 
+def affected_row_count(command_tag: str) -> int:
+    """
+    Return how many rows a statement affected, from its Postgres command tag.
+
+    `Connection.execute` returns the command tag rather than a row count, e.g. "DELETE 3",
+    "DELETE 0" or "UPDATE 2". Only the trailing count says whether anything changed: a
+    statement that matched nothing still reports its verb, so testing the verb alone (e.g.
+    `tag.startswith("DELETE")`) is always true and reads "nothing matched" as success.
+
+    Args:
+        command_tag (str): Command tag as returned by `Connection.execute`.
+
+    Returns:
+        int: Number of rows affected, or 0 if the tag carries no parsable count.
+    """
+    try:
+        return int(command_tag.rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        # no trailing count means nothing was reported as affected
+        return 0
+
+
 def get_embeddings_table_and_cast(vector_type: VectorType) -> tuple[str, str]:
     """
     Return (table_name, sql_cast) given a vector type.

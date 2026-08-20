@@ -94,7 +94,7 @@ from gen3_embeddings.database.errors import (
     MetadataLengthMismatchError,
     NoCollectionsMatchQueryError,
 )
-from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
@@ -337,8 +337,8 @@ class DataAccessLayer:
             collection_name (str): Name of the collection to delete.
 
         Returns:
-            bool: False if the caller is not authorized for this collection. Otherwise the
-            result of the DELETE, which currently reports True even when no row matched.
+            bool: True only if a row was actually deleted. False if the caller is not
+            authorized for this collection, or if no collection by that name existed.
         """
         if collection_name not in allowed_collection_names:
             return False
@@ -348,18 +348,7 @@ class DataAccessLayer:
                 "DELETE FROM collections WHERE collection_name = $1::text",
                 collection_name,
             )
-            return result.startswith("DELETE")
-
-    # async def delete_collection(self, collection_name: str) -> bool:
-    #     allowed_collection_names = self._get_allowed_collection_names_from_allowed_authz()
-
-    #     if collection_name not in allowed_collection_names:
-    #         return False
-
-    #     async with self.pool.acquire() as conn:
-    #         stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
-    #         result = await stmt.fetch(collection_name)
-    #         return result.startswith("DELETE")
+            return affected_row_count(result) > 0
 
     async def list_collections(
         self,
@@ -747,8 +736,8 @@ class DataAccessLayer:
             embedding_id (UUID): Identifier of the embedding to delete.
 
         Returns:
-            bool: Result of the DELETE, which currently reports True even when no row
-            matched or RLS hid the row from this caller.
+            bool: True only if a row was actually deleted. False if no such embedding
+            existed in the collection, or if RLS hid it from this caller.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -758,7 +747,7 @@ class DataAccessLayer:
                 collection.id,
                 embedding_id,
             )
-            return result.startswith("DELETE")
+            return affected_row_count(result) > 0
 
         return await self._with_rls(_query)
 

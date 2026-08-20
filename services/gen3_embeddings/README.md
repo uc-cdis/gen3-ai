@@ -831,11 +831,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 ## TODO
 
 - ai model
-- support DEBUG_SKIP_AUTH True for RLS
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
-- output page_size value use the actual output size or the defined page size?
-- delete functions need some work
-- move get_allowed_authz_for_request logic out of db.py
 - dimensions limit? create warnings on limitions on indexing for bigger dimension vectors
 - re-evaluate running the snyk test now that they support uv
