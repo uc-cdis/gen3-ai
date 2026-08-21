@@ -20,8 +20,8 @@ from gen3_embeddings.auth import get_allowed_collection_names_from_authz
     [
         (["/vectorstore/collections/docs"], {"docs"}),
         (["/vectorstore/collections/docs", "/vectorstore/collections/images"], {"docs", "images"}),
-        # NOT normalized: Arborist is case-sensitive, so a grant is taken exactly as written
-        (["/vectorstore/collections/Docs"], {"Docs"}),
+        (["/vectorstore/collections/my_coll-2"], {"my_coll-2"}),
+        (["/vectorstore/collections/abc123"], {"abc123"}),
         # the bare base resource does not currently grant every collection
         (["/vectorstore/collections"], set()),
         # deeper paths are not collection grants
@@ -30,27 +30,79 @@ from gen3_embeddings.auth import get_allowed_collection_names_from_authz
         (["/programs/foo"], set()),
     ],
 )
-def test_authz_paths_are_used_verbatim(authz_paths, expected):
-    """Grants are read exactly as the policy engine reports them."""
+def test_canonical_authz_paths_grant_their_collection(authz_paths, expected):
+    """A grant naming a collection in its stored form is kept exactly as written."""
     assert get_allowed_collection_names_from_authz(authz_paths) == expected
 
 
-def test_grant_must_name_the_collection_as_stored(client, allow_authz):
+@pytest.mark.parametrize(
+    "authz_paths, expected",
+    [
+        # collection names are stored lowercase, so any uppercase grant can never match
+        (["/vectorstore/collections/DOCS"], set()),
+        (["/vectorstore/collections/Docs"], set()),
+        (["/vectorstore/collections/dOcS"], set()),
+        (["/vectorstore/collections/docS"], set()),
+        (["/vectorstore/collections/My_Coll-2"], set()),
+        # neither can a padded one
+        (["/vectorstore/collections/  docs  "], set()),
+        # nor one containing characters a collection name cannot have
+        (["/vectorstore/collections/bad.name"], set()),
+        (["/vectorstore/collections/has space"], set()),
+        # dropping the unusable entry must not discard the usable ones, nor raise
+        (["/vectorstore/collections/DOCS", "/vectorstore/collections/docs"], {"docs"}),
+        (["/vectorstore/collections/Docs", "/vectorstore/collections/images"], {"images"}),
+        (["/vectorstore/collections/bad.name", "/vectorstore/collections/good"], {"good"}),
+        # non-string entries in the mapping are tolerated
+        ([None, 42, "/vectorstore/collections/good"], {"good"}),
+    ],
+)
+def test_non_canonical_authz_names_are_dropped(authz_paths, expected):
+    """
+    A grant that cannot name a stored collection is filtered out, not carried along.
+
+    Names are never rewritten here, since Arborist paths are case-sensitive; they are only
+    kept or discarded. Skipping beats raising, so one odd policy entry cannot fail every
+    request for that caller.
+    """
+    assert get_allowed_collection_names_from_authz(authz_paths) == expected
+
+
+@pytest.mark.parametrize("granted", ["Docs", "DOCS", "dOcS"])
+def test_uppercase_grant_does_not_authorize_create(client, allow_authz, granted):
     """
     A grant whose casing differs from the stored name does not authorize access.
 
-    This is intentional rather than a bug: Arborist resource paths are case-sensitive, so
-    the operator must write the policy against the collection's normalized name. Pinned as a
-    test so the behavior is a decision rather than an accident.
+    This is intentional rather than a bug: Arborist resource paths are case-sensitive and
+    collection names are stored lowercase, so the operator must write the policy against the
+    lowercase name. Pinned as a test so the behavior is a decision rather than an accident.
     """
-    allow_authz("Docs")
+    allow_authz(granted)
 
     response = client.post(
         "/vectorstore/collections",
-        json={"collection_name": "Docs", "description": "d", "dimensions": 3, "vector_type": "vector"},
+        json={"collection_name": granted, "description": "d", "dimensions": 3, "vector_type": "vector"},
     )
     assert response.status_code == 403
     assert "Not authorized" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("granted", ["DOCS", "Docs"])
+def test_uppercase_grant_does_not_authorize_reads(client, allow_authz, granted):
+    """An uppercase grant leaves the caller with no collections at all, so reads find nothing."""
+    # seed the collection with a correctly-cased grant
+    allow_authz("docs")
+    create = client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "d", "dimensions": 3, "vector_type": "vector"},
+    )
+    assert create.status_code == 200, create.text
+
+    # now narrow to an uppercase grant, which cannot name the stored collection
+    allow_authz(granted)
+
+    assert client.get("/vectorstore/collections/docs").status_code == 404
+    assert client.get("/vectorstore/collections").json()["collections"] == []
 
 
 @pytest.mark.parametrize("requested", ["docs", "DOCS", "Docs", "  docs  "])

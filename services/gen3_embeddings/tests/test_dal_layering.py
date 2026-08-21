@@ -10,8 +10,6 @@ Tests that the data access layer stays free of HTTP and authorization concerns.
 import ast
 import pathlib
 
-import pytest
-
 from gen3_embeddings.auth import get_allowed_collection_names_from_authz
 from gen3_embeddings.database import errors as dal_errors
 from gen3_embeddings.error_handlers import DATA_ACCESS_ERROR_STATUS, get_status_code_for_error
@@ -62,23 +60,13 @@ def test_dal_does_not_interpret_authz_paths():
     )
 
 
-@pytest.mark.parametrize(
-    "authz_paths, expected",
-    [
-        ([], set()),
-        (["/vectorstore/collections/docs"], {"docs"}),
-        (["/vectorstore/collections/docs", "/vectorstore/collections/images"], {"docs", "images"}),
-        # the bare base resource does not currently grant every collection
-        (["/vectorstore/collections"], set()),
-        # deeper paths are not collection grants
-        (["/vectorstore/collections/docs/embeddings"], set()),
-        # unrelated resources are ignored
-        (["/programs/foo"], set()),
-    ],
-)
-def test_authz_path_to_collection_names(authz_paths, expected):
-    """The extracted authz helper keeps the original path conventions."""
-    assert get_allowed_collection_names_from_authz(authz_paths) == expected
+def test_authz_path_interpretation_lives_in_the_auth_layer():
+    """
+    The helper behavior is covered in detail by test_collection_name_normalization.py; this only
+    pins that the extraction happened and did not leave the DAL depending on it.
+    """
+    assert get_allowed_collection_names_from_authz(["/vectorstore/collections/docs"]) == {"docs"}
+    assert get_allowed_collection_names_from_authz([]) == set()
 
 
 def test_every_dal_error_has_an_explicit_status_mapping():
