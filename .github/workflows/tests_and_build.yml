@@ -27,9 +27,11 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
-      DBMATE_VERSION: 'latest'
+      # must be a real release TAG, not 'latest': the reusable workflow interpolates this
+      # into .../releases/download/<TAG>/dbmate-linux-amd64, and there is no 'latest' tag
+      DBMATE_VERSION: 'v2.35.0'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
@@ -45,7 +47,7 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -93,12 +95,31 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
       PGUSER: 'postgres'
+
+    # A pgvector-enabled Postgres (not plain postgres) because the gen3_embeddings
+    # migrations run `CREATE EXTENSION IF NOT EXISTS vector`. The test fixtures also
+    # create/drop databases and roles, so they connect as the postgres superuser.
+    # NOTE: this is a Bitnami image, so it takes POSTGRESQL_* env vars, not POSTGRES_*.
+    services:
+      postgres:
+        image: quay.io/cdis/docker-bitnami-pgvector:16
+        env:
+          # not a credential: trust auth for a throwaway CI container, so there is no
+          # password to commit. detect-secrets flags any key containing "PASSWORD".
+          ALLOW_EMPTY_PASSWORD: 'yes'  # pragma: allowlist secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Check out code
@@ -143,7 +164,7 @@ jobs:
   image-build-push-1:
     name: Build Image and Push - Gen3 Embeddings
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [security]
+    needs: [post-commit-check, security, unit-test]
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       DOCKERFILE_BUILD_CONTEXT: '.'

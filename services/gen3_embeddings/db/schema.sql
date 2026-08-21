@@ -1,7 +1,7 @@
 \restrict dbmate
 
--- Dumped from database version 18.1 (Homebrew)
--- Dumped by pg_dump version 18.1 (Homebrew)
+-- Dumped from database version 18.3 (Debian 18.3-1.pgdg13+1)
+-- Dumped by pg_dump version 18.4 (Homebrew)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -14,20 +14,6 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: ltree; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS ltree WITH SCHEMA public;
-
-
---
--- Name: EXTENSION ltree; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION ltree IS 'data type for hierarchical tree-like structures';
-
 
 --
 -- Name: vector; Type: EXTENSION; Schema: -; Owner: -
@@ -93,6 +79,8 @@ CREATE TABLE public.embeddings_halfvec (
     updated_at timestamp with time zone DEFAULT now()
 );
 
+ALTER TABLE ONLY public.embeddings_halfvec FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: embeddings_vector; Type: TABLE; Schema: public; Owner: -
@@ -109,6 +97,8 @@ CREATE TABLE public.embeddings_vector (
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );
+
+ALTER TABLE ONLY public.embeddings_vector FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -240,14 +230,14 @@ ALTER TABLE ONLY public.embeddings_vector
 -- Name: embeddings_halfvec authz_policy_halfvec; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY authz_policy_halfvec ON public.embeddings_halfvec USING ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[]))) WITH CHECK ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[])));
+CREATE POLICY authz_policy_halfvec ON public.embeddings_halfvec USING ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[])))) WITH CHECK ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[]))));
 
 
 --
 -- Name: embeddings_vector authz_policy_vector; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY authz_policy_vector ON public.embeddings_vector USING ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[]))) WITH CHECK ((authz = ANY ((current_setting('app.allowed_authz'::text, true))::text[])));
+CREATE POLICY authz_policy_vector ON public.embeddings_vector USING ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[])))) WITH CHECK ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[]))));
 
 
 --
@@ -274,4 +264,5 @@ ALTER TABLE public.embeddings_vector ENABLE ROW LEVEL SECURITY;
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
-    ('20260622162416');
+    ('20260622162416'),
+    ('20260817150236');

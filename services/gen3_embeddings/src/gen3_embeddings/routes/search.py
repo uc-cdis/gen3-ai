@@ -7,11 +7,12 @@ from common.fastapi.responses import (
     BAD_REQUEST_RESPONSE,
     not_found_response,
 )
-from gen3_embeddings.database.db import (
-    DataAccessLayer,
+from gen3_embeddings.database.db import DataAccessLayer
+from gen3_embeddings.database.models import Collection, Embedding
+from gen3_embeddings.dependencies import (
+    get_allowed_collection_names_for_read_operations,
     get_data_access_layer_for_read_operations,
 )
-from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
     SearchRequestBody,
@@ -20,11 +21,15 @@ from gen3_embeddings.models.schemas import (
     SingleSearchResult,
     VectorType,
 )
+from gen3_embeddings.params import CollectionName
+from gen3_embeddings.routes.helpers import dual_path
 
 vectorstore_search_router = APIRouter()
 
 
-@vectorstore_search_router.post(
+@dual_path(
+    vectorstore_search_router,
+    "post",
     "/vectorstore/collections/{collection_name}/search",
     response_model=SearchResponse,
     summary="Search embeddings in collection",
@@ -40,17 +45,14 @@ vectorstore_search_router = APIRouter()
     },
     tags=["Vectorstore Search"],
 )
-@vectorstore_search_router.post(
-    "/vectorstore/collections/{collection_name}/search/",
-    include_in_schema=False,
-)
 async def search_in_collection(
     request: Request,
     body: SearchRequestBody,
-    collection_name: str,
+    collection_name: CollectionName,
     ai_model: str | None = Query(None, alias="ai_model"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
 ):
     """
     TODO: support for ai_model
@@ -72,7 +74,7 @@ async def search_in_collection(
     Raises:
         HTTPException: 404 if collection is not found; 400 if input is invalid.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
     if not collection:
         raise HTTPException(status_code=404, detail="collection not found")
 
@@ -118,7 +120,9 @@ async def search_in_collection(
     )
 
 
-@vectorstore_search_router.post(
+@dual_path(
+    vectorstore_search_router,
+    "post",
     "/vectorstore/search",
     response_model=SearchResponse,
     summary="Search embeddings across unknown collections",
@@ -134,10 +138,6 @@ async def search_in_collection(
     },
     tags=["Vectorstore Search"],
 )
-@vectorstore_search_router.post(
-    "/vectorstore/search/",
-    include_in_schema=False,
-)
 async def search_across_collections(
     request: Request,
     body: SearchRequestBody,
@@ -146,6 +146,7 @@ async def search_across_collections(
     vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
+    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
 ):
     """
     TODO: support for ai_model
@@ -171,12 +172,12 @@ async def search_across_collections(
         names = [v.strip() for v in collections.split(",") if v.strip()]
         collections_list: list[Collection] = []
         for name in names:
-            col = await dal.get_collection_by_name(name)
+            col = await dal.get_collection_by_name(name, allowed_collection_names=allowed_collection_names)
             if not col:
                 raise HTTPException(status_code=400, detail=f"Invalid collection or unauthorized: {name}")
             collections_list.append(col)
     else:
-        collections_list = await dal.list_collections()
+        collections_list = await dal.list_collections(allowed_collection_names=allowed_collection_names)
 
     if not collections_list:
         return SearchResponse(embeddings=[])

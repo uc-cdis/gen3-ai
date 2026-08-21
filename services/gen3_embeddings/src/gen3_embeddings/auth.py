@@ -13,6 +13,8 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_500
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
+from gen3_embeddings.models.helpers import normalize_collection_name
+from gen3_embeddings.params import CollectionName
 
 get_bearer_token = HTTPBearer(auto_error=False)
 
@@ -301,6 +303,69 @@ def get_authz_resource_path_from_collection_name(collection_name: str) -> str:
         return f"{base}/{collection_name}"
 
 
+def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str]:
+    """
+    Derive the collection names a caller may act on from their allowed authz paths.
+
+    Follows the resource convention:
+
+      /vectorstore/collections
+      /vectorstore/collections/{collection_name}
+
+    Only names that are ALREADY in canonical form are kept. Nothing is rewritten here:
+    Arborist resource paths are case-sensitive, so normalizing a grant would mean this
+    service disagreed with the policy engine about what the grant says. But collection names
+    are always stored normalized, so a resource naming `Docs`, `my collection` or
+    `bad.name` cannot match any stored collection and therefore grants nothing. Those are
+    dropped rather than carried into every comparison.
+
+    The practical consequence is that a policy must name the collection exactly as it is
+    stored, in lowercase.
+
+    Args:
+        allowed_authz (list[str]): Authz resource paths the caller holds.
+
+    Returns:
+        set[str]: Canonical collection names the caller may act on. Empty is a valid
+        fail-closed result meaning "no collections", not "all collections".
+    """
+    base = "/vectorstore/collections"
+    allowed: set[str] = set()
+
+    for item in allowed_authz:
+        if not isinstance(item, str):
+            continue
+        if item == base:
+            # base resource: may mean "can access all collections", depending on policy
+            # for now, we'll pass
+            continue
+        if item.startswith(base + "/"):
+            # e.g. "/vectorstore/collections/my_collection"
+            parts = item.split("/")
+            if parts:
+                if len(parts) != 4:
+                    # # Expect exactly: ["", "vectorstore", "collections", "{collection_name}"]
+                    # This covers "/vectorstore/collections/a/b" (len=5), etc.
+                    continue
+                name = parts[-1]
+                if not name:
+                    continue
+                try:
+                    # keep only names already in canonical form. Comparing rather than
+                    # replacing catches uppercase and padding as well as invalid characters,
+                    # without rewriting what the policy engine said.
+                    is_canonical = normalize_collection_name(name) == name
+                except ValueError:
+                    is_canonical = False
+                if not is_canonical:
+                    # cannot match a stored collection, so it grants nothing. Skip rather
+                    # than raise, so one odd policy entry cannot fail every request.
+                    logging.debug(f"Ignoring authz resource that cannot name a stored collection: {item}")
+                    continue
+                allowed.add(name)
+    return allowed
+
+
 def get_allowed_authz_from_mapping(
     authz_mapping: Mapping,
     method: str,
@@ -357,13 +422,18 @@ def _get_crud_action_from_request(request: Request) -> str:
     return action
 
 
-async def parse_and_auth_request(request: Request, collection_name: str):
+async def parse_and_auth_request(request: Request, collection_name: CollectionName):
     """
-    Authorize the request with arborist to ensure the request can be madefrom gen3_embeddings.auth import parse_and_auth_request
+    Authorize the request with arborist to ensure the request can be made.
+
+    `collection_name` arrives normalized (see `params.CollectionName`), so the resource path
+    checked here is the same string the data access layer compares against, and it matches
+    the collection as actually stored. Arborist resource paths are case-sensitive, so a
+    policy must name the collection in that same normalized form to grant access.
 
     Args:
         request: fastapi request entity.
-        collection_name: Name of the collection to authorize access to.
+        collection_name: Normalized name of the collection to authorize access to.
 
     Raises:
         HTTPException based on authorize_request outcome
