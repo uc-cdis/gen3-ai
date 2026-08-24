@@ -16,7 +16,7 @@ from gen3_embeddings.auth import (
     get_authz_resource_path_from_collection_name,
     parse_and_auth_request,
 )
-from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, logging
 from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.dependencies import get_allowed_collection_names, get_data_access_layer
 from gen3_embeddings.models.helpers import (
@@ -30,7 +30,7 @@ from gen3_embeddings.models.schemas import (
     SingleEmbeddingResult,
     UpdateEmbeddingBody,
 )
-from gen3_embeddings.params import CollectionName
+from gen3_embeddings.params import AiModel, CollectionName, Page, PageSize
 from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_router = APIRouter()
@@ -192,7 +192,7 @@ async def put_embeddings_in_collection(
     request: Request,
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
-    ai_model: str | None = Query(None, alias="ai_model"),
+    ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
@@ -414,8 +414,8 @@ async def list_embeddings_in_collection(
     request: Request,
     collection_name: CollectionName,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
+    page: Page = 1,
+    page_size: PageSize = DEFAULT_PAGE_SIZE,
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
 ):
@@ -497,7 +497,7 @@ async def create_embeddings_in_collection(
     request: Request,
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
-    ai_model: str | None = Query(None, alias="ai_model"),
+    ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),

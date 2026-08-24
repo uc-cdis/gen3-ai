@@ -21,7 +21,7 @@ from gen3_embeddings.models.schemas import (
     SingleSearchResult,
     VectorType,
 )
-from gen3_embeddings.params import CollectionName
+from gen3_embeddings.params import AiModel, CollectionName, RequestedCollectionNames
 from gen3_embeddings.routes.helpers import dual_path
 
 vectorstore_search_router = APIRouter()
@@ -49,7 +49,7 @@ async def search_in_collection(
     request: Request,
     body: SearchRequestBody,
     collection_name: CollectionName,
-    ai_model: str | None = Query(None, alias="ai_model"),
+    ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
@@ -141,8 +141,8 @@ async def search_in_collection(
 async def search_across_collections(
     request: Request,
     body: SearchRequestBody,
-    collections: str | None = Query(None, alias="collections"),
-    ai_model: str | None = Query(None, alias="ai_model"),
+    collections: RequestedCollectionNames = None,
+    ai_model: AiModel = None,
     vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
@@ -156,7 +156,9 @@ async def search_across_collections(
     Args:
         request: The request object.
         body: SearchRequestBody containing the query vector and parameters.
-        collections: Optional comma-separated list of collection names to restrict the search.
+        collections: Optional collection names to restrict the search to, parsed and bounded
+            from the comma-separated query parameter. None means every collection the caller
+            can read.
         ai_model: Optional model name; not used in this minimal implementation.
         vector_type: The type of vector (vector or halfvec) to search against.
         exclude_info: If True, omit the 'info' block in each embedding result.
@@ -168,10 +170,9 @@ async def search_across_collections(
     Raises:
         HTTPException: 400 if invalid collections are specified or input is invalid.
     """
-    if collections:
-        names = [v.strip() for v in collections.split(",") if v.strip()]
+    if collections is not None:
         collections_list: list[Collection] = []
-        for name in names:
+        for name in collections:
             col = await dal.get_collection_by_name(name, allowed_collection_names=allowed_collection_names)
             if not col:
                 raise HTTPException(status_code=400, detail=f"Invalid collection or unauthorized: {name}")

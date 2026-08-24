@@ -2,9 +2,79 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+from gen3_embeddings.config import (
+    MAX_AUTHZ_LENGTH,
+    MAX_COLLECTION_NAME_LENGTH,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_EMBEDDINGS_PER_REQUEST,
+    MAX_SEARCH_FILTER_KEY_LENGTH,
+    MAX_SEARCH_FILTER_VALUE_LENGTH,
+    MAX_SEARCH_FILTERS,
+    MAX_TEXT_CHUNKS,
+    MAX_TEXT_INPUT_LENGTH,
+    MAX_TOP_K,
+    MAX_VECTOR_DIMENSIONS,
+    MIN_VECTOR_DIMENSIONS,
+)
+from gen3_embeddings.limits import validate_metadata
+
+# Bounded aliases for the caller-supplied fields whose cost to this service scales with
+# their size. They are declared once here so every request schema that accepts one gets the
+# same ceiling, and so the OpenAPI document advertises the limits instead of leaving callers
+# to discover them by getting a 422.
+#
+# These are a denial-of-service control: see the request limits block in `config` for the
+# reasoning behind each number, and `limits` for the byte ceiling that backs them all up.
+
+VectorComponent = Annotated[float, Field(allow_inf_nan=False)]
+"""One element of a vector. pgvector rejects NaN and infinity, so refuse them at the edge."""
+
+Vector = Annotated[
+    list[VectorComponent],
+    Field(min_length=MIN_VECTOR_DIMENSIONS, max_length=MAX_VECTOR_DIMENSIONS),
+]
+"""A vector of floats, bounded independently of any collection's `dimensions`."""
+
+TextChunks = Annotated[
+    list[Annotated[str, Field(max_length=MAX_TEXT_INPUT_LENGTH)]],
+    Field(max_length=MAX_TEXT_CHUNKS),
+]
+"""Raw text to be embedded. Not implemented yet, but still bounded."""
+
+CollectionNameField = Annotated[str, Field(min_length=1, max_length=MAX_COLLECTION_NAME_LENGTH)]
+"""A collection name in a request body. Path parameters are bounded in `models.helpers`."""
+
+DescriptionField = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
+"""Free text stored on a collection."""
+
+AuthzField = Annotated[str, Field(max_length=MAX_AUTHZ_LENGTH)]
+"""An authz resource path, which is sent to the policy engine and stored on every row."""
+
+Metadata = Annotated[dict, AfterValidator(validate_metadata)]
+"""Embedding metadata, bounded by serialized size, top-level key count, and nesting depth."""
+
+SearchFilters = Annotated[
+    dict[
+        Annotated[str, Field(max_length=MAX_SEARCH_FILTER_KEY_LENGTH)],
+        Annotated[str, Field(max_length=MAX_SEARCH_FILTER_VALUE_LENGTH)],
+    ],
+    Field(max_length=MAX_SEARCH_FILTERS),
+]
+"""Metadata equality filters. Each one adds a WHERE clause and two parameters to the query."""
+
+Dimensions = Annotated[int, Field(ge=MIN_VECTOR_DIMENSIONS, le=MAX_VECTOR_DIMENSIONS)]
+"""A collection's vector width, which every embedding written to it is checked against."""
+
+TopK = Annotated[int, Field(ge=1, le=MAX_TOP_K)]
+"""Number of search hits to return. Becomes a SQL LIMIT over rows that each hold a vector."""
+
+MetricBound = Annotated[float, Field(allow_inf_nan=False)]
+"""A min/max threshold on a distance metric, compared in SQL."""
 
 
 class VectorPrecision(StrEnum):
@@ -157,12 +227,12 @@ class SearchRequestBody(BaseModel):
     Request body for vector search operations.
     """
 
-    input: str | list[float]
-    top_k: int = 10
-    min_value: float | None = None
-    max_value: float | None = None
+    input: Annotated[str, Field(max_length=MAX_TEXT_INPUT_LENGTH)] | Vector
+    top_k: TopK = 10
+    min_value: MetricBound | None = None
+    max_value: MetricBound | None = None
     distance_metric: DistanceMetric = DistanceMetric.cosine_similarity
-    filters: dict[str, str] | None = None
+    filters: SearchFilters | None = None
 
 
 class SingleSearchResult(BaseModel):
@@ -189,9 +259,9 @@ class CreateCollectionBody(BaseModel):
     Request body for creating a new Collection.
     """
 
-    collection_name: str
-    description: str | None = None
-    dimensions: int
+    collection_name: CollectionNameField
+    description: DescriptionField | None = None
+    dimensions: Dimensions
     vector_type: VectorType = VectorType.vector
 
 
@@ -200,7 +270,7 @@ class UpdateCollectionBody(BaseModel):
     Request body for updating mutable properties of a Collection.
     """
 
-    description: str | None = None
+    description: DescriptionField | None = None
 
 
 class UpdateEmbeddingBody(BaseModel):
@@ -208,9 +278,9 @@ class UpdateEmbeddingBody(BaseModel):
     Request body for updating an embedding.
     """
 
-    embedding: list[float] | None = None
-    metadata: dict | None = None
-    authz: str | None = None
+    embedding: Vector | None = None
+    metadata: Metadata | None = None
+    authz: AuthzField | None = None
 
 
 class EmbeddingToCreate(BaseModel):
@@ -225,8 +295,8 @@ class EmbeddingToCreate(BaseModel):
     service for text → embedding.
     """
 
-    embedding: list[float] | list[str]
-    metadata: dict | None = None
+    embedding: Vector | TextChunks
+    metadata: Metadata | None = None
     embedding_id: UUID | None = None
 
     model_config = {
@@ -249,5 +319,10 @@ class CreateEmbeddingsBody(BaseModel):
     authz example: "authz": "/vectorstore/collections/my_collection"
     """
 
-    authz: str | None = None
-    embeddings: list[EmbeddingToCreate]
+    authz: AuthzField | None = None
+    embeddings: Annotated[
+        list[EmbeddingToCreate],
+        # The per-item bounds above cap one embedding; this caps how many of them a single
+        # request may carry, so the two multiply out to a worst case we can size a pod for.
+        Field(min_length=1, max_length=MAX_EMBEDDINGS_PER_REQUEST),
+    ]

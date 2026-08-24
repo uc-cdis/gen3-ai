@@ -10,7 +10,7 @@ from common.fastapi.responses import (
     not_found_response,
 )
 from gen3_embeddings.auth import parse_and_auth_request
-from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, logging
 from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.dependencies import get_allowed_collection_names, get_data_access_layer
 from gen3_embeddings.models.helpers import collection_to_model, normalize_collection_name
@@ -20,7 +20,7 @@ from gen3_embeddings.models.schemas import (
     PaginatedCollectionsResponse,
     UpdateCollectionBody,
 )
-from gen3_embeddings.params import CollectionName
+from gen3_embeddings.params import CollectionName, Page, PageSize
 from gen3_embeddings.routes.helpers import dual_path
 
 collections_router = APIRouter()
@@ -42,8 +42,8 @@ collections_router = APIRouter()
 )
 async def list_collections(
     request: Request,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    page: Page = 1,
+    page_size: PageSize = DEFAULT_PAGE_SIZE,
     counts: bool = Query(False, alias="counts"),
     dal: DataAccessLayer = Depends(get_data_access_layer),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names),

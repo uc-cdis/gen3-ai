@@ -69,7 +69,7 @@ def test_list_embeddings_in_collection_pagination_is_consistent_across_pages(cli
     expected_ids = {e["embedding_id"] for e in create_resp.json()["embeddings"]}
     assert len(expected_ids) == total
 
-    page_size = 100  # minimum page_size this endpoint allows (DEFAULT_PAGE_SIZE)
+    page_size = 100  # 3 full pages of `total`, so the walk crosses page boundaries
 
     def walk_all_pages() -> list[str]:
         seen_ids: list[str] = []

@@ -12,6 +12,7 @@ from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.database.db import close_pool, get_pool
 from gen3_embeddings.error_handlers import register_error_handlers
+from gen3_embeddings.limits import RequestSizeLimitMiddleware
 from gen3_embeddings.routes.basic import basic_router
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
@@ -235,6 +236,13 @@ def get_app() -> FastAPI:
         lifespan=lifespan,
     )
     register_error_handlers(app)
+
+    # Outermost, because it is the only limit that can act before the request body is read.
+    # Every other bound in this service is checked against parsed Python objects, and the
+    # parse is itself the expensive step: a 1 GiB JSON array costs a 1 GiB read plus the
+    # memory of the resulting list before any validator sees it.
+    app.add_middleware(RequestSizeLimitMiddleware, max_body_bytes=config.MAX_REQUEST_BODY_BYTES)
+
     app.include_router(route_aggregator)
 
     return app

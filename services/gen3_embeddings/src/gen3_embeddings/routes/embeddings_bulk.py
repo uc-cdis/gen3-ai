@@ -6,9 +6,7 @@ which is cheaper for large vectors. They are declared `POST` so the UUID list ca
 sent in the request body, but they only read.
 """
 
-from uuid import UUID
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from common.fastapi.responses import (
     AUTH_RESPONSES,
@@ -29,7 +27,7 @@ from gen3_embeddings.models.schemas import (
     EmbeddingResponseBinaryWithCollections,
     SingleEmbeddingResultBinary,
 )
-from gen3_embeddings.params import CollectionName
+from gen3_embeddings.params import CollectionName, EmbeddingUUIDs
 from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_bulk_router = APIRouter()
@@ -53,7 +51,7 @@ embeddings_bulk_router = APIRouter()
 )
 async def get_embeddings_bulk_unknown_collections(
     request: Request,
-    embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
+    embedding_uuids: EmbeddingUUIDs,
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
@@ -137,7 +135,7 @@ async def get_embeddings_bulk_unknown_collections(
 async def get_embeddings_bulk_from_collection(
     request: Request,
     collection_name: CollectionName,
-    embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
+    embedding_uuids: EmbeddingUUIDs,
     exclude_info: bool = Query(False, alias="exclude_info"),
     dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
     allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),

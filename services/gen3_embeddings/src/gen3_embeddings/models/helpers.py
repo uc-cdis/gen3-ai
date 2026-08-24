@@ -3,6 +3,7 @@
 import re
 from uuid import UUID
 
+from gen3_embeddings.config import MAX_COLLECTION_NAME_LENGTH
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.schemas import (
     CollectionModel,
@@ -19,9 +20,22 @@ def normalize_collection_name(name: str) -> str:
 
     - strip whitespace
     - lower-case
+    - bound the length, since this also runs on path parameters and query strings, which
+      no Pydantic model gets to constrain first
     - ensure only [a-z0-9_-]
+
+    Args:
+        name (str): Raw collection name.
+
+    Returns:
+        str: The normalized name.
+
+    Raises:
+        ValueError: If the name is too long or contains characters outside [a-z0-9_-].
     """
     name = name.strip().lower()
+    if len(name) > MAX_COLLECTION_NAME_LENGTH:
+        raise ValueError(f"collection_name may be at most {MAX_COLLECTION_NAME_LENGTH} characters, got {len(name)}")
     pattern = re.compile(r"^[a-z0-9_-]+$")
     if not pattern.match(name):
         raise ValueError("collection_name may only contain lowercase letters, digits, hyphen (-), and underscore (_)")
@@ -34,6 +48,15 @@ def normalize_authz(authz: str | None) -> str | None:
 
     - strip whitespace
     - ensure it starts with a slash if not None or empty
+
+    Args:
+        authz (str | None): Raw authz resource path.
+
+    Returns:
+        str | None: The normalized path, or None if nothing was supplied.
+
+    Raises:
+        ValueError: If the path does not start with a slash.
     """
     if not authz:
         return None
