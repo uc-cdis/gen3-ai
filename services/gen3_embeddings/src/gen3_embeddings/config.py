@@ -16,9 +16,6 @@ logging = common_config.logging
 # name of the top-level package in this service
 logging.name = "gen3_embeddings"
 
-# gunicorn setting for the number of workers to spawn, see https://docs.gunicorn.org/en/stable/settings.html#workers
-GUNICORN_WORKERS = starlette_config("GUNICORN_WORKERS", cast=int, default="1")
-
 DEFAULT_PAGE_SIZE = starlette_config("DEFAULT_PAGE_SIZE", default=100)
 MAX_PAGE_SIZE = starlette_config("MAX_PAGE_SIZE", default=1000)
 
@@ -73,7 +70,7 @@ VERBOSE_INTERNAL_LOGS = common_config.VERBOSE_INTERNAL_LOGS
 DEBUG_SKIP_AUTH = common_config.DEBUG_SKIP_AUTH
 ALLOW_ANONYMOUS_ACCESS = common_config.ALLOW_ANONYMOUS_ACCESS
 ARBORIST_URL = common_config.ARBORIST_URL
-PUBLIC_ROUTES = common_config.PUBLIC_ROUTES
+UNMONITORED_ROUTES = common_config.UNMONITORED_ROUTES
 ENDPOINTS_WITHOUT_METRICS = common_config.ENDPOINTS_WITHOUT_METRICS
 ENABLE_OPENTELEMETRY_TRACES = common_config.ENABLE_OPENTELEMETRY_TRACES
 OTEL_EXPORTER_OTLP_ENDPOINT = common_config.OTEL_EXPORTER_OTLP_ENDPOINT

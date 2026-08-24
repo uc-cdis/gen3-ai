@@ -49,7 +49,7 @@ select = [
     "UP",
 
     ## flake8-bugbear: bugs / code smells
-    # Do not use this for now, too noisy. Need time to refin
+    # Do not use this for now, too noisy. Need time to refine
     # which codes are useful
 
     ## flake8-simplify
@@ -60,26 +60,62 @@ select = [
     ## isort
     "I",
 
-    ## Missing docstrings
+    ## pydocstyle: docstring presence.
+    # D1 is the whole "is a docstring even there" group: D100 module, D101 class, D102 method,
+    # D103 function, D104 package, D105 magic method, D106 nested class, D107 `__init__`.
     "D1",
 
     ## Naming conventions
     "N",
 ]
 ignore = [
-    # Use `X | Y` for type annotations
-    # Ignoring b/c the use of Union[] is more readable
-    # imo when you have more than 3 types b/c it allows
-    # clearer multi-line formating
-    "UP007",
-    # multi-line-summary-first-line (b/c we prefer it on the second line)
+    # D212 multi-line-summary-first-line: wants the summary up against the opening `"""`.
+    # The opposite of our house style (new line starts docstring), so it is off and D213 below is on instead.
     "D212"
 ]
 # add these back:
 extend-select = [
-    # multi-line-summary-second-line (our preferred style)
-    "D213"
+    # D213 multi-line-summary-second-line: a multi-line docstring starts its summary on the
+    # line after the opening `"""`. Our house style, and the reason D212 is ignored above.
+    "D213",
+
+    # D417 undocumented-param: every parameter appears in the `Args:` section. A weird quirk:
+    # This only validates a section that already exists - it does not require one. so a docstring with
+    # no `Args:` at all still passes.
+    "D417",
+
+    ## pydoclint: the docstring matches what the body actually does. Every DOC rule is
+    ## preview-only as of ruff 0.16, hence `preview = true` below.
+
+    # DOC102 docstring-extraneous-parameter: `Args:` documents a name that is not in the
+    # signature. Complements D417 rather than duplicating it - D417 catches a parameter added
+    # without documentation, DOC102 catches documentation left behind when a parameter is
+    # removed, and only a rename trips both.
+    "DOC102",
+    # DOC201 docstring-missing-returns: the body returns a value but there is no `Returns:`.
+    # A one-line docstring whose summary starts with "Return" is accepted as documenting the
+    # return, so a short helper does not need the full section.
+    "DOC201",
+    # DOC202 docstring-extraneous-returns: there is a `Returns:` but the body returns nothing.
+    "DOC202",
+    # DOC402 docstring-missing-yields: the body yields but there is no `Yields:`.
+    "DOC402",
+    # DOC403 docstring-extraneous-yields: there is a `Yields:` but the body never yields.
+    "DOC403",
+    # DOC501 docstring-missing-exception: the body raises an exception type absent from
+    # `Raises:`. Only sees `raise` in the function itself, not what its callees raise, so it
+    # only ever asks for more documentation - never less.
+    "DOC501"
+
+    # DOC502 docstring-extraneous-exception is deliberately NOT selected. It only counts an
+    # explicit `raise` in the function itself, so it flags a documented exception that a callee
+    # raises on the function's behalf - which is exactly what a caller needs to know about and
+    # what our convention says to document.
 ]
+
+# Required by the DOC rules above, which ruff still gates behind preview. Verified to add no
+# other findings to this repo: every rule selected here behaves the same with it on.
+preview = true
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
@@ -91,8 +127,15 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [lint.per-file-ignores]
 # Ignore `E402` (import violations) in all `__init__.py` files
 "__init__.py" = ["E402"]
-# Ignore `D` rules everywhere except for the `src/` directory.
-"!**/src/**/*.py" = ["D"]
+"services/gen3_ai_model_repo/src/**/*.py" = ["DOC"]
+# Ignore every `D` rule outside `src/` and `tests/`, which leaves scripts like
+# generate_openapi.py and run.py alone.
+"!**/{src,tests}/**/*.py" = ["D"]
+# A test states what it proves in one sentence and stops there. The signature-matching rules
+# would have each test describe the fixtures it takes, repeating each fixture's own docstring
+# at every call site, so they are off here - D1 still requires the docstring itself.
+"**/tests/**/*.py" = ["D417", "DOC"]
+"services/gen3_ai_model_repo/tests/**/*.py" = ["D"]
 
 [lint.pydocstyle]
 convention = "google"

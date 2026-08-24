@@ -45,6 +45,10 @@ class OpenaiChat(InferenceProtocolClient):
 
         Returns:
             JSONResponse: The formatted chat completion response
+
+        Raises:
+            HTTPException: 404 if the model rejects the request, 503 if the inference server
+                cannot be reached.
         """
         host = str(urlparse(self.base_url).hostname) or ""
         if host not in HOST_TO_CREDS:
@@ -135,6 +139,9 @@ def _get_messages(body: CreateResponseBody) -> list[dict]:
 
     TODO: Does not support functions, this is a minimal implementation optimized
           around text-based user messages.
+
+    Returns:
+        list[dict]: The chat messages to send to the model.
     """
     body_input = body.input or []
     if isinstance(body_input, str):

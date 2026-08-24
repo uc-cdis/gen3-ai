@@ -16,7 +16,10 @@ from gen3_ai_model_repo.storage.helpers import get_storage_provider
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Handle application startup and shutdown lifecycle.
+    WIP
+
+    Returns:
+        FastAPI: The application, with no routes mounted yet.
     """
     logging.info("Starting up Gen3 AI Model Repository Service")
 

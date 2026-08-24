@@ -1,8 +1,8 @@
 """Tests that the generated OpenAPI spec stays fit for a public, user-facing audience."""
 
-from common.fastapi.testing import OpenApiDocsContract
 from fastapi import FastAPI
 
+from common.fastapi.testing import OpenApiDocsContract
 from gen3_embeddings.main import get_app as get_service_app
 
 

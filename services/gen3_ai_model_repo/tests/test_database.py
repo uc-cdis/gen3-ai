@@ -80,7 +80,8 @@ def test_helper_module_does_not_reexport_database_functions():
 
 @pytest.mark.anyio
 async def test_delete_model_metadata(monkeypatch):
-    """Verify model metadata delete returns True on successful delete.
+    """
+    Verify model metadata delete returns True on successful delete.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
@@ -96,7 +97,8 @@ async def test_delete_model_metadata(monkeypatch):
 
 @pytest.mark.anyio
 async def test_track_file_false_when_missing_repo(monkeypatch):
-    """Verify file tracking returns False when repository lookup fails.
+    """
+    Verify file tracking returns False when repository lookup fails.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.
@@ -115,7 +117,8 @@ async def test_track_file_false_when_missing_repo(monkeypatch):
 
 @pytest.mark.anyio
 async def test_get_or_create_revision_none_when_missing_repo(monkeypatch):
-    """Verify revision upsert returns None when repository does not exist.
+    """
+    Verify revision upsert returns None when repository does not exist.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): Fixture used to patch DB pool resolver.

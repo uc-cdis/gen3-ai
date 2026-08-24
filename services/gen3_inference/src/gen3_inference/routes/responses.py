@@ -55,7 +55,9 @@ from gen3_inference.types import OpenResponsesError
 
 responses_router = APIRouter()
 
-AllResponseTypes = Union[
+# Kept as `Union[...]` rather than an `X | Y` chain: at this many members the section comments
+# below are what make it readable, and a pipe chain cannot carry them between the members.
+AllResponseTypes = Union[  # noqa: UP007
     # non-streaming
     ResponseResource,
     # streaming events
@@ -113,6 +115,9 @@ async def create_response(
     """
     Implements the /v1/responses endpoint defined in the Open Responses OpenAPI spec,
     using the models from openresponses_types.types
+
+    Returns:
+        Response: The model's response, streaming or not depending on the request.
     """
     # this will search "locally" first, then try other configured hosts
     ai_model_info = await get_ai_model_info(body)
@@ -145,7 +150,14 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
     Get AI Model Info by talking with local and connected Gen3 AI Model Repos
 
     Args:
-        body (CreateResponseBody): The request body containing the requested model information.
+        body (CreateResponseBody): the request body containing model info
+
+    Returns:
+        dict: The model's url and metadata.
+
+    Raises:
+        HTTPException: 400 if no model was requested, 404 if the model is unknown.
+        Exception: If the model's url is outside ALLOWED_GEN3_INFERENCE_DOMAINS.
     """
     ai_model = body.model
     if not ai_model:
@@ -265,9 +277,16 @@ async def get_inference_protocol_client(all_model_inference_protocol_client_name
              blindly adds that to the client.
 
     Args:
-        all_model_inference_protocol_client_names (list[str]): A list of available inference
-            protocol client names for a given model.
-        ai_model_url (str | None): The URL of the AI model endpoint to use for the client.
+        all_model_inference_protocol_client_names (list[str]): A list of all available inference
+            protocol client names for a given model
+        ai_model_url (str | None): Base URL the client sends inference requests to. Already
+            validated as allowed by the caller.
+
+    Returns:
+        InferenceProtocolClient: A client for one of the model's supported protocols.
+
+    Raises:
+        HTTPException: 400 if none of the model's protocols are supported.
     """
     inference_protocol_client: InferenceProtocolClient | None = None
 

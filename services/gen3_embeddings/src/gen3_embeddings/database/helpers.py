@@ -12,6 +12,12 @@ def get_embeddings_table_and_cast(vector_type: VectorType) -> tuple[str, str]:
     Example:
       VectorType.vector   -> ("embeddings_vector", "::vector")
       VectorType.halfvec  -> ("embeddings_halfvec", "::halfvec")
+
+    Returns:
+        tuple[str, str]: The table name and the SQL cast for that vector type.
+
+    Raises:
+        ValueError: If the vector type is not one this schema stores.
     """
     if vector_type == VectorType.vector:
         return "embeddings_vector", "::vector"
@@ -36,6 +42,12 @@ def build_search_sql(
 ) -> tuple[str, list[Any]]:
     """
     Build the SQL and parameter list for search queries on the embeddings_* tables.
+
+    Returns:
+        tuple[str, list[Any]]: The SQL statement and its positional parameters.
+
+    Raises:
+        ValueError: If the distance metric is not supported.
     """
     filters = filters or {}
     params: list[Any] = []

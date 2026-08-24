@@ -23,7 +23,7 @@ async def create_model_metadata(
 
     Args:
         namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        model_name: The name of the repository.
         description: A description of the repository.
         tags: Optional list of tags for the repository.
 
@@ -72,7 +72,7 @@ async def get_model_metadata(
 
     Args:
         namespace (str): The namespace/organization for the repository.
-        repo_name (str): The name of the repository.
+        model_name (str): The name of the repository.
 
     Returns:
         RepositoryMetadataModel if found, None otherwise.
@@ -116,7 +116,7 @@ async def delete_model_metadata(
 
     Args:
         namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        model_name: The name of the repository.
 
     Returns:
         True if deletion was successful, False otherwise.
@@ -146,7 +146,7 @@ async def model_exists(
 
     Args:
         namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        model_name: The name of the repository.
 
     Returns:
         True if the repository exists, False otherwise.
@@ -264,7 +264,7 @@ async def update_model_metadata(
 
     Args:
         namespace: The namespace/organization for the repository.
-        repo_name: The name of the repository.
+        model_name: The name of the repository.
         description: Optional new description for the repository.
         tags: Optional new list of tags for the repository.
 
