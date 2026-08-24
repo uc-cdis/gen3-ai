@@ -53,6 +53,7 @@ jobs:
       # running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
       UV_VERSION: '0.12.5'
       JUST_VERSION: '1.58.0'
+      DBMATE_VERSION: 'v2.35.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432
@@ -82,6 +83,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ env.JUST_VERSION }}
+
+      - name: Install dbmate
+        run: |
+          sudo curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/${{ env.DBMATE_VERSION }}/dbmate-linux-amd64
+          sudo chmod +x /usr/local/bin/dbmate
+          /usr/local/bin/dbmate --help
 
       - name: just setup
         run: |

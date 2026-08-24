@@ -93,34 +93,42 @@ lock SERVICE="all": _check_dependencies
     fi
 
 # Let you know what tools are missing and try to install
+# Reports missing tools as warnings and always exits 0, so callers that only need
+# a subset of the tooling (e.g. CI jobs that never touch the database) still pass.
+# Recipes that actually need a tool are expected to fail on their own.
 [group('basic')]
 setup:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -uo pipefail
     source scripts/.justfile_helpers.bash
+
+    missing=""
 
     print_header "just setup:" "verifying" "uv" "installation..."
     if command -v uv >/dev/null 2>&1; then
         echo "uv is installed. version: $(uv --version)"
     else
         echo -e "${YELLOW}** WARNING: uv not found in \$PATH. Installing... **${RESET}"
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+            echo -e "${YELLOW}** WARNING: uv install failed. See: https://docs.astral.sh/uv/getting-started/installation **${RESET}"
+            missing="$missing uv"
+        fi
     fi
 
     print_header "just setup:" "verifying" "PostgreSQL client (psql)" "installation..."
     if command -v psql >/dev/null 2>&1; then
         echo "psql is installed. version: $(psql --version)"
     else
-        echo -e "${RED}** ERROR: psql not found. Please install PostgreSQL. **${RESET}"
-        exit 1
+        echo -e "${YELLOW}** WARNING: psql not found. Please install PostgreSQL. **${RESET}"
+        missing="$missing psql"
     fi
 
     print_header "just setup:" "verifying" "dbmate" "installation..."
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
     else
-        echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
-        exit 1
+        echo -e "${YELLOW}** WARNING: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
+        missing="$missing dbmate"
     fi
 
     print_header "just setup:" "verifying" "pre-commit" "installation..."
@@ -128,15 +136,26 @@ setup:
         echo "pre-commit is installed. version: $(pre-commit --version)"
     else
         echo -e "${YELLOW}** WARNING: pre-commit not found. Installing... **${RESET}"
-        pip install pre-commit
+        if ! pip install pre-commit; then
+            echo -e "${YELLOW}** WARNING: pre-commit install failed. See: https://pre-commit.com/#install **${RESET}"
+            missing="$missing pre-commit"
+        fi
     fi
 
-    hook_path="$(git rev-parse --git-path hooks/pre-commit)"
-    if [[ ! -f "$hook_path" ]] || ! grep -q 'pre-commit' "$hook_path"; then
-        echo -e "${YELLOW}** WARNING: pre-commit git hook not found or incomplete. Installing... **${RESET}"
-        pre-commit install --overwrite
+    if command -v pre-commit >/dev/null 2>&1; then
+        hook_path="$(git rev-parse --git-path hooks/pre-commit)"
+        if [[ ! -f "$hook_path" ]] || ! grep -q 'pre-commit' "$hook_path"; then
+            echo -e "${YELLOW}** WARNING: pre-commit git hook not found or incomplete. Installing... **${RESET}"
+            pre-commit install --overwrite || echo -e "${YELLOW}** WARNING: could not install the pre-commit git hook **${RESET}"
+        fi
+        echo "pre-commit git hook is installed."
     fi
-    echo "pre-commit git hook is installed."
+
+    if [[ -n "$missing" ]]; then
+        echo
+        echo -e "${YELLOW}** WARNING: just setup finished with missing tools:${missing} **${RESET}"
+        echo -e "${YELLOW}Recipes that need them will fail until they are installed.${RESET}"
+    fi
 
 # Detect vulnerabilities in service(s) dependencies
 [group('basic')]
