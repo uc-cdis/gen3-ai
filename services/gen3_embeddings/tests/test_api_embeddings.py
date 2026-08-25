@@ -133,6 +133,35 @@ def test_create_embeddings_dimension_mismatch(client, allow_authz):
     assert "Embedding dimension mismatch" in response.json()["detail"]
 
 
+@pytest.mark.parametrize("chunks", [["alpha", "beta", "gamma"], ["1", "2", "3"]])
+def test_create_embeddings_rejects_text_chunks(client, allow_authz, chunks):
+    """Text chunks validate against the Vector | TextChunks union but are not embeddable yet.
+
+    The numeric-string case matters: pydantic's smart union sends it down the TextChunks arm,
+    so it must be refused rather than coerced into a vector.
+    """
+    allow_authz("docs")
+
+    create_collection_resp = client.post(
+        "/vectorstore/collections",
+        json={
+            "collection_name": "docs",
+            "description": "documents",
+            "dimensions": 3,
+            "vector_type": "vector",
+        },
+    )
+    assert create_collection_resp.status_code == 200, create_collection_resp.text
+
+    for method in (client.post, client.put):
+        response = method(
+            "/vectorstore/collections/docs/embeddings",
+            json={"embeddings": [{"embedding": chunks, "metadata": {"source": "notes.txt"}}]},
+        )
+        assert response.status_code == 400, response.text
+        assert "Raw text embedding not implemented" in response.json()["detail"]
+
+
 def test_update_embedding(client, allow_authz):
     """PUT on a single embedding by ID replaces its vector and metadata."""
     allow_authz("docs")

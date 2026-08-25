@@ -1,5 +1,6 @@
 """Routes for creating, reading, updating, and deleting embeddings within collections."""
 
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -271,18 +272,24 @@ async def put_embeddings_in_collection(
         emb = item.embedding
         meta = item.metadata or {}
 
-        if len(emb) != collection.dimensions:
+        # `EmbeddingToCreate.embedding` is `Vector | TextChunks`, so a list of text chunks
+        # validates too. Embedding raw text is not wired up yet, so reject it here rather
+        # than letting str elements reach the vector column. The union is
+        # `list[float] | list[str]`, so the list is homogeneous and element 0 decides.
+        if emb and isinstance(emb[0], str):
+            raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
+        vector = cast(list[float], emb)
+
+        if len(vector) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
+                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
             )
 
-        emb_vector = [float(x) for x in emb]
-
         if item.embedding_id is not None:
-            items_with_id.append((item.embedding_id, emb_vector, meta))
+            items_with_id.append((item.embedding_id, vector, meta))
         else:
-            vectors_no_id.append(emb_vector)
+            vectors_no_id.append(vector)
             metadata_list_no_id.append(meta)
 
     logging.debug(f"PUT (upsert) embeddings in collection.id: `{collection.id}`...")
@@ -564,14 +571,19 @@ async def create_embeddings_in_collection(
         emb = item.embedding
         meta = item.metadata or {}
 
-        if len(emb) != collection.dimensions:
+        # See the matching guard in the PUT handler: text chunks validate against the
+        # `Vector | TextChunks` union but cannot be stored as a vector yet.
+        if emb and isinstance(emb[0], str):
+            raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
+        vector = cast(list[float], emb)
+
+        if len(vector) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
+                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
             )
 
-        # TODO: use numpy float16 instead
-        vectors.append([float(x) for x in emb])
+        vectors.append(vector)
         metadata_list.append(meta)
 
     logging.debug(f"Creating embeddings in collection.id: `{collection.id}`...")
