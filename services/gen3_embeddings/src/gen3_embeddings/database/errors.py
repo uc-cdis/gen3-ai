@@ -41,7 +41,3 @@ class DuplicateEmbeddingError(DataAccessError):
 
 class EmbeddingWriteInconsistencyError(DataAccessError):
     """The number of rows written did not match the number of rows requested."""
-
-
-class NoCollectionsMatchQueryError(DataAccessError):
-    """No accessible collection matches the query's vector type and dimensions."""

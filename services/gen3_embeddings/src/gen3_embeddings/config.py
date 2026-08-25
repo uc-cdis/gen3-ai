@@ -78,6 +78,14 @@ MAX_SEARCH_FILTER_VALUE_LENGTH = starlette_config("MAX_SEARCH_FILTER_VALUE_LENGT
 # Each one currently costs its own database round trip.
 MAX_COLLECTIONS_PER_SEARCH = starlette_config("MAX_COLLECTIONS_PER_SEARCH", cast=int, default=100)
 
+# How many collections one cross-collection search may fan out over when the caller does
+# not name any, and we search everything they are authorized for. Deliberately larger than
+# MAX_COLLECTIONS_PER_SEARCH: that bound counts round trips, one per name, while this one
+# counts collection_ids in the single ANY(...) search query, which is a much cheaper unit.
+# Past this the caller has to name collections explicitly, which loses nothing - search
+# ranks by a per-row metric, so the top_k of a union is the top_k of the per-batch top_ks.
+MAX_COLLECTIONS_SEARCHED = starlette_config("MAX_COLLECTIONS_SEARCHED", cast=int, default=1000)
+
 # Length of that same parameter before it is split. Derived rather than configured, because
 # the only thing it needs to be is wide enough for MAX_COLLECTIONS_PER_SEARCH names of the
 # longest permitted length, plus their separating commas. Splitting a string is what costs

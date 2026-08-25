@@ -7,6 +7,7 @@ from common.fastapi.responses import (
     BAD_REQUEST_RESPONSE,
     not_found_response,
 )
+from gen3_embeddings.config import MAX_COLLECTIONS_PER_SEARCH, MAX_COLLECTIONS_SEARCHED
 from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.dependencies import (
@@ -130,7 +131,15 @@ async def search_in_collection(
         "Finds the embeddings nearest to the query vector across every collection you have access "
         "to, ordered by similarity. Pass a comma-separated `collections` list to restrict the "
         "search to specific collections. Only collections matching the requested `vector_type` and "
-        "the query vector's dimensions are searched."
+        "the query vector's dimensions are searched; if none of them do, there is nothing the "
+        "query could match and the result is empty rather than an error.\n\n"
+        f"A single search spans at most {MAX_COLLECTIONS_SEARCHED} collections. If you have access "
+        "to more than that, this returns 400 rather than searching a subset, and you search in "
+        "batches instead: list your collections with `GET /vectorstore/collections`, then name up "
+        f"to {MAX_COLLECTIONS_PER_SEARCH} of them per request in `collections`. Batching does not "
+        "change the results. Every result is scored independently of the others, so ordering the "
+        "combined batches by `value` - ascending, or descending for `cosine_similarity` - and "
+        "keeping the first `top_k` gives exactly what a single search over all of them would."
     ),
     responses={
         **AUTH_RESPONSES,
@@ -158,7 +167,7 @@ async def search_across_collections(
         body: SearchRequestBody containing the query vector and parameters.
         collections: Optional collection names to restrict the search to, parsed and bounded
             from the comma-separated query parameter. None means every collection the caller
-            can read.
+            can read, up to MAX_COLLECTIONS_SEARCHED of them.
         ai_model: Optional model name; not used in this minimal implementation.
         vector_type: The type of vector (vector or halfvec) to search against.
         exclude_info: If True, omit the 'info' block in each embedding result.
@@ -168,7 +177,8 @@ async def search_across_collections(
         SearchResponse containing search hits across collections.
 
     Raises:
-        HTTPException: 400 if invalid collections are specified or input is invalid.
+        HTTPException: 400 if invalid collections are specified, if the caller is authorized
+            for more collections than one search may span, or if input is invalid.
     """
     if collections is not None:
         collections_list: list[Collection] = []
@@ -178,7 +188,27 @@ async def search_across_collections(
                 raise HTTPException(status_code=400, detail=f"Invalid collection or unauthorized: {name}")
             collections_list.append(col)
     else:
-        collections_list = await dal.list_collections(allowed_collection_names=allowed_collection_names)
+        # One more than the ceiling, so an over-limit caller is detected rather than served
+        # the alphabetically-first page as if it were everything. `list_collections` orders
+        # by collection_name, so silently taking its default limit here would search the
+        # first N collections by name and return a ranking that looks complete.
+        collections_list = await dal.list_collections(
+            allowed_collection_names=allowed_collection_names,
+            limit=MAX_COLLECTIONS_SEARCHED + 1,
+        )
+        if len(collections_list) > MAX_COLLECTIONS_SEARCHED:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"You are authorized for more than {MAX_COLLECTIONS_SEARCHED} collections, "
+                    "which is more than one search can span. Name the collections to search in "
+                    f"the `collections` query parameter, at most {MAX_COLLECTIONS_PER_SEARCH} per "
+                    "request. Splitting a search this way does not change its results: list your "
+                    "collections with GET /vectorstore/collections, search them in batches, then "
+                    "order the combined results by `value` (ascending, or descending for "
+                    "cosine_similarity) and keep the first `top_k`."
+                ),
+            )
 
     if not collections_list:
         return SearchResponse(embeddings=[])

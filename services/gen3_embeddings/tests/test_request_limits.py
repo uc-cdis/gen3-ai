@@ -438,6 +438,55 @@ class TestRouteLimits:
         assert resp.status_code == 400, resp.text
         assert "at once" in resp.json()["detail"]
 
+    def test_search_over_more_authorized_collections_than_one_search_may_span_is_refused(
+        self, client, allow_authz, monkeypatch
+    ):
+        """
+        Searching every authorized collection refuses past the bound instead of truncating.
+
+        This is the branch with no `collections` parameter to bound it, so the ceiling has
+        to be applied to what the caller is authorized for. Truncating would be worse than
+        refusing: `list_collections` orders by name, so a caller over the bound would get
+        the alphabetically-first collections searched and a ranking that looks complete.
+
+        The bound is lowered rather than creating its default's worth of collections. The
+        route reads it as a module global, so that is where it has to be patched.
+        """
+        from gen3_embeddings.routes import search as search_module
+
+        monkeypatch.setattr(search_module, "MAX_COLLECTIONS_SEARCHED", 2)
+
+        allow_authz("c_a", "c_b", "c_c")
+        for name in ("c_a", "c_b", "c_c"):
+            make_collection(client, name)
+
+        resp = client.post("/vectorstore/search", json={"input": [1.0, 0.0, 0.0]})
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "more than 2 collections" in detail
+        # The refusal has to say how to get the results anyway, since it is refusing the
+        # only request that needs no prior knowledge of which collections exist.
+        assert "collections" in detail and "top_k" in detail
+
+    def test_search_at_exactly_the_collection_ceiling_is_served(self, client, allow_authz, monkeypatch):
+        """
+        The bound is a ceiling, not a threshold: a caller right at it is still served.
+
+        Worth pinning separately, because the route detects the over-limit case by asking
+        for one collection more than the ceiling, and an off-by-one there would refuse the
+        callers it is meant to allow.
+        """
+        from gen3_embeddings.routes import search as search_module
+
+        monkeypatch.setattr(search_module, "MAX_COLLECTIONS_SEARCHED", 3)
+
+        allow_authz("c_a", "c_b", "c_c")
+        for name in ("c_a", "c_b", "c_c"):
+            make_collection(client, name)
+
+        resp = client.post("/vectorstore/search", json={"input": [1.0, 0.0, 0.0]})
+        assert resp.status_code == 200, resp.text
+
     def test_oversized_collections_query_string_is_refused_before_splitting(self, client, allow_authz):
         """
         The string is bounded before the split, because the split is what allocates.

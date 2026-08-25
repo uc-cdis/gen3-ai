@@ -92,7 +92,6 @@ from gen3_embeddings.database.errors import (
     EmbeddingWriteInconsistencyError,
     InvalidCollectionNameError,
     MetadataLengthMismatchError,
-    NoCollectionsMatchQueryError,
 )
 from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
@@ -366,7 +365,10 @@ class DataAccessLayer:
 
         Returns:
             list[Collection]: Authorized collections for this page, empty if the caller
-            has no allowed collections.
+            has no allowed collections. Never more rows than `allowed_collection_names`
+            has entries, since that set is the whole candidate space - so a caller that
+            wants every collection and needs to know whether it got them all can ask for
+            one more than its own ceiling and check whether that extra row came back.
         """
         # If no allowed names, return empty result
         if not allowed_collection_names:
@@ -969,6 +971,8 @@ class DataAccessLayer:
 
         The collections list will be filtered to only those whose vector_type matches
         the given `vector_type` AND whose dimensions match the query vector length.
+        A collection that matches neither cannot hold a hit for this query, so no
+        collection matching means no hits: the result is empty rather than an error.
         """
         if not collections:
             return []
@@ -982,11 +986,7 @@ class DataAccessLayer:
                 filtered_collections.append(col)
 
         if not filtered_collections:
-            # No collections meet the requested vector_type and dimension
-            raise NoCollectionsMatchQueryError(
-                "No collections available with the requested vector_type "
-                f"'{vector_type.value}' and dimensions {query_dims}"
-            )
+            return []
 
         table, cast = get_embeddings_table_and_cast(vector_type)
         collection_ids = [col.id for col in filtered_collections]
