@@ -266,9 +266,18 @@ need `gil_only=False` to see any of it.
 ### One agent per process
 
 The SDK holds a single global agent, and a second `configure` only logs `Agent already running`.
-`dockerrun.bash` runs one uvicorn process, so one agent per container is correct. Adding
-`--workers` would fork after `configure_profiling` has run and leave every child unprofiled - the
-agent would have to start inside each child instead.
+`dockerrun.bash` runs one uvicorn process, so one agent per container.
+
+Adding `--workers` would not leave the children unprofiled. Uvicorn's multiprocess mode uses
+`multiprocessing` with the **spawn** start method, and each child calls `Config.load()` for
+itself, so every child imports the app and runs `configure_profiling` on its own. What breaks
+instead is telling them apart: every agent pushes under the same application name, tagged with
+the same `pod` from `HOSTNAME`, so the workers' flamegraphs merge into one.
+
+The reason for a single process per container is not the profiler, though - it is
+[FastAPI's guidance for a clustered deployment](https://fastapi.tiangolo.com/deployment/docker/#replication-number-of-processes),
+which is one process per container with the orchestrator owning replication. Scale with
+replicas.
 
 ### Checking profiles work
 

@@ -133,7 +133,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/${{ env.DBMATE_VERSION }}/dbmate-linux-amd64
+          sudo curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/${{ env.DBMATE_VERSION }}/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 

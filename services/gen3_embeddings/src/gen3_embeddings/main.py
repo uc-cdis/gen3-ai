@@ -175,9 +175,10 @@ def get_app() -> FastAPI:
     configure_logging()
 
     # Before configure_tracing, which only links spans to profiles if the agent is already up.
-    # One agent per process is right because dockerrun.bash runs a single uvicorn process; adding
-    # `--workers` would fork after this call and leave the children unprofiled, so the agent would
-    # have to start per child instead.
+    # One agent per process, and dockerrun.bash runs a single uvicorn process per container, so
+    # one agent per container. Adding `--workers` would not leave the children unprofiled -
+    # uvicorn spawns them and each imports the app, so each starts its own agent - but they would
+    # all push under the same application name and the same `pod` tag, merging their flamegraphs.
     configure_profiling("gen3_embeddings")
     configure_tracing(app, "gen3_embeddings")
 

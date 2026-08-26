@@ -168,8 +168,8 @@ ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=f
 ENABLE_METRICS = starlette_config("ENABLE_METRICS", default=True, cast=bool)
 METRICS_PROVIDER = starlette_config("METRICS_PROVIDER", default="prometheus", cast=str)
 PROMETHEUS_MULTIPROC_DIR = starlette_config("PROMETHEUS_MULTIPROC_DIR", default="/var/tmp/prometheus_metrics", cast=str)
-# prometheus_client decides between its in-memory and its multiprocess value class once, when it
-# is first imported, based on this env var. Anything that sets the var later - including
-# cdispyutils' BaseMetrics, which sets it in its constructor - leaves counters in memory while
-# /metrics serves a multiprocess registry reading an empty directory, i.e. a 200 with no data.
+# Published to the environment because that is the only channel prometheus_client reads it on.
+# Set here rather than anywhere earlier so a .env value still wins: starlette's Config prefers
+# the environment over the file, so setting the variable before the read above would make the
+# file's value unreachable.
 os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", PROMETHEUS_MULTIPROC_DIR)

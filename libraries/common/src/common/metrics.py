@@ -2,24 +2,17 @@
 Common handling for metrics
 """
 
-# isort: off
-# prometheus_client freezes its choice of storage backend when it is first imported, based on
-# PROMETHEUS_MULTIPROC_DIR being present. common.config is what puts that in the environment, so
-# it has to be imported before anything that reaches prometheus_client - cdispyutils does.
-# Get this backwards and /metrics serves an empty 200 forever, silently.
-from common import config
-
 from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
 
-# Re-exported for services to import from here. `cdispyutils.observability` sorts above
-# `common`, so a service importing this directly gets prometheus_client before common.config.
-# Repeating the name after `as` is what marks an import as a deliberate re-export: nothing in
-# this module calls it, so ruff would otherwise prune it as unused.
+# Re-exported for services to import from here. Repeating the name after `as` is what marks an
+# import as a deliberate re-export: nothing in this module calls it, so ruff would otherwise
+# prune it as unused.
 from cdispyutils.observability.request_metrics import (
     add_request_metrics_middleware as add_request_metrics_middleware,
 )
 from fastapi import FastAPI
-# isort: on
+
+from common import config
 
 
 class ServiceMetrics:
@@ -64,6 +57,11 @@ def get_metrics_client(fastapi_app: FastAPI):
     Raises:
         Exception: If metrics are enabled but METRICS_PROVIDER names an unsupported provider.
     """
+    # prometheus_client picks between its in-memory and its multiprocess storage class when it is
+    # first imported, from PROMETHEUS_MULTIPROC_DIR. BaseMetrics re-runs that choice after
+    # setting the variable, so nothing here depends on import order - but a metric constructed
+    # before this function runs keeps the in-memory class, and its values never reach /metrics.
+    # Build counters on first use, not at import.
     metrics_client = None
     metrics_client_kwargs = {}
     if config.METRICS_PROVIDER == "prometheus":

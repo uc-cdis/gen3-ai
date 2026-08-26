@@ -44,6 +44,11 @@ dependencies = [
   "pytest-asyncio",
   "ruff",
   "pytest-xdist",
+  # `starlette.testclient` imports httpx2 and only falls back to httpx with a deprecation
+  # warning, so TestClient needs this. Test-only: the runtime httpx that authutils and
+  # gen3authz require is a separate distribution and stays where it is, which is also what
+  # HTTPXClientInstrumentor instruments.
+  "httpx2>=2.12.0",
   "pylint>=4.0.5",
   "dotenv>=0.9.9",
   "sqlfluff>=4.2.2",
