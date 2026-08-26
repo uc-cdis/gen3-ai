@@ -10,6 +10,14 @@ Common handling for metrics
 from common import config
 
 from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
+
+# Re-exported for services to import from here. `cdispyutils.observability` sorts above
+# `common`, so a service importing this directly gets prometheus_client before common.config.
+# Repeating the name after `as` is what marks an import as a deliberate re-export: nothing in
+# this module calls it, so ruff would otherwise prune it as unused.
+from cdispyutils.observability.request_metrics import (
+    add_request_metrics_middleware as add_request_metrics_middleware,
+)
 from fastapi import FastAPI
 # isort: on
 

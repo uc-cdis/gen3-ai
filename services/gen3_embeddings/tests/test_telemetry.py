@@ -1,20 +1,34 @@
 """Tests that building the service wires up tracing for its own internals."""
 
+from collections.abc import Iterator
 from typing import cast
 
 import pytest
 from asyncpg import Pool
+from cdispyutils.observability import continuous_profiling
 from fastapi.testclient import TestClient
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from common import telemetry
+from common import config, telemetry
 from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.main import get_app
 
 TRACED_ROUTE = "/vectorstore/collections/a-specific-collection"
+# Set by the Pyroscope span processor, and what Grafana reads to offer a profile for a span.
+PROFILE_ID_ATTRIBUTE = "pyroscope.profile.id"
+
+
+class StubSDK:
+    """Stands in for the Pyroscope SDK, accepting every call `configure_profiling` makes."""
+
+    def configure(self, **kwargs: object) -> None:
+        """Accept the agent settings without starting an agent."""
+
+    def shutdown(self) -> None:
+        """Accept the request to stop."""
 
 
 @pytest.fixture(scope="session")
@@ -59,8 +73,27 @@ def traced_app(monkeypatch: pytest.MonkeyPatch, exporter: InMemorySpanExporter) 
         TestClient: A client for the traced app. Not entered as a context manager, so the
             lifespan's database checks do not run.
     """
-    monkeypatch.setattr(telemetry, "ENABLE_OPENTELEMETRY_TRACES", True)
+    monkeypatch.setattr(config, "ENABLE_OPENTELEMETRY_TRACES", True)
     return TestClient(get_app())
+
+
+@pytest.fixture(autouse=True)
+def stop_profiling_after_each_test(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """
+    Leave the profiling module thinking no agent is running, whatever the test did.
+
+    Requests monkeypatch so this finalizer runs while the stubbed SDK is still installed, rather
+    than reaching the real one.
+
+    Yields:
+        None: Control to the test.
+    """
+    yield
+
+    continuous_profiling.stop_profiling()
+    # `configure_tracing` records what it resolved in a process-wide override, which the
+    # instrument helpers read. Left set, the first test to enable tracing decides for the rest.
+    telemetry.reset_tracing_state()
 
 
 def names(spans: InMemorySpanExporter) -> list[str]:
@@ -95,12 +128,41 @@ def test_data_access_layer_calls_are_traced(traced_app: TestClient, spans: InMem
     )
 
 
+def test_spans_link_to_profiles_only_when_profiling_is_active(
+    monkeypatch: pytest.MonkeyPatch, exporter: InMemorySpanExporter
+) -> None:
+    """A span carries a profile id when the agent is running, and none when it is not."""
+    # Both halves live in one test because the span processor cannot be removed from a tracer
+    # provider once added, and the provider is process-wide. Split in two, whichever test ran
+    # second would see the other's processor still tagging spans.
+    monkeypatch.setattr(config, "ENABLE_OPENTELEMETRY_TRACES", True)
+
+    unprofiled = TestClient(get_app())
+    exporter.clear()
+    unprofiled.patch(TRACED_ROUTE)
+
+    assert all(PROFILE_ID_ATTRIBUTE not in (span.attributes or {}) for span in exporter.get_finished_spans())
+
+    # Only the SDK is stubbed, so the app starts the agent by the path production takes. A real
+    # agent would spend the rest of the suite retrying pushes at a server that is not there.
+    monkeypatch.setattr(continuous_profiling, "pyroscope", StubSDK())
+    monkeypatch.setattr(config, "ENABLE_CONTINUOUS_PROFILING", True)
+
+    profiled = TestClient(get_app())
+    exporter.clear()
+    profiled.patch(TRACED_ROUTE)
+
+    assert any(PROFILE_ID_ATTRIBUTE in (span.attributes or {}) for span in exporter.get_finished_spans())
+
+
 def test_kill_switch_leaves_request_tracing_alone(
     monkeypatch: pytest.MonkeyPatch, exporter: InMemorySpanExporter
 ) -> None:
     """FORCE_DISABLE_CUSTOM_TRACING drops the function spans only."""
-    monkeypatch.setattr(telemetry, "ENABLE_OPENTELEMETRY_TRACES", True)
-    monkeypatch.setattr(telemetry, "FORCE_DISABLE_CUSTOM_TRACING", True)
+    monkeypatch.setattr(config, "ENABLE_OPENTELEMETRY_TRACES", True)
+    # Read from the environment rather than passed to `configure_tracing`, because `traced` runs
+    # at import time, before any call could have told it otherwise.
+    monkeypatch.setenv("FORCE_DISABLE_CUSTOM_TRACING", "true")
     client = TestClient(get_app())
     exporter.clear()
 

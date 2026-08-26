@@ -123,6 +123,44 @@ OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", de
 # requests, logging) running, so requests and queries are still traced with less detail.
 FORCE_DISABLE_CUSTOM_TRACING = starlette_config("FORCE_DISABLE_CUSTOM_TRACING", cast=bool, default=False)
 
+# `traced` decides whether to wrap when the module it decorates is imported, which is before any
+# app factory runs, so cdispyutils reads these two from the environment rather than from anything
+# passed to `configure_tracing`. Publishing what CONFIG_PATH resolved is what makes a `.env` file
+# reach the per-function spans; without it, turning tracing off in that file would still leave
+# every `@traced` function wrapped.
+os.environ["ENABLE_OPENTELEMETRY_TRACES"] = str(ENABLE_OPENTELEMETRY_TRACES).lower()
+os.environ["FORCE_DISABLE_CUSTOM_TRACING"] = str(FORCE_DISABLE_CUSTOM_TRACING).lower()
+
+# Continuous profiling with Pyroscope. See common/profiling.py.
+#
+# Off by default, unlike tracing: the Pyroscope SDK has no console exporter to fall back on, so
+# with nothing listening it retries pushes for the life of the process.
+ENABLE_CONTINUOUS_PROFILING = starlette_config("ENABLE_CONTINUOUS_PROFILING", cast=bool, default=False)
+# The SDK pushes to `<address>/push.v1.PusherService/Push`, which is Pyroscope's own ingest API
+# and not OTLP, so this cannot point at the OTLP ports (4317/4318) that traces use. In Gen3 it is
+# Alloy's `pyroscope.receive_http` listener; a Pyroscope server or Grafana Cloud works too.
+PYROSCOPE_SERVER_ADDRESS = starlette_config(
+    "PYROSCOPE_SERVER_ADDRESS", default="http://alloy.monitoring:4040", cast=str
+)
+# Samples per second per thread.
+PYROSCOPE_SAMPLE_RATE = starlette_config("PYROSCOPE_SAMPLE_RATE", cast=int, default=100)
+# Seconds between pushes to the server.
+PYROSCOPE_UPLOAD_INTERVAL = starlette_config("PYROSCOPE_UPLOAD_INTERVAL", cast=int, default=10)
+PROFILE_CPU = starlette_config("PROFILE_CPU", cast=bool, default=True)
+# Allocation profiling. Off by default because it samples the allocator itself, which costs more
+# than the CPU profiler on an endpoint that allocates per row. Turn it on to chase a leak.
+PROFILE_MEMORY = starlette_config("PROFILE_MEMORY", cast=bool, default=False)
+# True measures CPU time, False measures wall clock. These services are I/O bound, so the CPU-only
+# default answers "what is burning CPU" and shows nothing for the time a request spends awaiting
+# the database. Flip it to attribute latency rather than CPU, and expect the flamegraph to be
+# dominated by the event loop waiting.
+PROFILE_ON_CPU_ONLY = starlette_config("PROFILE_ON_CPU_ONLY", cast=bool, default=True)
+# Credentials for a Pyroscope that requires them, e.g. Grafana Cloud. Empty means unauthenticated,
+# which is what an in-cluster Alloy or Pyroscope expects.
+PYROSCOPE_BASIC_AUTH_USERNAME = starlette_config("PYROSCOPE_BASIC_AUTH_USERNAME", default="", cast=str)
+PYROSCOPE_BASIC_AUTH_PASSWORD = starlette_config("PYROSCOPE_BASIC_AUTH_PASSWORD", default="", cast=str)
+PYROSCOPE_TENANT_ID = starlette_config("PYROSCOPE_TENANT_ID", default="", cast=str)
+
 ASYNC_HTTP_CLIENT_TIMEOUT = starlette_config("ASYNC_HTTP_CLIENT_TIMEOUT", cast=float, default=30)
 
 # Metrics provider, at the moment we only support "prometheus". If you want to use a different one,

@@ -5,6 +5,15 @@ Graphana, etc.
 
 You can [run Prometheus locally](https://github.com/prometheus/prometheus) if you want to test or visualize these.
 
+## What `/metrics` does not carry
+
+There are no `process_cpu_seconds_total` or `process_resident_memory_bytes` series here.
+`prometheus_client` omits its default `process_*` and `python_gc_*` collectors in multiprocess mode,
+because per-process values cannot be summed, and `/metrics` serves a registry holding only the
+multiprocess collector. For a pod's CPU and memory, use the cluster Prometheus, which scrapes
+cAdvisor. For which *function* is spending the CPU, see the profiles section of
+[observability.md](./observability.md).
+
 ## Set Up Locally
 
 Run the service locally using `just run {{service}}`.

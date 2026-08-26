@@ -1,16 +1,28 @@
 # Observability
 
-Three signals, three separate paths out of a service:
+Four signals, four separate paths out of a service:
 
 | Signal      | How it leaves the service | Where it goes                    |
 | ----------- | ------------------------- | -------------------------------- |
 | **Traces**  | pushed over OTLP          | Alloy (`alloy.monitoring:4318`)  |
 | **Metrics** | scraped from `/metrics`   | Prometheus                       |
 | **Logs**    | JSON on stdout            | whatever collects container logs |
+| **Profiles** | pushed over Pyroscope's ingest API | Alloy (`alloy.monitoring:4040`) |
 
 They are joined by trace ids: `LoggingInstrumentor` puts the active trace and span id on
 every log record, and `gen3logging` renders them as `trace_id` / `span_id`. So a log line
-found in Loki leads to its trace in Tempo, and vice versa.
+found in Loki leads to its trace in Tempo, and vice versa. Profiles carry the same ids as
+Pyroscope labels, so a slow span leads to the flamegraph for that one request.
+
+## Where this lives
+
+The tracing, profiling and request-metrics machinery is
+[`cdispyutils.observability`](https://github.com/uc-cdis/cdis-python-utils/blob/master/cdispyutils/observability/README.md),
+shared with the rest of Gen3. What this repo keeps is the configuration: `common/telemetry.py`
+and `common/profiling.py` read `common/config.py` and pass those values in, so a service calls
+`configure_tracing(app, name)` and gets the settings the monorepo agrees on. `common.telemetry`
+also re-exports `traced`, `no_trace`, `instrument_class`, `instrument_module` and `get_tracer`
+unchanged, so service code imports them from there and never names the library directly.
 
 ## Configuration
 
@@ -24,6 +36,15 @@ found in Loki leads to its trace in Tempo, and vice versa.
 | `METRICS_PROVIDER`             | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
 | `PROMETHEUS_MULTIPROC_DIR`     | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. **Must exist**, see below.                          |
 | `GEN3_JSON_LOGS`               | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
+| `ENABLE_CONTINUOUS_PROFILING`  | `False`                        | Off means no Pyroscope agent and no profiles. Off by default because there is no console fallback: with nothing listening the agent retries pushes for the life of the process. |
+| `PYROSCOPE_SERVER_ADDRESS`     | `http://alloy.monitoring:4040` | Where profiles are pushed. **Not** an OTLP endpoint, so this cannot be 4317/4318, see below.          |
+| `PYROSCOPE_SAMPLE_RATE`        | `100`                          | Samples per second per thread.                                                                       |
+| `PYROSCOPE_UPLOAD_INTERVAL`    | `10`                           | Seconds between pushes.                                                                              |
+| `PROFILE_CPU`                  | `True`                         | Collect CPU profiles.                                                                                |
+| `PROFILE_MEMORY`               | `False`                        | Collect allocation profiles. Opt-in: it samples the allocator, which costs more than the CPU profiler on an endpoint that allocates per row. |
+| `PROFILE_ON_CPU_ONLY`          | `True`                         | `True` measures CPU time, `False` measures wall clock. See [CPU time or wall clock](#cpu-time-or-wall-clock). |
+| `PYROSCOPE_BASIC_AUTH_USERNAME` / `_PASSWORD` | `""`            | For a Pyroscope that needs credentials, e.g. Grafana Cloud. Empty is right for an in-cluster Alloy.   |
+| `PYROSCOPE_TENANT_ID`          | `""`                           | For a multi-tenant Pyroscope.                                                                        |
 
 ## Traces
 
@@ -211,6 +232,71 @@ Three things to confirm in that output:
 
 **With a real Prometheus.** See [metrics.md](./metrics.md) for a local Prometheus container,
 a scrape config for all three services, and some starting PromQL.
+
+## Profiles
+
+`common/profiling.py` starts a Pyroscope agent that samples this process continuously and pushes
+CPU and, optionally, allocation profiles. It answers the question traces cannot: a span says a
+request took 400ms, a profile says which Python frames spent it.
+
+`configure_profiling` runs before `configure_tracing` in `get_app()`, and the order is required.
+`configure_tracing` installs the span processor that links the two signals only when it can see a
+running agent, because that processor tags the profiler's thread on every root span and those tags
+go nowhere without one.
+
+### Not an OTLP endpoint
+
+The SDK pushes to `POST <PYROSCOPE_SERVER_ADDRESS>/push.v1.PusherService/Push`, which is
+Pyroscope's own ingest API. Alloy's OTLP ports do not accept it, so pointing
+`PYROSCOPE_SERVER_ADDRESS` at 4318 fails at push time with a 404, not at startup. Alloy needs a
+`pyroscope.receive_http` listener for this traffic, which is why the default is port 4040.
+
+### CPU time or wall clock
+
+`PROFILE_ON_CPU_ONLY` defaults to `True`, which measures CPU time. These services are I/O bound, so
+that hides every millisecond a request spends awaiting the database - which is usually most of its
+latency. That is the right default for "what is burning CPU" and the wrong one for "where did my
+latency go". Set it to `False` for the latter and expect the flamegraph to be dominated by the event
+loop waiting.
+
+The agent samples only the thread holding the GIL. Every request is handled on the one event loop
+thread, so that is the thread doing the work; a service that pushed work into a threadpool would
+need `gil_only=False` to see any of it.
+
+### One agent per process
+
+The SDK holds a single global agent, and a second `configure` only logs `Agent already running`.
+`dockerrun.bash` runs one uvicorn process, so one agent per container is correct. Adding
+`--workers` would fork after `configure_profiling` has run and leave every child unprofiled - the
+agent would have to start inside each child instead.
+
+### Checking profiles work
+
+Run a Pyroscope and point the service at it:
+
+```bash
+docker run --rm -d --name pyroscope -p 4040:4040 grafana/pyroscope
+
+mkdir -p /var/tmp/prometheus_metrics
+ENABLE_CONTINUOUS_PROFILING=true \
+PYROSCOPE_SERVER_ADDRESS=http://localhost:4040 \
+PROFILE_MEMORY=true \
+OTEL_EXPORTER_OTLP_ENDPOINT= \
+just run gen3_embeddings
+```
+
+Generate some traffic, then check three things:
+
+1. `http://localhost:4040` lists `gen3_embeddings`, with both a CPU (`process_cpu`) and an
+   allocation profile type.
+2. The console spans carry a `pyroscope.profile.id` attribute. If they do not, the span processor
+   was not installed - check that `configure_profiling` runs before `configure_tracing`.
+3. In Pyroscope, filter on `trace_id="<id from a console span>"` and the flamegraph narrows to that
+   one request. That is the join between the two signals working.
+
+Every replica pushes under the same application name, so profiles are tagged with `pod` from the
+`HOSTNAME` environment variable. Without it there is no way to tell one replica's flamegraph from
+another's.
 
 ## Logs
 
