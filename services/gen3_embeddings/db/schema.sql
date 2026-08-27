@@ -76,10 +76,26 @@ CREATE TABLE public.embeddings_halfvec (
     metadata jsonb DEFAULT '{}'::jsonb,
     metadata_hash uuid,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    embedding_hash_v2 uuid,
+    metadata_hash_v2 uuid
 );
 
 ALTER TABLE ONLY public.embeddings_halfvec FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN embeddings_halfvec.embedding_hash_v2; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.embeddings_halfvec.embedding_hash_v2 IS 'sha256/128 of the stored float16 bytes, NULL until backfilled';
+
+
+--
+-- Name: COLUMN embeddings_halfvec.metadata_hash_v2; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.embeddings_halfvec.metadata_hash_v2 IS 'sha256/128 of canonical metadata JSON, NULL until backfilled';
 
 
 --
@@ -95,10 +111,26 @@ CREATE TABLE public.embeddings_vector (
     metadata jsonb DEFAULT '{}'::jsonb,
     metadata_hash uuid,
     created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    embedding_hash_v2 uuid,
+    metadata_hash_v2 uuid
 );
 
 ALTER TABLE ONLY public.embeddings_vector FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN embeddings_vector.embedding_hash_v2; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.embeddings_vector.embedding_hash_v2 IS 'sha256/128 of the stored float32 bytes, NULL until backfilled';
+
+
+--
+-- Name: COLUMN embeddings_vector.metadata_hash_v2; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.embeddings_vector.metadata_hash_v2 IS 'sha256/128 of canonical metadata JSON, NULL until backfilled';
 
 
 --
@@ -180,6 +212,20 @@ ALTER TABLE ONLY public.embeddings_vector
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: embeddings_halfvec_uniq_collection_embhash_v2; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX embeddings_halfvec_uniq_collection_embhash_v2 ON public.embeddings_halfvec USING btree (collection_id, embedding_hash_v2, metadata_hash_v2, authz);
+
+
+--
+-- Name: embeddings_vector_uniq_collection_embhash_v2; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX embeddings_vector_uniq_collection_embhash_v2 ON public.embeddings_vector USING btree (collection_id, embedding_hash_v2, metadata_hash_v2, authz);
 
 
 --
@@ -265,4 +311,7 @@ ALTER TABLE public.embeddings_vector ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO public.schema_migrations (version) VALUES
     ('20260622162416'),
-    ('20260817150236');
+    ('20260817150236'),
+    ('20260826120000'),
+    ('20260826120100'),
+    ('20260826120200');

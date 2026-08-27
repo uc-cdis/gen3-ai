@@ -73,7 +73,7 @@ What do we do in this file?
       an empty set means "no collections", which is fail-closed
 """
 
-import json
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -83,6 +83,7 @@ from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
+from gen3_embeddings.database import hashing
 from gen3_embeddings.database.errors import (
     CollectionAlreadyExistsError,
     CollectionCreateFailedError,
@@ -141,6 +142,161 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
+
+
+@dataclass(frozen=True)
+class _BulkWriteBatch:
+    """
+    A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
+
+    Vectors travel as one flat float4[] that the INSERT slices per row, and the per-row
+    columns travel as parallel arrays. That is what keeps the whole batch on asyncpg's binary
+    encoding path: nothing here is a JSON document, so no float is ever formatted as text.
+    """
+
+    dimensions: int
+    # len == row_count * dimensions, row-major
+    flat_vectors: list[float]
+    # canonical JSON text, one per unique row; also what the metadata hash was taken over
+    metadata_json: list[str]
+    embedding_hashes: list[UUID]
+    metadata_hashes: list[UUID]
+    # for each index in the caller's original list, which unique row it maps to
+    original_to_unique: list[int]
+    has_duplicates: bool
+
+    @property
+    def row_count(self) -> int:
+        """Number of unique rows the INSERT will write."""
+        return len(self.embedding_hashes)
+
+    @property
+    def row_keys(self) -> list[tuple[UUID, UUID]]:
+        """
+        The (embedding_hash, metadata_hash) pair identifying each unique row, in row order.
+
+        Deduplication is by exactly this pair, so it is unique across the batch and usable to
+        match RETURNING rows back to inputs without relying on the order Postgres emits them.
+        """
+        return list(zip(self.embedding_hashes, self.metadata_hashes))
+
+
+def _prepare_bulk_write(
+    collection: Collection,
+    embeddings: list[list[float]],
+    metadata_list: list[dict] | None,
+) -> _BulkWriteBatch:
+    """
+    Hash a batch of embeddings and drop the duplicates within it.
+
+    Deduplication is on (embedding_hash, metadata_hash); `authz` is a single value for the
+    whole call, so it is constant within a batch and cannot distinguish rows. Because the
+    hashes are taken at storage precision, two inputs that differ only in digits the column
+    cannot store now collapse here, which is what the database's unique constraint would
+    consider them anyway.
+
+    Args:
+        collection (Collection): Target collection; supplies dimensions and vector type.
+        embeddings (list[list[float]]): Vectors to write.
+        metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
+
+    Returns:
+        _BulkWriteBatch: The deduplicated batch, ready to bind.
+
+    Raises:
+        MetadataLengthMismatchError: If `metadata_list` is a different length than
+            `embeddings`.
+        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
+            dimensionality.
+        EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
+            vector type.
+    """
+    if metadata_list is None:
+        metadata_list = [{} for _ in embeddings]
+    elif len(metadata_list) != len(embeddings):
+        raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
+
+    vector_type = VectorType(collection.vector_type)
+    # one conversion for the whole batch; its rows are the bytes Postgres will store, which
+    # is both what gets hashed and what gets bound
+    array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
+    embedding_hashes = hashing.hash_rows(array)
+
+    unique_row_indices: list[int] = []
+    unique_metadata_json: list[str] = []
+    unique_embedding_hashes: list[UUID] = []
+    unique_metadata_hashes: list[UUID] = []
+    # key -> unique row index
+    seen: dict[tuple[UUID, UUID], int] = {}
+    # for each original index i, which unique index j it maps to
+    original_to_unique: list[int] = []
+    has_duplicates = False
+
+    for index, (embedding_hash, metadata) in enumerate(zip(embedding_hashes, metadata_list)):
+        metadata_json = hashing.canonical_metadata_json(metadata)
+        metadata_hash = hashing.hash_metadata_json(metadata_json)
+        key = (embedding_hash, metadata_hash)
+
+        if key in seen:
+            original_to_unique.append(seen[key])
+            has_duplicates = True
+            continue
+
+        unique_index = len(unique_row_indices)
+        seen[key] = unique_index
+        original_to_unique.append(unique_index)
+        unique_row_indices.append(index)
+        unique_metadata_json.append(metadata_json)
+        unique_embedding_hashes.append(embedding_hash)
+        unique_metadata_hashes.append(metadata_hash)
+
+    return _BulkWriteBatch(
+        dimensions=collection.dimensions,
+        flat_vectors=hashing.flatten_rows(array, unique_row_indices),
+        metadata_json=unique_metadata_json,
+        embedding_hashes=unique_embedding_hashes,
+        metadata_hashes=unique_metadata_hashes,
+        original_to_unique=original_to_unique,
+        has_duplicates=has_duplicates,
+    )
+
+
+def _bulk_write_results(rows: list[asyncpg.Record], batch: _BulkWriteBatch) -> list[Embedding]:
+    """
+    Map the rows a bulk write returned back onto the caller's original input order.
+
+    RETURNING order is not something Postgres promises, so rows are matched by the hash pair
+    they came back with rather than by position. Every unique row has a distinct pair by
+    construction, so the match is exact.
+
+    Args:
+        rows (list[asyncpg.Record]): Rows from the INSERT's RETURNING clause.
+        batch (_BulkWriteBatch): The batch that was written.
+
+    Returns:
+        list[Embedding]: One Embedding per embedding the caller passed in, in that order.
+            Inputs that deduplicated onto the same row share an object.
+
+    Raises:
+        EmbeddingWriteInconsistencyError: If the returned rows do not correspond exactly to
+            the rows requested, which would mean a row was silently dropped or duplicated.
+    """
+    if len(rows) != batch.row_count:
+        raise EmbeddingWriteInconsistencyError("Internal error: mismatch between unique upsert results and inputs.")
+
+    rows_by_key = {(row["embedding_hash_v2"], row["metadata_hash_v2"]): row for row in rows}
+    try:
+        unique_results = [Embedding.from_record(rows_by_key[key]) for key in batch.row_keys]
+    except KeyError as exc:
+        raise EmbeddingWriteInconsistencyError(
+            "Internal error: a written embedding could not be matched back to its input."
+        ) from exc
+
+    if not batch.has_duplicates:
+        # nothing collapsed, so unique order is already the caller's order
+        return unique_results
+
+    return [unique_results[unique_index] for unique_index in batch.original_to_unique]
 
 
 class DataAccessLayer:
@@ -407,101 +563,59 @@ class DataAccessLayer:
         Returns:
             List of created Embedding instances.
         """
-        if metadata_list is None:
-            metadata_list = [{} for _ in embeddings]
-        elif len(metadata_list) != len(embeddings):
-            raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
-
-        # Deduplicate within the request based on (embedding, metadata, authz)
-        unique_payload_data: list[dict] = []
-        # key -> unique index
-        seen: dict[tuple[str, str, str], int] = {}
-        # for each original index i, which unique index j it maps to
-        original_to_unique: list[int] = []
-        has_duplicates = False
-
-        for emb_vec, metadata in zip(embeddings, metadata_list):
-            # Use json.dumps with sorted keys to make metadata deterministic
-            emb_json = json.dumps(emb_vec)
-            meta_json = json.dumps(metadata or {}, sort_keys=True)
-            key = (emb_json, meta_json, authz)
-
-            if key in seen:
-                j = seen[key]
-                original_to_unique.append(j)
-                has_duplicates = True
-            else:
-                j = len(unique_payload_data)
-                original_to_unique.append(j)
-                seen[key] = j
-                unique_payload_data.append(
-                    {
-                        "collection_id": collection.id,
-                        "embedding": emb_json,
-                        "authz": authz,
-                        "metadata": metadata or {},
-                    }
-                )
-
-        if not unique_payload_data:
+        batch = _prepare_bulk_write(collection, embeddings, metadata_list)
+        if not batch.row_count:
             return []
 
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            # Convert data in bulk to JSON, then use postgres support for JSON -> records
-            # to bulk insert in a single transaction.
-            # convert the entire batch into a single JSON string
-            json_payload = json.dumps(unique_payload_data)
-
             # execute one concurrent safe query
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
-                SELECT
-                    raw.collection_id,
-                    raw.embedding{cast},
-                    raw.authz,
-                    raw.metadata,
-                    md5(raw.embedding)::uuid,
-                    md5(raw.metadata::text)::uuid
-                FROM jsonb_to_recordset($1::jsonb) AS raw(
-                    collection_id bigint,
-                    embedding text,
-                    authz text,
-                    metadata jsonb
+                INSERT INTO {table} (
+                    collection_id, embedding, authz, metadata,
+                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
                 )
-                -- only return what we need back, not the embedding itself b/c it's big
-                -- and we already have it in Python
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
+                SELECT
+                    $1::bigint,
+                    -- one flat float4[] for the batch, sliced per row. asyncpg encodes it in
+                    -- binary, so the vectors never become text on the way here.
+                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
+                    $4::text,
+                    raw.metadata::jsonb,
+                    -- legacy md5 columns, written with the sha256 value so their NOT NULL and
+                    -- unique constraint stay satisfied until the contract migration drops
+                    -- them. See db/migrations/20260826120000_sha256_content_hashes.sql.
+                    raw.embedding_hash,
+                    raw.metadata_hash,
+                    raw.embedding_hash,
+                    raw.metadata_hash
+                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
+                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                -- the hashes come back so results can be matched to inputs by content rather
+                -- than by an order Postgres does not guarantee
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                          embedding_hash_v2, metadata_hash_v2;
                 """
             )
             try:
-                rows = await stmt.fetch(json_payload)
+                rows = await stmt.fetch(
+                    collection.id,
+                    batch.flat_vectors,
+                    batch.dimensions,
+                    authz,
+                    batch.metadata_json,
+                    batch.embedding_hashes,
+                    batch.metadata_hashes,
+                )
             except UniqueViolationError as exc:
                 raise EmbeddingsAlreadyExistError(
                     "One or more embeddings already exist in this collection. "
                     "No embeddings were created. Use PUT to force update existing embeddings."
                 ) from exc
 
-            if len(rows) != len(unique_payload_data):
-                raise EmbeddingWriteInconsistencyError(
-                    "Internal error: mismatch between unique upsert results and inputs."
-                )
-
-            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
-
-            if not has_duplicates:
-                # If there were no duplicates in the request, we can return the results directly
-                return unique_results
-            else:
-                # If there were duplicates in the request, we need to map back to the original order
-                results: list[Embedding] = []
-                for orig_idx in range(len(embeddings)):
-                    unique_idx = original_to_unique[orig_idx]
-                    results.append(unique_results[unique_idx])
-
-                return results
+            return _bulk_write_results(rows, batch)
 
         return await self._with_rls(_query)
 
@@ -543,93 +657,54 @@ class DataAccessLayer:
         """
         Bulk upsert multiple embeddings in the given collection.
         """
-        if metadata_list is None:
-            metadata_list = [{} for _ in embeddings]
-        elif len(metadata_list) != len(embeddings):
-            raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
-
-        # Deduplicate within the request based on (embedding, metadata, authz)
-        unique_payload_data: list[dict] = []
-        # key -> unique index
-        seen: dict[tuple[str, str, str], int] = {}
-        # for each original index i, which unique index j it maps to
-        original_to_unique: list[int] = []
-        has_duplicates = False
-
-        for emb_vec, metadata in zip(embeddings, metadata_list):
-            # Use json.dumps with sorted keys to make metadata deterministic
-            emb_json = json.dumps(emb_vec)
-            meta_json = json.dumps(metadata or {}, sort_keys=True)
-            key = (emb_json, meta_json, authz)
-
-            if key in seen:
-                j = seen[key]
-                original_to_unique.append(j)
-                has_duplicates = True
-            else:
-                j = len(unique_payload_data)
-                original_to_unique.append(j)
-                seen[key] = j
-                unique_payload_data.append(
-                    {
-                        "collection_id": collection.id,
-                        "embedding": emb_json,
-                        "authz": authz,
-                        "metadata": metadata or {},
-                    }
-                )
-
-        if not unique_payload_data:
+        batch = _prepare_bulk_write(collection, embeddings, metadata_list)
+        if not batch.row_count:
             return []
 
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            json_payload = json.dumps(unique_payload_data)
-
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
-                SELECT
-                    raw.collection_id,
-                    raw.embedding{cast},
-                    raw.authz,
-                    raw.metadata,
-                    md5(raw.embedding)::uuid AS embedding_hash,
-                    md5(raw.metadata::text)::uuid AS metadata_hash
-                FROM jsonb_to_recordset($1::jsonb) AS raw(
-                    collection_id bigint,
-                    embedding text,
-                    authz text,
-                    metadata jsonb
+                INSERT INTO {table} (
+                    collection_id, embedding, authz, metadata,
+                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
                 )
-                ON CONFLICT (collection_id, embedding_hash, metadata_hash, authz)
+                SELECT
+                    $1::bigint,
+                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
+                    $4::text,
+                    raw.metadata::jsonb,
+                    -- legacy md5 columns, see the note in create_embeddings_bulk
+                    raw.embedding_hash,
+                    raw.metadata_hash,
+                    raw.embedding_hash,
+                    raw.metadata_hash
+                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
+                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                -- Conflicts resolve on the v2 index. A new row writes the same value to the
+                -- legacy columns, so anything that would collide there collides here too and
+                -- is handled; a collision with a legacy md5 value would need sha256 and md5
+                -- to agree, which is not a case worth carrying code for.
+                ON CONFLICT (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
                 DO UPDATE SET
                     updated_at = NOW()
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                          embedding_hash_v2, metadata_hash_v2;
                 """
             )
             # If RLS denies insert or update, this will raise an error
-            rows = await stmt.fetch(json_payload)
+            rows = await stmt.fetch(
+                collection.id,
+                batch.flat_vectors,
+                batch.dimensions,
+                authz,
+                batch.metadata_json,
+                batch.embedding_hashes,
+                batch.metadata_hashes,
+            )
 
-            if len(rows) != len(unique_payload_data):
-                raise EmbeddingWriteInconsistencyError(
-                    "Internal error: mismatch between unique upsert results and inputs."
-                )
-
-            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
-
-            if not has_duplicates:
-                # If there were no duplicates in the request, we can return the results directly
-                return unique_results
-            else:
-                # If there were duplicates in the request, we need to map back to the original order
-                results: list[Embedding] = []
-                for orig_idx in range(len(embeddings)):
-                    unique_idx = original_to_unique[orig_idx]
-                    results.append(unique_results[unique_idx])
-
-                return results
+            return _bulk_write_results(rows, batch)
 
         return await self._with_rls(_query)
 
@@ -648,39 +723,57 @@ class DataAccessLayer:
         - If `metadata` is provided, update metadata and recompute metadata_hash.
         - If `new_authz` is provided, update authz.
 
-        The combination (collection_id, embedding_hash, metadata_hash, authz)
+        The combination (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
         must remain unique (per the DB constraint).
+
+        Raises:
+            DuplicateEmbeddingError: If the update would collide with another row.
+            EmbeddingDimensionMismatchError: If `embedding` is not the collection's
+                dimensionality.
+            EmbeddingNotRepresentableError: If `embedding` holds a value the collection's
+                vector type cannot store.
         """
-        table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+        vector_type = VectorType(collection.vector_type)
+        table, vector_cast = get_embeddings_table_and_cast(vector_type)
+
+        # hash before opening the transaction; a bad vector is the caller's error, not a
+        # reason to have taken a connection out of the pool
+        embedding_hash = (
+            hashing.hash_vector(embedding, vector_type, collection.dimensions) if embedding is not None else None
+        )
+        # the same canonical text is both stored and hashed, so this row's hash matches what
+        # a bulk write of identical metadata would produce
+        metadata_json = hashing.canonical_metadata_json(metadata) if metadata is not None else None
+        metadata_hash = hashing.hash_metadata_json(metadata_json) if metadata_json is not None else None
 
         async def _query(conn):
             set_parts = []
             params = [collection.id, embedding_id]
             param_idx = 3
 
-            # embedding: update vector and embedding_hash
+            # embedding: update vector and embedding_hash. The vector binds natively (pgvector
+            # registers a binary codec on the pool), so it is never serialized to text.
             if embedding is not None:
-                # store embedding as JSON text, then cast in SQL
-                embedding_json = json.dumps(embedding)
                 set_parts.append(f"embedding = ${param_idx}{vector_cast}")
                 params.append(embedding)
                 param_idx += 1
 
-                # recompute embedding_hash from the same JSON text representation
-                set_parts.append(f"embedding_hash = md5(${param_idx}::text)::uuid")
-                params.append(embedding_json)
+                # legacy md5 column gets the sha256 value too; see
+                # db/migrations/20260826120000_sha256_content_hashes.sql
+                set_parts.append(f"embedding_hash = ${param_idx}::uuid")
+                set_parts.append(f"embedding_hash_v2 = ${param_idx}::uuid")
+                params.append(embedding_hash)
                 param_idx += 1
 
             # metadata: update metadata and metadata_hash
             if metadata is not None:
-                metadata_json = json.dumps(metadata)
                 set_parts.append(f"metadata = ${param_idx}::jsonb")
                 params.append(metadata_json)
                 param_idx += 1
 
-                # recompute metadata_hash from metadata::text
-                set_parts.append(f"metadata_hash = md5(${param_idx}::text)::uuid")
-                params.append(metadata_json)
+                set_parts.append(f"metadata_hash = ${param_idx}::uuid")
+                set_parts.append(f"metadata_hash_v2 = ${param_idx}::uuid")
+                params.append(metadata_hash)
                 param_idx += 1
 
             # authz: update authz
@@ -715,7 +808,7 @@ class DataAccessLayer:
                 row = await stmt.fetchrow(*params)
             except UniqueViolationError as exc:
                 # updating caused a collision with another row that has the same
-                # (collection_id, embedding_hash, metadata_hash, authz)
+                # (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
                 raise DuplicateEmbeddingError(
                     "Update would create a duplicate embedding "
                     "with same vector, metadata, and authz in this collection."

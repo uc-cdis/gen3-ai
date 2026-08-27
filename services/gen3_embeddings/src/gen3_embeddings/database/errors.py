@@ -31,6 +31,14 @@ class MetadataLengthMismatchError(DataAccessError):
     """A metadata list was supplied whose length does not match the embeddings list."""
 
 
+class EmbeddingDimensionMismatchError(DataAccessError):
+    """A vector's length does not match the dimensionality its collection declares."""
+
+
+class EmbeddingNotRepresentableError(DataAccessError):
+    """A vector holds a value the collection's storage type cannot represent."""
+
+
 class EmbeddingsAlreadyExistError(DataAccessError):
     """One or more embeddings already exist in the collection."""
 

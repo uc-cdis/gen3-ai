@@ -27,7 +27,7 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.12.5'
+      UV_VERSION: '0.12.6'
       JUST_VERSION: '1.58.0'
       # must be a real release TAG, not 'latest': the reusable workflow interpolates this
       # into .../releases/download/<TAG>/dbmate-linux-amd64, and there is no 'latest' tag
@@ -47,7 +47,7 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.5'
+      UV_VERSION: '0.12.6'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -95,7 +95,7 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.5'
+      UV_VERSION: '0.12.6'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
