@@ -9,7 +9,7 @@ ARG SERVICE_NAME
 #
 # IMPORTANT: If you are reading this and `# allow-old-version` is present, try removing it and
 # running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
-ARG DBMATE_VERSION=2.35.0
+ARG DBMATE_VERSION=2.35.1
 
 # Named stage because --from does not expand build arguments inline.
 FROM ghcr.io/amacneil/dbmate:${DBMATE_VERSION} AS dbmatebin
