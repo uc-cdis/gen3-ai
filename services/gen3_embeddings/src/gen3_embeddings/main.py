@@ -179,8 +179,8 @@ def get_app() -> FastAPI:
     # one agent per container. Adding `--workers` would not leave the children unprofiled -
     # uvicorn spawns them and each imports the app, so each starts its own agent - but they would
     # all push under the same application name and the same `pod` tag, merging their flamegraphs.
-    configure_profiling("gen3_embeddings")
-    configure_tracing(app, "gen3_embeddings")
+    configure_profiling(config.DEPLOYMENT_SERVICE_NAME)
+    configure_tracing(app, config.DEPLOYMENT_SERVICE_NAME)
 
     # A span per data-access call, which sits between the request span and the asyncpg spans
     # and is the layer the library instrumentation cannot see. Kept to work done once per

@@ -2,12 +2,12 @@
 
 Four signals, four separate paths out of a service:
 
-| Signal      | How it leaves the service | Where it goes                    |
-| ----------- | ------------------------- | -------------------------------- |
-| **Traces**  | pushed over OTLP          | Alloy (`alloy.monitoring:4318`)  |
-| **Metrics** | scraped from `/metrics`   | Prometheus                       |
-| **Logs**    | JSON on stdout            | whatever collects container logs |
-| **Profiles** | pushed over Pyroscope's ingest API | Alloy (`alloy.monitoring:4040`) |
+| Signal       | How it leaves the service          | Where it goes                    |
+| ------------ | ---------------------------------- | -------------------------------- |
+| **Traces**   | pushed over OTLP                   | Alloy (`alloy.monitoring:4318`)  |
+| **Metrics**  | scraped from `/metrics`            | Prometheus                       |
+| **Logs**     | JSON on stdout                     | whatever collects container logs |
+| **Profiles** | pushed over Pyroscope's ingest API | Alloy (`alloy.monitoring:4040`)  |
 
 They are joined by trace ids: `LoggingInstrumentor` puts the active trace and span id on
 every log record, and `gen3logging` renders them as `trace_id` / `span_id`. So a log line
@@ -26,25 +26,42 @@ unchanged, so service code imports them from there and never names the library d
 
 ## Configuration
 
-| Variable                       | Default                        | Effect                                                                                               |
-| ------------------------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `ENABLE_OPENTELEMETRY_TRACES`  | `True`                         | Off means no provider, no instrumentation, no spans at all.                                          |
-| `FORCE_DISABLE_CUSTOM_TRACING` | `False`                        | On means no per-function spans. Library instrumentation keeps running, so requests and queries are still traced with less detail. It will reduce some CPU cycles for the tracing, but generally that is on the order of <1ms UNLESS you are instrumenting a function that gets called tens of thousands of times or something, in which case it can add up. This config lets you determine if the tracing is what's slowing stuff down, but the solution is NOT to leave it off - you should not trace that function directly (e.g. fix your tracing setup, don't just remove all tracing). |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`  | `http://alloy.monitoring:4318` | An **empty string** selects the console exporter, which is how to inspect spans locally without a collector. |
-| `OTEL_EXPORTER_OTLP_PROTOCOL`  | `http/protobuf`                | `http/protobuf` pairs with port 4318, `grpc` with 4317. A mismatched pair fails at export time, not at startup. |
-| `ENABLE_METRICS`               | `True`                         | Off means `/metrics` serves nothing useful and the counters are never created.                       |
-| `METRICS_PROVIDER`             | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
-| `PROMETHEUS_MULTIPROC_DIR`     | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. **Must exist**, see below.                          |
-| `GEN3_JSON_LOGS`               | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
-| `ENABLE_CONTINUOUS_PROFILING`  | `False`                        | Off means no Pyroscope agent and no profiles. Off by default because there is no console fallback: with nothing listening the agent retries pushes for the life of the process. |
-| `PYROSCOPE_SERVER_ADDRESS`     | `http://alloy.monitoring:4040` | Where profiles are pushed. **Not** an OTLP endpoint, so this cannot be 4317/4318, see below.          |
-| `PYROSCOPE_SAMPLE_RATE`        | `100`                          | Samples per second per thread.                                                                       |
-| `PYROSCOPE_UPLOAD_INTERVAL`    | `10`                           | Seconds between pushes.                                                                              |
-| `PROFILE_CPU`                  | `True`                         | Collect CPU profiles.                                                                                |
-| `PROFILE_MEMORY`               | `False`                        | Collect allocation profiles. Opt-in: it samples the allocator, which costs more than the CPU profiler on an endpoint that allocates per row. |
-| `PROFILE_ON_CPU_ONLY`          | `True`                         | `True` measures CPU time, `False` measures wall clock. See [CPU time or wall clock](#cpu-time-or-wall-clock). |
-| `PYROSCOPE_BASIC_AUTH_USERNAME` / `_PASSWORD` | `""`            | For a Pyroscope that needs credentials, e.g. Grafana Cloud. Empty is right for an in-cluster Alloy.   |
-| `PYROSCOPE_TENANT_ID`          | `""`                           | For a multi-tenant Pyroscope.                                                                        |
+| Variable                                      | Default                        | Effect                                                                                               |
+| --------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `ENABLE_OPENTELEMETRY_TRACES`                 | `True`                         | Off means no provider, no instrumentation, no spans at all.                                          |
+| `FORCE_DISABLE_CUSTOM_TRACING`                | `False`                        | On means no per-function spans. Library instrumentation keeps running, so requests and queries are still traced with less detail. It will reduce some CPU cycles for the tracing, but generally that is on the order of <1ms UNLESS you are instrumenting a function that gets called tens of thousands of times or something, in which case it can add up. This config lets you determine if the tracing is what's slowing stuff down, but the solution is NOT to leave it off - you should not trace that function directly (e.g. fix your tracing setup, don't just remove all tracing). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                 | `http://alloy.monitoring:4318` | An **empty string** selects the console exporter, which is how to inspect spans locally without a collector. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`                 | `http/protobuf`                | `http/protobuf` pairs with port 4318, `grpc` with 4317. A mismatched pair fails at export time, not at startup. |
+| `ENABLE_METRICS`                              | `True`                         | Off means `/metrics` serves nothing useful and the counters are never created.                       |
+| `METRICS_PROVIDER`                            | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
+| `PROMETHEUS_MULTIPROC_DIR`                    | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. **Must exist**, see below.                          |
+| `GEN3_JSON_LOGS`                              | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
+| `ENABLE_CONTINUOUS_PROFILING`                 | `False`                        | Off means no Pyroscope agent and no profiles. Off by default because there is no console fallback: with nothing listening the agent retries pushes for the life of the process. |
+| `PYROSCOPE_SERVER_ADDRESS`                    | `http://alloy.monitoring:4040` | Where profiles are pushed. **Not** an OTLP endpoint, so this cannot be 4317/4318, see below.         |
+| `PYROSCOPE_SAMPLE_RATE`                       | `100`                          | Samples per second per thread.                                                                       |
+| `PYROSCOPE_UPLOAD_INTERVAL`                   | `10`                           | Seconds between pushes.                                                                              |
+| `PROFILE_CPU`                                 | `True`                         | Collect CPU profiles.                                                                                |
+| `PROFILE_MEMORY`                              | `False`                        | Collect allocation profiles. Opt-in: it samples the allocator, which costs more than the CPU profiler on an endpoint that allocates per row. |
+| `PROFILE_ON_CPU_ONLY`                         | `True`                         | `True` measures CPU time, `False` measures wall clock. See [CPU time or wall clock](#cpu-time-or-wall-clock). |
+| `PYROSCOPE_BASIC_AUTH_USERNAME` / `_PASSWORD` | `""`                           | For a Pyroscope that needs credentials, e.g. Grafana Cloud. Empty is right for an in-cluster Alloy.  |
+| `PYROSCOPE_TENANT_ID`                         | `""`                           | For a multi-tenant Pyroscope.                                                                        |
+
+### How a service names itself
+
+Two names b/c of different handling of underscores vs hyphens in different technologies:
+
+| axis                | spelling    | where it comes from                                                                       | examples                                                                                             |
+| ------------------- | ----------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| deployment identity | hyphenated  | `config.DEPLOYMENT_SERVICE_NAME`, passed to `configure_profiling` and `configure_tracing` | Pyroscope application, OTel `service.name`, the `service` field on every log line, the Kubernetes `app` label |
+| package             | underscored | the Python package itself                                                                 | `version("gen3_embeddings")`, `logging.name`, span names like `gen3_embeddings.auth.*`, the image repository, `API_REQUESTS_COUNTER` |
+
+The deployment identity has to equal the Kubernetes `app` label! That label is hyphenated
+because the k8s API server rejects an underscore in an object name (e.g. k8s does not allow `_`).
+
+`API_REQUESTS_COUNTER` is separate for a
+mechanical reason: Prometheus metric names cannot contain a hyphen. *sigh*
+
+So... lots of fun with `-` vs `_` across these technologies. What we basically landed on is: use `-` as much as we can *outside* of Python, keep everything directly inside and related to Python with Pythonic underscores.
 
 ## Traces
 
@@ -298,9 +315,9 @@ Generate some traffic, then check three things:
 
 1. `http://localhost:4040` lists `gen3_embeddings`, with both a CPU (`process_cpu`) and an
    allocation profile type.
-2. The console spans carry a `pyroscope.profile.id` attribute. If they do not, the span processor
+1. The console spans carry a `pyroscope.profile.id` attribute. If they do not, the span processor
    was not installed - check that `configure_profiling` runs before `configure_tracing`.
-3. In Pyroscope, filter on `trace_id="<id from a console span>"` and the flamegraph narrows to that
+1. In Pyroscope, filter on `trace_id="<id from a console span>"` and the flamegraph narrows to that
    one request. That is the join between the two signals working.
 
 Every replica pushes under the same application name, so profiles are tagged with `pod` from the

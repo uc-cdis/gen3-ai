@@ -9,7 +9,7 @@ from cdispyutils.observability import continuous_profiling
 from common import config
 from common.profiling import configure_profiling
 
-SERVICE_NAME = "gen3_embeddings"
+SERVICE_NAME = "gen3-embeddings"
 
 
 class FakeAgent:
