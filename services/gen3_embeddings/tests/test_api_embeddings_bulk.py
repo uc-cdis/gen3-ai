@@ -16,6 +16,45 @@ def _decode_vector_base64(vector_base64: str, precision: str) -> list[float]:
     return list(struct.unpack(f"<{count}{fmt_char}", raw))
 
 
+@pytest.mark.parametrize(
+    ("vector_type", "vector", "expected_bytes"),
+    [
+        # 1.0 is 0x3F800000 as a float32 and 0x3C00 as a float16; -2.0 is 0xC0000000 and
+        # 0xC000. Both are written here least-significant byte first.
+        ("vector", [1.0, -2.0], b"\x00\x00\x80\x3f\x00\x00\x00\xc0"),
+        ("halfvec", [1.0, -2.0], b"\x00\x3c\x00\xc0"),
+    ],
+)
+def test_binary_vectors_are_little_endian(client, allow_authz, vector_type, vector, expected_bytes):
+    """
+    The binary encoding is little-endian regardless of the host's byte order.
+
+    Asserting against literal bytes rather than round-tripping through a decoder is the point:
+    the vector arrives from pgvector as a native-order view, so a decoder that also assumes
+    native order would agree with the server on any host and prove nothing. Clients decode
+    these bytes as little-endian, so that is what the response has to contain.
+    """
+    allow_authz("docs")
+
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "dimensions": len(vector), "vector_type": vector_type},
+    )
+    create_resp = client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": vector, "metadata": {}}]},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    embedding_id = create_resp.json()["embeddings"][0]["embedding_id"]
+
+    bulk_resp = client.post("/vectorstore/collections/docs/embeddings/bulk", json=[embedding_id])
+    assert bulk_resp.status_code == 200, bulk_resp.text
+
+    result = bulk_resp.json()["embeddings"][0]
+    padded = result["vector_base64"] + "=" * (-len(result["vector_base64"]) % 4)
+    assert base64.urlsafe_b64decode(padded) == expected_bytes
+
+
 def test_bulk_read_from_collection(client, allow_authz):
     """Bulk read from a known collection returns binary-encoded vectors with count and float32 precision."""
     allow_authz("docs")

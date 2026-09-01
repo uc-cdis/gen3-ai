@@ -14,6 +14,8 @@ basic_router = APIRouter()
     "/",
     description="Directs client to the docs",
     summary="Get swagger docs",
+    response_description="A redirect to the interactive Swagger documentation.",
+    tags=["Service Info"],
 )
 async def redirect_to_docs():
     """
@@ -30,6 +32,8 @@ async def redirect_to_docs():
     status_code=status.HTTP_200_OK,
     description="Gets the current version of the service",
     summary="Get current version",
+    response_description="The installed version of this service.",
+    tags=["Service Info"],
 )
 @basic_router.get("/_version", include_in_schema=False, dependencies=[])
 async def get_version() -> dict:
@@ -50,6 +54,7 @@ async def get_version() -> dict:
     responses={
         status.HTTP_200_OK: {"description": "Service is healthy"},
     },
+    tags=["Service Info"],
 )
 @basic_router.get("/_status", include_in_schema=False, dependencies=[])
 async def get_status() -> JSONResponse:

@@ -1,6 +1,6 @@
 """Routes for creating, reading, updating, and deleting vector collections."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
 
 from common.fastapi.responses import (
@@ -18,7 +18,7 @@ from gen3_embeddings.models.schemas import (
     PaginatedCollectionsResponse,
     UpdateCollectionBody,
 )
-from gen3_embeddings.params import CollectionName, Page, PageSize
+from gen3_embeddings.params import CollectionName, Counts, Page, PageSize
 from gen3_embeddings.routes.helpers import dual_path
 
 collections_router = APIRouter()
@@ -35,13 +35,14 @@ collections_router = APIRouter()
         "Returns every vector collection you have access to, one page at a time. "
         "Set `counts=true` to also get the number of embeddings available in each collection."
     ),
+    response_description="A page of collections you can read.",
     responses={**AUTH_RESPONSES},
     tags=["Vectorstore Collections"],
 )
 async def list_collections(
     page: Page = 1,
     page_size: PageSize = DEFAULT_PAGE_SIZE,
-    counts: bool = Query(False, alias="counts"),
+    counts: Counts = False,
     ctx: AuthzContext = Depends(authz("read")),
 ):
     """
@@ -97,6 +98,7 @@ async def list_collections(
         "Creates a new vector collection. The collection name is normalized before it is stored, "
         "and the dimensions you supply here are enforced on every embedding added to the collection."
     ),
+    response_description="The collection that was created.",
     responses={**AUTH_RESPONSES, **BAD_REQUEST_RESPONSE},
     tags=["Vectorstore Collections"],
 )
@@ -145,6 +147,7 @@ async def create_collection(
         "Returns the metadata for a single collection, including its dimensions and vector type. "
         "Set `counts=true` to also get the number of embeddings available in it."
     ),
+    response_description="The requested collection's metadata.",
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection"),
@@ -153,7 +156,7 @@ async def create_collection(
 )
 async def get_collection(
     collection_name: CollectionName,
-    counts: bool = Query(False, alias="counts"),
+    counts: Counts = False,
     ctx: AuthzContext = Depends(authz("read")),
 ):
     """
@@ -192,6 +195,8 @@ async def get_collection(
         "Updates the mutable metadata on a collection, such as its description. "
         "The collection's name, dimensions, and vector type cannot be changed after creation."
     ),
+    response_model=CollectionModel,
+    response_description="The collection as it stands after the update.",
     responses={
         **AUTH_RESPONSES,
         **BAD_REQUEST_RESPONSE,

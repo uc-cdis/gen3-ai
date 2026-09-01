@@ -23,6 +23,55 @@ from gen3_embeddings.routes.search import vectorstore_search_router
 # check_rls_is_enabled, since nothing else would notice if RLS were turned off.
 RLS_PROTECTED_TABLES = ("embeddings_vector", "embeddings_halfvec", "collections")
 
+SERVICE_DESCRIPTION = """
+An authorization-scoped vector store for Gen3.
+
+Embeddings are grouped into **collections**. A collection fixes two things at creation that
+cannot be changed afterwards: the number of `dimensions` every vector in it must have, and the
+`vector_type` those vectors are stored at (`vector` for float32, `halfvec` for float16). Write
+embeddings with `POST`, replace them with `PUT`, and find the nearest ones with search.
+
+Every request is authorized against a resource path. A collection's own path is
+`/vectorstore/collections/{collection_name}`, but embeddings may be stored under any path you
+hold the action on -- pass `authz` on write to choose one. Reads return only what your grants
+cover, so an empty result and "not authorized" are deliberately indistinguishable.
+
+Vectors are returned as JSON float arrays by default. For large vectors, the bulk read
+endpoints return them base64-encoded instead, which is substantially cheaper to transfer.
+
+Only pre-computed vectors are accepted today. Fields that take raw text are present in the
+schemas so text input can be added without a breaking change, but supplying text returns a 400.
+"""
+
+# Tag order here is the order Redoc renders sections in, so it doubles as the shape of the
+# published reference: collections first, because nothing else works without one.
+OPENAPI_TAGS = [
+    {
+        "name": "Vectorstore Collections",
+        "description": "Create and manage the collections that embeddings are grouped into.",
+    },
+    {
+        "name": "Embeddings",
+        "description": "Read and write individual embeddings, as JSON float arrays.",
+    },
+    {
+        "name": "Embeddings (Bulk Read)",
+        "description": (
+            "Read many embeddings at once by UUID, with vectors base64-encoded rather than "
+            "rendered as JSON arrays. These use `POST` so the UUID list can travel in the request "
+            "body, but they only read."
+        ),
+    },
+    {
+        "name": "Vectorstore Search",
+        "description": "Find the embeddings nearest to a query vector, within or across collections.",
+    },
+    {
+        "name": "Service Info",
+        "description": "Service version and health. Intended for operators rather than API clients.",
+    },
+]
+
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
 route_aggregator.include_router(embeddings_bulk_router)
@@ -239,7 +288,10 @@ def get_app() -> FastAPI:
     """
     app = FastAPI(
         title="Gen3 Embeddings Service",
+        summary="Store, read, and search vector embeddings, scoped to what the caller is authorized to see.",
+        description=SERVICE_DESCRIPTION,
         version=version("gen3_embeddings"),
+        openapi_tags=OPENAPI_TAGS,
         debug=config.DEBUG,
         root_path=config.URL_PREFIX,
         lifespan=lifespan,

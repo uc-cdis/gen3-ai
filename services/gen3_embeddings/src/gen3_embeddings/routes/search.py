@@ -1,5 +1,7 @@
 """Routes for vector similarity search within and across collections."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from common.fastapi.responses import (
@@ -18,7 +20,7 @@ from gen3_embeddings.models.schemas import (
     SingleSearchResult,
     VectorType,
 )
-from gen3_embeddings.params import AiModel, CollectionName, RequestedCollectionNames
+from gen3_embeddings.params import AiModel, CollectionName, ExcludeInfo, RequestedCollectionNames
 from gen3_embeddings.routes.helpers import dual_path
 
 vectorstore_search_router = APIRouter()
@@ -35,6 +37,11 @@ vectorstore_search_router = APIRouter()
         "similarity. The query vector must have the same number of dimensions as the collection. "
         "Set `exclude_info=true` to omit the `info` block from each result."
     ),
+    response_description=(
+        "Up to `top_k` hits, nearest first. Each hit's `value` is the score under the "
+        "`distance_metric` you asked for -- smaller is closer for every metric except "
+        "`cosine_similarity`, where larger is closer."
+    ),
     responses={
         **AUTH_RESPONSES,
         **BAD_REQUEST_RESPONSE,
@@ -46,7 +53,7 @@ async def search_in_collection(
     body: SearchRequestBody,
     collection_name: CollectionName,
     ai_model: AiModel = None,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     # POST, but this only reads. The action is declared, so the verb is irrelevant.
     ctx: AuthzContext = Depends(authz("read")),
 ):
@@ -133,6 +140,12 @@ async def search_in_collection(
         "combined batches by `value` - ascending, or descending for `cosine_similarity` - and "
         "keeping the first `top_k` gives exactly what a single search over all of them would."
     ),
+    response_description=(
+        "Up to `top_k` hits from across the searched collections, nearest first, plus the "
+        "collections they came from. Each hit's `value` is the score under the `distance_metric` "
+        "you asked for -- smaller is closer for every metric except `cosine_similarity`, where "
+        "larger is closer."
+    ),
     responses={
         **AUTH_RESPONSES,
         **BAD_REQUEST_RESPONSE,
@@ -143,8 +156,17 @@ async def search_across_collections(
     body: SearchRequestBody,
     collections: RequestedCollectionNames = None,
     ai_model: AiModel = None,
-    vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    vector_type: Annotated[
+        VectorType,
+        Query(
+            description=(
+                "Which storage precision to search. Collections are backed by either `vector` "
+                "(float32) or `halfvec` (float16), and a single search covers one of the two, so "
+                "collections of the other type are skipped."
+            ),
+        ),
+    ] = VectorType.vector,
+    exclude_info: ExcludeInfo = False,
     # No collection in the path, so there is no single resource to check: the caller sees
     # whatever their `read` grants make visible, which may be nothing.
     ctx: AuthzContext = Depends(authz("read")),

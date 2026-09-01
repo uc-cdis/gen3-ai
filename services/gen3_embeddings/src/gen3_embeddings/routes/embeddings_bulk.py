@@ -6,7 +6,7 @@ which is cheaper for large vectors. They are declared `POST` so the UUID list ca
 sent in the request body, but they only read.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from common.fastapi.responses import (
     AUTH_RESPONSES,
@@ -23,7 +23,7 @@ from gen3_embeddings.models.schemas import (
     EmbeddingResponseBinaryWithCollections,
     SingleEmbeddingResultBinary,
 )
-from gen3_embeddings.params import CollectionName, EmbeddingUUIDs
+from gen3_embeddings.params import CollectionName, EmbeddingUUIDs, ExcludeInfo
 from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_bulk_router = APIRouter()
@@ -43,11 +43,15 @@ embeddings_bulk_router = APIRouter()
         "This uses `POST` so the UUID list can be sent in the request body, but it does not "
         "create anything."
     ),
+    response_description=(
+        "The embeddings that resolved, plus the collections they came from. Each `vector_base64` "
+        "is base64-encoded little-endian floats; decode it according to the result's `precision`."
+    ),
     responses={**AUTH_RESPONSES},
 )
 async def get_embeddings_bulk_unknown_collections(
     embedding_uuids: EmbeddingUUIDs,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     # POST, but this only reads. No collection in the path, so RLS is the only filter.
     ctx: AuthzContext = Depends(authz("read")),
 ) -> EmbeddingResponseBinaryWithCollections:
@@ -120,6 +124,10 @@ async def get_embeddings_bulk_unknown_collections(
         "This uses `POST` so the UUID list can be sent in the request body, but it does not "
         "create anything."
     ),
+    response_description=(
+        "The embeddings that resolved, and how many. Each `vector_base64` is a base64-encoded "
+        "array of little-endian floats; decode it according to the result's `precision`."
+    ),
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection"),
@@ -129,7 +137,7 @@ async def get_embeddings_bulk_unknown_collections(
 async def get_embeddings_bulk_from_collection(
     collection_name: CollectionName,
     embedding_uuids: EmbeddingUUIDs,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     # POST, but this only reads. Declaring the action is what resolved the "how to handle
     # authz here?" this handler used to carry: the verb no longer decides anything.
     ctx: AuthzContext = Depends(authz("read")),

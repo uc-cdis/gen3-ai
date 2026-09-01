@@ -3,7 +3,7 @@
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
 
 from common.fastapi.responses import (
@@ -26,7 +26,7 @@ from gen3_embeddings.models.schemas import (
     SingleEmbeddingResult,
     UpdateEmbeddingBody,
 )
-from gen3_embeddings.params import AiModel, CollectionName, Page, PageSize
+from gen3_embeddings.params import AiModel, CollectionName, EmbeddingUUID, ExcludeInfo, Page, PageSize
 from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_router = APIRouter()
@@ -40,6 +40,7 @@ embeddings_router = APIRouter()
     response_model_exclude_none=True,
     summary="Read embedding from collection",
     description="Returns a single embedding from a collection, looked up by its UUID.",
+    response_description="The requested embedding, as a JSON array of floats.",
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection or embedding"),
@@ -48,7 +49,7 @@ embeddings_router = APIRouter()
 )
 async def get_embedding_from_collection(
     collection_name: CollectionName,
-    embedding_uuid: UUID,
+    embedding_uuid: EmbeddingUUID,
     ctx: AuthzContext = Depends(authz("read")),
 ):
     """
@@ -90,6 +91,7 @@ async def get_embedding_from_collection(
         "Replaces the vector and/or metadata of an existing embedding, looked up by its UUID. "
         "A new vector must match the collection's dimensions."
     ),
+    response_description="The embedding as it stands after the update.",
     responses={
         **AUTH_RESPONSES,
         **BAD_REQUEST_RESPONSE,
@@ -99,7 +101,7 @@ async def get_embedding_from_collection(
 )
 async def update_embedding_in_collection(
     collection_name: CollectionName,
-    embedding_uuid: UUID,
+    embedding_uuid: EmbeddingUUID,
     body: UpdateEmbeddingBody,
     ctx: AuthzContext = Depends(authz("update")),
 ):
@@ -162,7 +164,15 @@ async def update_embedding_in_collection(
         "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
         "used.\n"
         "- You need both `create` and `update` permission on the collection path and on the "
-        "resulting embedding paths."
+        "resulting embedding paths.\n\n"
+        "Set `embedding_id` on an item to replace that specific existing embedding; an id that "
+        "does not exist is rejected rather than created. Items without an `embedding_id` are "
+        "created, or updated in place if an identical vector, metadata, and authz combination is "
+        "already in the collection."
+    ),
+    response_description=(
+        "The created or updated embeddings, in the same order as the request. Each carries the "
+        "`input_index` it came from."
     ),
     responses={
         **AUTH_RESPONSES,
@@ -175,7 +185,7 @@ async def put_embeddings_in_collection(
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: AiModel = None,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     # An upsert both creates and updates, so both are demanded on the collection. `update`
     # is the primary action, so it is the one that scopes row-level security.
     ctx: AuthzContext = Depends(authz("update", also_require=("create",))),
@@ -323,7 +333,7 @@ async def put_embeddings_in_collection(
 )
 async def delete_embedding(
     collection_name: CollectionName,
-    embedding_uuid: UUID,
+    embedding_uuid: EmbeddingUUID,
     ctx: AuthzContext = Depends(authz("delete")),
 ):
     """
@@ -364,6 +374,7 @@ async def delete_embedding(
         "Returns the embeddings in a collection, one page at a time. "
         "Set `exclude_info=true` to omit the `info` block from each result."
     ),
+    response_description="A page of embeddings from the collection.",
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection"),
@@ -372,7 +383,7 @@ async def delete_embedding(
 )
 async def list_embeddings_in_collection(
     collection_name: CollectionName,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     page: Page = 1,
     page_size: PageSize = DEFAULT_PAGE_SIZE,
     ctx: AuthzContext = Depends(authz("read")),
@@ -440,7 +451,13 @@ async def list_embeddings_in_collection(
         "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
         "used.\n"
         "- You need `create` permission on the collection path and on the resulting embedding "
-        "paths."
+        "paths.\n\n"
+        "IDs are assigned by the service. An `embedding_id` set on an item is ignored here; use "
+        "`PUT` if you need to write to a specific existing embedding."
+    ),
+    response_description=(
+        "The created embeddings, in the same order as the request. Each carries the `input_index` "
+        "it came from and the `embedding_id` assigned to it."
     ),
     responses={
         **AUTH_RESPONSES,
@@ -453,7 +470,7 @@ async def create_embeddings_in_collection(
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: AiModel = None,
-    exclude_info: bool = Query(False, alias="exclude_info"),
+    exclude_info: ExcludeInfo = False,
     ctx: AuthzContext = Depends(authz("create")),
 ):
     """

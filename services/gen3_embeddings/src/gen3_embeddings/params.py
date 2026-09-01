@@ -24,10 +24,11 @@ See the request limits block in `config` for why each bound exists.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Body, Depends, HTTPException, Query
+from fastapi import Body, Depends, HTTPException, Path, Query
 
 from gen3_embeddings.config import (
     MAX_AI_MODEL_NAME_LENGTH,
+    MAX_COLLECTION_NAME_LENGTH,
     MAX_COLLECTIONS_PER_SEARCH,
     MAX_COLLECTIONS_QUERY_LENGTH,
     MAX_EMBEDDING_UUIDS_PER_REQUEST,
@@ -37,7 +38,20 @@ from gen3_embeddings.config import (
 from gen3_embeddings.models.helpers import normalize_collection_name
 
 
-def normalized_collection_name(collection_name: str) -> str:
+def normalized_collection_name(
+    collection_name: Annotated[
+        str,
+        Path(
+            description=(
+                "Name of the collection. Matched case-insensitively -- names are lower-cased "
+                "before lookup, so `MyDocs` and `mydocs` are the same collection. May contain "
+                f"only lowercase letters, digits, hyphen, and underscore, up to "
+                f"{MAX_COLLECTION_NAME_LENGTH} characters; anything else returns a 400."
+            ),
+            examples=["my-documents"],
+        ),
+    ],
+) -> str:
     """
     Normalize a `collection_name` request parameter, rejecting invalid ones.
 
@@ -111,21 +125,89 @@ def requested_collection_names(
 RequestedCollectionNames = Annotated[list[str] | None, Depends(requested_collection_names)]
 """The `collections` query parameter on cross-collection search, split and bounded."""
 
-Page = Annotated[int, Query(ge=1, le=MAX_PAGE)]
+Page = Annotated[
+    int,
+    Query(
+        ge=1,
+        le=MAX_PAGE,
+        description=(
+            "Which page of results to return, counting from 1. Use the `next_page` and "
+            "`prev_page` values in the response to walk through pages rather than computing "
+            f"them yourself. Maximum {MAX_PAGE}."
+        ),
+    ),
+]
 """A 1-based page number. Bounded because it becomes an OFFSET, which Postgres takes as int4."""
 
-PageSize = Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)]
+PageSize = Annotated[
+    int,
+    Query(
+        ge=1,
+        le=MAX_PAGE_SIZE,
+        description=(
+            "How many results to return per page. Each result carries a full vector, so large "
+            f"pages mean large responses. Maximum {MAX_PAGE_SIZE}."
+        ),
+    ),
+]
 """Rows per page. Bounds the number of full vectors one response can carry."""
 
-AiModel = Annotated[str | None, Query(max_length=MAX_AI_MODEL_NAME_LENGTH)]
+AiModel = Annotated[
+    str | None,
+    Query(
+        max_length=MAX_AI_MODEL_NAME_LENGTH,
+        description=(
+            "Reserved for selecting the model used to embed text input. Not implemented yet: "
+            "supplying it has no effect, because only pre-computed vectors are accepted today."
+        ),
+    ),
+]
 """The `ai_model` query parameter. Unused so far, but still caller-controlled free text."""
+
+ExcludeInfo = Annotated[
+    bool,
+    Query(
+        description=(
+            "Omit the per-embedding `info` object (collection, authz, metadata, and self link) "
+            "from the response, leaving just the vectors and their IDs. Useful when you already "
+            "know where the embeddings came from and want a smaller response."
+        ),
+    ),
+]
+"""Whether to drop the `info` block from each returned embedding."""
+
+Counts = Annotated[
+    bool,
+    Query(
+        description=(
+            "Include `available_embeddings_count` on each collection. Off by default because it "
+            "costs an extra count query per collection returned."
+        ),
+    ),
+]
+"""Whether to count each collection's embeddings, which is an extra query per collection."""
+
+EmbeddingUUID = Annotated[
+    UUID,
+    Path(
+        description="ID of the embedding, as returned in `embedding_id` when it was created.",
+        examples=["00000000-0000-0000-0000-000000000000"],
+    ),
+]
+"""An `embedding_uuid` path parameter."""
 
 EmbeddingUUIDs = Annotated[
     list[UUID],
     Body(
         min_length=1,
         max_length=MAX_EMBEDDING_UUIDS_PER_REQUEST,
-        examples=["embedding_uuid_0", "embedding_uuid_1"],
+        description=(
+            "The IDs of the embeddings to read, as a JSON array. Results come back in the same "
+            f"order you asked for them. At most {MAX_EMBEDDING_UUIDS_PER_REQUEST} per request."
+        ),
+        # A list of one example VALUE, not a list of example items: the example for a list
+        # parameter has to itself be a list, or Redoc renders a bare string in place of the array.
+        examples=[["00000000-0000-0000-0000-000000000000", "11111111-1111-1111-1111-111111111111"]],
     ),
 ]
 """

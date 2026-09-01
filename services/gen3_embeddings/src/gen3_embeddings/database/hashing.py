@@ -34,7 +34,7 @@ from gen3_embeddings.database.errors import (
     EmbeddingDimensionMismatchError,
     EmbeddingNotRepresentableError,
 )
-from gen3_embeddings.models.schemas import VectorType
+from gen3_embeddings.models.schemas import VectorPrecision, VectorType
 
 # `embedding_hash`/`metadata_hash` are uuid columns and hold 128 bits; sha256 produces 256.
 # Truncating a sha256 digest to its leading half is the standard construction (sha256/128)
@@ -44,11 +44,34 @@ DIGEST_BYTES = 16
 # Byte order is pinned explicitly: `np.float32` is native-endian, which would make a hash
 # computed on a big-endian host disagree with one computed on the x86/arm hosts that wrote
 # the rest of the table.
-_STORAGE_DTYPE: dict[VectorType, str] = {
-    # pgvector `vector` stores float32, `halfvec` stores float16.
-    VectorType.vector: "<f4",
-    VectorType.halfvec: "<f2",
+#
+# Keyed on precision rather than vector type because precision is what decides the byte
+# layout, and because the binary read endpoints have a precision rather than a collection to
+# hand. That makes this the single place the wire byte order of a vector is decided, for both
+# the hashes stored in the table and the bytes handed to clients.
+_STORAGE_DTYPE: dict[VectorPrecision, str] = {
+    VectorPrecision.float32: "<f4",
+    VectorPrecision.float16: "<f2",
 }
+
+
+def storage_dtype_for_precision(precision: VectorPrecision) -> np.dtype:
+    """
+    Return the numpy dtype for vectors stored at this precision.
+
+    Args:
+        precision (VectorPrecision): Floating-point precision of the stored vectors.
+
+    Returns:
+        np.dtype: Little-endian float32 for `float32`, little-endian float16 for `float16`.
+
+    Raises:
+        ValueError: If the precision has no known storage dtype.
+    """
+    try:
+        return np.dtype(_STORAGE_DTYPE[precision])
+    except KeyError:
+        raise ValueError(f"Unsupported vector precision: {precision}") from None
 
 
 def storage_dtype(vector_type: VectorType) -> np.dtype:
@@ -64,10 +87,8 @@ def storage_dtype(vector_type: VectorType) -> np.dtype:
     Raises:
         ValueError: If the vector type has no known storage dtype.
     """
-    try:
-        return np.dtype(_STORAGE_DTYPE[vector_type])
-    except KeyError:
-        raise ValueError(f"Unsupported vector type: {vector_type}") from None
+    # pgvector `vector` stores float32, `halfvec` stores float16.
+    return storage_dtype_for_precision(vector_type.precision)
 
 
 def to_storage_array(
