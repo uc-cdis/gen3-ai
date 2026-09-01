@@ -21,7 +21,12 @@ ai_models_uploads_router = APIRouter()
 
 
 async def _hash_upload_file(upload: UploadFile) -> tuple[str, str, int]:
-    """Compute SHA256 and MD5 digests for an uploaded file without loading it into memory."""
+    """
+    Compute SHA256 and MD5 digests for an uploaded file without loading it into memory.
+
+    Returns:
+        tuple[str, str, int]: SHA256 digest, MD5 digest, and file size in bytes.
+    """
     await upload.seek(0)
     sha256 = hashlib.sha256()
     md5 = hashlib.md5(usedforsecurity=False)
@@ -42,7 +47,16 @@ async def _create_model_and_initial_revision(
     repo: str,
     revision_name: str,
 ) -> tuple[int, int, str, bool, bool, bool]:
-    """Create repository and placeholder revision records and return schema capability flags."""
+    """
+    Create repository and placeholder revision records and return schema capability flags.
+
+    Returns:
+        tuple[int, int, str, bool, bool, bool]: Model ID, revision ID, identifier column name,
+            has_current_revision flag, has_s3_key flag, and has_file_type flag.
+
+    Raises:
+        HTTPException: If the repository already exists.
+    """
     identifier_column = await get_revision_identifier_column(conn)
     has_current_revision = await repository_has_current_revision(conn)
     has_s3_key, has_file_type = await model_files_optional_columns(conn)
@@ -79,7 +93,12 @@ async def _create_model_and_initial_revision(
 
 
 async def _prepare_file_insert_stmt(conn, has_s3_key: bool, has_file_type: bool):
-    """Build and prepare the INSERT statement for model files based on optional columns."""
+    """
+    Build and prepare the INSERT statement for model files based on optional columns.
+
+    Returns:
+        asyncpg.connection.PreparedStatement: The prepared SQL statement for file insertion.
+    """
     file_columns = ["revision_id", "file_path", "file_size", "content_sha", "content_etag"]
     if has_s3_key:
         file_columns.append("s3_key")
@@ -104,7 +123,16 @@ async def _process_uploaded_files(
     has_s3_key: bool,
     has_file_type: bool,
 ) -> tuple[list[str], list[tuple[str, str, str]], int]:
-    """Upload files to object storage and persist file metadata rows."""
+    """
+    Upload files to object storage and persist file metadata rows.
+
+    Returns:
+        tuple[list[str], list[tuple[str, str, str]], int]: List of object keys, list of (filename, SHA, ETag) tuples,
+            and total file size.
+
+    Raises:
+        HTTPException: If a file is missing a filename.
+    """
     uploaded_objects: list[str] = []
     uploaded_file_digests: list[tuple[str, str, str]] = []
     total_size = 0
@@ -151,6 +179,12 @@ async def upload_model(
 ) -> MultipartUploadResponse:
     """
     Upload one or more files and create a repository revision.
+
+    Returns:
+        MultipartUploadResponse: Response containing upload status and file details.
+
+    Raises:
+        HTTPException: If no files are provided or upload fails.
     """
 
     if not files:
@@ -247,6 +281,12 @@ async def create_model_revision(
 ) -> RevisionModel:
     """
     Create a revision for an existing repository.
+
+    Returns:
+        RevisionModel: The created revision model.
+
+    Raises:
+        HTTPException: If the repository is not found.
     """
 
     revision = await create_revision(namespace, repo, request.revision_name, request.revision_identifier, request.etag)
@@ -263,6 +303,9 @@ async def generate_upload_url(
 ) -> UploadUrlResponse:
     """
     Generate a storage upload URL for a file in a revision.
+
+    Returns:
+        UploadUrlResponse: Response containing the upload URL and object key.
     """
 
     provider = get_storage_provider()
@@ -281,6 +324,12 @@ async def complete_upload(
 ) -> RevisionModel:
     """
     Finalize an upload by creating/updating revision and file tracking records.
+
+    Returns:
+        RevisionModel: The created or updated revision model.
+
+    Raises:
+        HTTPException: If no uploaded files are found or creation fails.
     """
 
     provider = get_storage_provider()

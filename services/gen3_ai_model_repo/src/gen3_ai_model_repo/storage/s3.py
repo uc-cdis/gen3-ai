@@ -31,7 +31,13 @@ class S3StorageProvider(StorageProvider):
         )
 
     async def ensure_container(self):
-        """Ensure the configured S3 bucket exists."""
+        """
+        Ensure the configured S3 bucket exists.
+
+        Raises:
+            FileNotFoundError: If the bucket doesn't exist and create_bucket_if_missing is False.
+            ClientError: If an unexpected S3 error occurs.
+        """
         from botocore.exceptions import ClientError
 
         try:
@@ -74,7 +80,12 @@ class S3StorageProvider(StorageProvider):
         self,
         prefix: str,
     ) -> list[str]:
-        """List object keys under a prefix in S3."""
+        """
+        List object keys under a prefix in S3.
+
+        Returns:
+            list[str]: List of object keys under the prefix.
+        """
         paginator = self.client.get_paginator("list_objects_v2")
         keys: list[str] = []
         for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
@@ -124,7 +135,12 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate a pre-signed download URL for an S3 object."""
+        """
+        Generate a pre-signed download URL for an S3 object.
+
+        Returns:
+            str: A presigned URL for downloading the object.
+        """
         return self.client.generate_presigned_url(
             ClientMethod="get_object",
             Params={"Bucket": self.bucket_name, "Key": object_key},
@@ -136,7 +152,12 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate a pre-signed upload URL for an S3 object."""
+        """
+        Generate a pre-signed upload URL for an S3 object.
+
+        Returns:
+            str: A presigned URL for uploading the object.
+        """
         return self.client.generate_presigned_url(
             ClientMethod="put_object",
             Params={"Bucket": self.bucket_name, "Key": object_key},

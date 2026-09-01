@@ -127,7 +127,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [lint.per-file-ignores]
 # Ignore `E402` (import violations) in all `__init__.py` files
 "__init__.py" = ["E402"]
-"services/gen3_ai_model_repo/src/**/*.py" = ["DOC"]
 # Ignore every `D` rule outside `src/` and `tests/`, which leaves scripts like
 # generate_openapi.py and run.py alone.
 "!**/{src,tests}/**/*.py" = ["D"]

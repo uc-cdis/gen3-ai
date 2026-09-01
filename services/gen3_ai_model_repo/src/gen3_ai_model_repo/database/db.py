@@ -65,6 +65,9 @@ async def close_db():
 async def get_db_pool():
     """
     Return initialized database connection pool.
+
+    Returns:
+        asyncpg.Pool: The initialized database connection pool.
     """
 
     global db_pool

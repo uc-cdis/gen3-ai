@@ -22,7 +22,15 @@ _provider_cache = None
 
 
 def get_storage_provider():
-    """Return the configured storage provider implementation."""
+    """
+    Return the configured storage provider implementation.
+
+    Returns:
+        StorageProvider: The configured storage provider instance (Local, MinIO, or S3).
+
+    Raises:
+        ValueError: If an unsupported STORAGE_PROVIDER is configured.
+    """
     global _provider_cache
 
     if _provider_cache is not None:

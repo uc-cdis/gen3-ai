@@ -31,7 +31,12 @@ class MinioStorageProvider(StorageProvider):
         )
 
     async def ensure_container(self):
-        """Ensure the configured MinIO bucket exists."""
+        """
+        Ensure the configured MinIO bucket exists.
+
+        Raises:
+            FileNotFoundError: If the bucket doesn't exist and create_bucket_if_missing is False.
+        """
         if self.client.bucket_exists(self.bucket_name):
             return
 
@@ -79,7 +84,12 @@ class MinioStorageProvider(StorageProvider):
         self,
         prefix: str,
     ) -> list[str]:
-        """List objects stored under a prefix in MinIO."""
+        """
+        List objects stored under a prefix in MinIO.
+
+        Returns:
+            list[str]: List of object keys under the prefix.
+        """
         objects = self.client.list_objects(
             self.bucket_name,
             prefix=prefix,
@@ -132,7 +142,12 @@ class MinioStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate a signed URL for downloading an object."""
+        """
+        Generate a signed URL for downloading an object.
+
+        Returns:
+            str: A presigned URL for downloading the object.
+        """
         return self.client.presigned_get_object(
             self.bucket_name,
             object_key,
@@ -144,7 +159,12 @@ class MinioStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate a signed URL for uploading an object."""
+        """
+        Generate a signed URL for uploading an object.
+
+        Returns:
+            str: A presigned URL for uploading the object.
+        """
         return self.client.presigned_put_object(
             self.bucket_name,
             object_key,

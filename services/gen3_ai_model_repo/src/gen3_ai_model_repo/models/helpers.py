@@ -12,6 +12,12 @@ from gen3_ai_model_repo.models.schemas import (
 def repository_metadata_to_model(data: dict) -> RepositoryMetadataModel:
     """
     Convert repository metadata dict into schema model.
+
+    Returns:
+        RepositoryMetadataModel: The converted repository metadata model.
+
+    Raises:
+        KeyError: If repository metadata is missing a repo name.
     """
     repo_name = data.get("repo")
     if repo_name is None:
@@ -31,6 +37,9 @@ def repository_metadata_to_model(data: dict) -> RepositoryMetadataModel:
 def revision_to_model(revision_data: dict) -> RevisionModel:
     """
     Convert revision data into API schema.
+
+    Returns:
+        RevisionModel: The converted revision model.
     """
     return RevisionModel(
         id=revision_data["id"],
@@ -42,6 +51,9 @@ def revision_to_model(revision_data: dict) -> RevisionModel:
 def repository_file_to_model(file_data: dict) -> TreeEntryModel:
     """
     Convert repository file metadata into API schema.
+
+    Returns:
+        TreeEntryModel: The converted tree entry model.
     """
     return TreeEntryModel(
         type=file_data["type"],

@@ -61,6 +61,12 @@ async def list_repo_tree(
 ) -> list[TreeEntryModel]:
     """
     List repository directory contents at a specific revision.
+
+    Returns:
+        list[TreeEntryModel]: A list of tree entry models for the directory contents.
+
+    Raises:
+        HTTPException: If the repository is not found.
     """
     repo_exists = await db_model_exists(namespace, repo)
     if not repo_exists:
@@ -92,6 +98,12 @@ async def list_repo_tree(
 async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
     """
     Get detailed metadata for a specific model revision.
+
+    Returns:
+        RevisionModel: The revision metadata model.
+
+    Raises:
+        HTTPException: If the revision is not found.
     """
     data = await db_get_revision(namespace, repo, rev)
     if not data:
@@ -108,6 +120,12 @@ async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
 async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionModel:
     """
     Retrieve revision metadata by revision name.
+
+    Returns:
+        RevisionModel: The revision metadata model.
+
+    Raises:
+        HTTPException: If the revision is not found.
     """
 
     data = await db_get_revision(namespace, repo, revision)
@@ -129,6 +147,12 @@ async def get_model_revision(namespace: str, repo: str, revision: str) -> Revisi
 async def head_file(namespace: str, repo: str, rev: str, path: str):
     """
     Get file metadata without downloading the file content.
+
+    Returns:
+        RedirectResponse: A redirect response with file metadata headers.
+
+    Raises:
+        HTTPException: If the file is not found.
     """
 
     file_record = await get_file_record(
@@ -167,6 +191,12 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
 async def get_file(namespace: str, repo: str, rev: str, path: str):
     """
     Download a model file from a specific revision.
+
+    Returns:
+        RedirectResponse: A redirect response with signed URL to download the file.
+
+    Raises:
+        HTTPException: If the file is not found.
     """
     logging.info(f"Received request for file: {namespace}/{repo}/{rev}/{path}")
     file_record = await get_file_record(
@@ -190,6 +220,9 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
 async def list_model_files(namespace: str, repo: str, revision: str = "main") -> FileListResponseModel:
     """
     List tracked files for a repository revision.
+
+    Returns:
+        FileListResponseModel: A model containing the list of files.
     """
 
     files = await list_files_in_revision(namespace, repo, revision)
@@ -215,6 +248,12 @@ async def list_model_files(namespace: str, repo: str, revision: str = "main") ->
 async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadataModel:
     """
     Retrieve file metadata from a repository using a file identifier.
+
+    Returns:
+        FileMetadataModel: The file metadata model.
+
+    Raises:
+        HTTPException: If the file or repository is not found.
     """
 
     parts = file_id.split(":", 3)
@@ -243,6 +282,12 @@ async def delete_model_file(
 ) -> RevisionDeleteResponse:
     """
     Delete a tracked file from a repository revision.
+
+    Returns:
+        RevisionDeleteResponse: Response indicating successful deletion.
+
+    Raises:
+        HTTPException: If the file or repository is not found.
     """
 
     parts = file_id.split(":", 3)
@@ -263,6 +308,12 @@ async def delete_model_revision(
 ) -> RevisionDeleteResponse:
     """
     Delete a revision and all files tracked under it.
+
+    Returns:
+        RevisionDeleteResponse: Response indicating successful deletion.
+
+    Raises:
+        HTTPException: If the revision or repository is not found.
     """
 
     deleted_files = await delete_files_for_revision(namespace, repo, revision)
@@ -285,5 +336,8 @@ async def delete_model_revision(
 async def signed_url(path: str):
     """
     Deprecated local signed-url endpoint.
+
+    Raises:
+        HTTPException: Always raises with 410 Gone status as this endpoint is deprecated.
     """
     raise HTTPException(status_code=410, detail="Local streaming endpoint is deprecated; use storage signed URLs")

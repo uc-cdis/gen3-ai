@@ -4,7 +4,12 @@ from fastapi.responses import RedirectResponse
 
 
 def build_head_response(commit_hash: str, etag: str, size: int, signed_url: str) -> RedirectResponse:
-    """Build a HEAD-style redirect response for repository file access."""
+    """
+    Build a HEAD-style redirect response for repository file access.
+
+    Returns:
+        RedirectResponse: A redirect response with custom headers for file metadata.
+    """
     headers = {
         "X-Repo-Commit": commit_hash,
         "X-Linked-Etag": etag,

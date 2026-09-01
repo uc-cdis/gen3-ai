@@ -9,6 +9,9 @@ __all__ = ["check_db_connection"]
 async def check_db_connection():
     """
     Helper function to check database connection.
+
+    Returns:
+        bool: True if database connection is successful, False otherwise.
     """
     try:
         db_pool = await get_db_pool()

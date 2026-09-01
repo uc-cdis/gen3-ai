@@ -20,6 +20,12 @@ async def get_revision_identifier_column(conn) -> str:
     Older local databases used commit_sha while the current migration uses
     revision_identifier. Keeping this lookup here lets route and helper code work
     across already-created developer databases without hiding real SQL errors.
+
+    Returns:
+        str: The name of the revision identifier column ('revision_identifier' or 'commit_sha').
+
+    Raises:
+        RuntimeError: If the model_revisions table is missing the revision identifier column.
     """
     stmt = await conn.prepare(
         """
@@ -47,7 +53,12 @@ async def create_revision(
     revision_identifier: str | None = None,
     etag: str | None = None,
 ) -> dict | None:
-    """Create or update a revision for a repository."""
+    """
+    Create or update a revision for a repository.
+
+    Returns:
+        dict | None: The created/updated revision metadata, or None if repository doesn't exist.
+    """
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         identifier_column = await get_revision_identifier_column(conn)
@@ -241,7 +252,12 @@ async def delete_revision(
     model_name: str,
     revision_name: str,
 ) -> bool:
-    """Delete a revision for a repository."""
+    """
+    Delete a revision for a repository.
+
+    Returns:
+        bool: True if the revision was successfully deleted, False otherwise.
+    """
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         stmt = await conn.prepare(

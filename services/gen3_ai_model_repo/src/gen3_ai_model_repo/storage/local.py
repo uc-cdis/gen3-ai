@@ -57,7 +57,12 @@ class LocalStorageProvider(StorageProvider):
         self,
         prefix: str,
     ) -> list[str]:
-        """List files stored under a prefix."""
+        """
+        List files stored under a prefix.
+
+        Returns:
+            list[str]: List of object keys under the prefix.
+        """
         base = self.root_directory / prefix
 
         if not base.exists():
@@ -101,7 +106,12 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate a signed URL for an object in local storage."""
+        """
+        Generate a signed URL for an object in local storage.
+
+        Returns:
+            str: A local path-based URL for accessing the object.
+        """
         del expiry_seconds
         return f"/signed-url/{quote(object_key)}"
 
@@ -110,7 +120,12 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """Generate an upload URL for an object in local storage."""
+        """
+        Generate an upload URL for an object in local storage.
+
+        Returns:
+            str: A local path-based upload URL with a token.
+        """
         del expiry_seconds
         return f"/upload-url/{quote(object_key)}?token={uuid4()}"
 

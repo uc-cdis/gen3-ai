@@ -29,6 +29,9 @@ async def create_model_metadata(
 
     Returns:
         RepositoryMetadataModel: The created or updated repository metadata.
+
+    Raises:
+        RuntimeError: If metadata cannot be reloaded after creation.
     """
     if tags is None:
         tags = []
@@ -215,7 +218,12 @@ async def list_models(
     tags: list[str] | None = None,
     search: str | None = None,
 ) -> list[RepositoryMetadataModel]:
-    """List repositories, optionally filtered by namespace, tags, or free-text search."""
+    """
+    List repositories, optionally filtered by namespace, tags, or free-text search.
+
+    Returns:
+        list[RepositoryMetadataModel]: A list of matching repository metadata models.
+    """
     pool = await get_db_pool()
     clauses = []
     values: list[object] = []

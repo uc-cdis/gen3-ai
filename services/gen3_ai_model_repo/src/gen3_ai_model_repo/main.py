@@ -25,10 +25,9 @@ UNMATCHED_PATH = "<unmatched>"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    WIP
+    Application lifespan context manager.
 
-    Returns:
-        FastAPI: The application, with no routes mounted yet.
+    Handles startup and shutdown of the application.
     """
     logging.info("Starting up Gen3 AI Model Repository Service")
 
@@ -73,6 +72,9 @@ async def initialize_storage():
 def get_app() -> FastAPI:
     """
     Return configured FastAPI app.
+
+    Returns:
+        FastAPI: A fully configured FastAPI application instance.
     """
 
     app = FastAPI(

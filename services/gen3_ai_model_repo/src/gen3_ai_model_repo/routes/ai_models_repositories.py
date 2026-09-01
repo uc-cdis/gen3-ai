@@ -49,6 +49,9 @@ async def list_models_route(
 ) -> list[RepositoryModel]:
     """
     Retrieve all available model repositories.
+
+    Returns:
+        list[RepositoryModel]: A list of all available model repositories.
     """
     repos = await list_models(namespace=namespace, tags=tags, search=search)
     return [
@@ -68,6 +71,12 @@ async def list_models_route(
 async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
     """
     Retrieve repository information, main revision metadata, and tracked files.
+
+    Returns:
+        RepositoryInfoModel: Comprehensive information about the repository.
+
+    Raises:
+        HTTPException: If the repository is not found.
     """
 
     metadata = await get_model_metadata(namespace, repo)
@@ -101,6 +110,12 @@ async def create_repository(
 ) -> RepositoryMetadataModel:
     """
     Create repository metadata for a new repository.
+
+    Returns:
+        RepositoryMetadataModel: The created repository metadata.
+
+    Raises:
+        HTTPException: If the repository already exists or creation fails.
     """
 
     if await db_model_exists(namespace, repo):
@@ -126,7 +141,15 @@ async def update_repository(
     request: RepositoryUpdateRequest,
     # _: None = Depends(verify_authorization),
 ) -> RepositoryMetadataModel:
-    """Update mutable metadata fields for a repository."""
+    """
+    Update mutable metadata fields for a repository.
+
+    Returns:
+        RepositoryMetadataModel: The updated repository metadata.
+
+    Raises:
+        HTTPException: If the repository is not found.
+    """
 
     if not await db_model_exists(namespace, repo):
         raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
@@ -158,6 +181,12 @@ async def update_repository(
 async def delete_model(namespace: str, repo: str, _: None = Depends(verify_authorization)) -> DeleteModelResponse:
     """
     Delete a model repository.
+
+    Returns:
+        DeleteModelResponse: Response indicating successful deletion.
+
+    Raises:
+        HTTPException: If the repository is not found or deletion fails.
     """
     repo_exists_check = await db_model_exists(namespace, repo)
     if not repo_exists_check:
@@ -195,6 +224,12 @@ async def list_model_revisions(
 ) -> RevisionListResponseModel:
     """
     List all revisions of a model repository.
+
+    Returns:
+        RevisionListResponseModel: A list of all revisions for the repository.
+
+    Raises:
+        HTTPException: If the repository is not found.
     """
 
     repo_exists_check = await db_model_exists(namespace, repo)
@@ -232,6 +267,12 @@ async def list_model_revisions(
 async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     """
     Get comprehensive information about a model repository.
+
+    Returns:
+        RepositoryInfoModel: Detailed information about the repository.
+
+    Raises:
+        HTTPException: If the repository or metadata is not found.
     """
     repo_exists_in_db = await db_model_exists(namespace, repo)
     if not repo_exists_in_db:

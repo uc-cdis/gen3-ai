@@ -9,7 +9,12 @@ from gen3_ai_model_repo.database.db import get_db_pool
 
 
 async def model_files_has_s3_key(conn) -> bool:
-    """Check whether the model_files table contains an s3_key column."""
+    """
+    Check whether the model_files table contains an s3_key column.
+
+    Returns:
+        bool: True if the s3_key column exists, False otherwise.
+    """
     stmt = await conn.prepare(
         """
         SELECT 1
@@ -253,7 +258,12 @@ async def delete_file(
     revision_name: str,
     file_path: str,
 ) -> bool:
-    """Delete a file record from a specific revision."""
+    """
+    Delete a file record from a specific revision.
+
+    Returns:
+        bool: True if the file was successfully deleted, False otherwise.
+    """
     pool = await get_db_pool()
     assert pool is not None, "Database pool is not initialized"
     async with pool.acquire() as conn:
@@ -282,7 +292,12 @@ async def delete_files_for_revision(
     model_name: str,
     revision_name: str,
 ) -> bool:
-    """Delete all file records for a revision."""
+    """
+    Delete all file records for a revision.
+
+    Returns:
+        bool: True if files were successfully deleted, False otherwise.
+    """
     pool = await get_db_pool()
     assert pool is not None, "Database pool is not initialized"
     async with pool.acquire() as conn:

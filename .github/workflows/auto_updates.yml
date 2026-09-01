@@ -51,7 +51,7 @@ jobs:
       #
       # IMPORTANT: If you are reading this and `# allow-old-version` is present, try removing it and
       # running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
-      UV_VERSION: '0.12.7'
+      UV_VERSION: '0.12.8'
       JUST_VERSION: '1.58.0'
       DBMATE_VERSION: 'v2.35.1'
       PYTHON_VERSION: '3.13'

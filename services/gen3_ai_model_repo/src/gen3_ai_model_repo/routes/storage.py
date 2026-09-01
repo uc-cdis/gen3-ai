@@ -75,7 +75,12 @@ class StorageDownloadUrlResponse(BaseModel):
 async def verify_storage(
     request: StorageVerifyRequest, _: None = Depends(verify_authorization)
 ) -> StorageVerifyResponse:
-    """Check whether a storage prefix exists and how much data it contains."""
+    """
+    Check whether a storage prefix exists and how much data it contains.
+
+    Returns:
+        StorageVerifyResponse: Response containing existence status, file count, and total size.
+    """
 
     provider = get_storage_provider()
     files = await provider.list_files(request.storage_prefix)
@@ -104,7 +109,12 @@ async def verify_storage(
 async def storage_download_url(
     request: StorageDownloadUrlRequest, _: None = Depends(verify_authorization)
 ) -> StorageDownloadUrlResponse:
-    """Create a pre-signed URL for downloading a stored object."""
+    """
+    Create a pre-signed URL for downloading a stored object.
+
+    Returns:
+        StorageDownloadUrlResponse: Response containing the presigned download URL.
+    """
 
     provider = get_storage_provider()
     return StorageDownloadUrlResponse(presigned_url=await provider.generate_signed_url(request.object_key))
