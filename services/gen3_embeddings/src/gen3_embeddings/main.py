@@ -10,7 +10,7 @@ from gen3authz.client.arborist.async_client import ArboristClient
 
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
-from gen3_embeddings.database.db import close_pool, get_pool
+from gen3_embeddings.database.db import create_pool
 from gen3_embeddings.error_handlers import register_error_handlers
 from gen3_embeddings.limits import RequestSizeLimitMiddleware
 from gen3_embeddings.routes.basic import basic_router
@@ -46,20 +46,27 @@ async def lifespan(app: FastAPI):
         Exception: If the database is unreachable, the database role can bypass row-level
             security, or the policy engine is unhealthy.
     """
-    # Startup logic
-    await check_db_connection()
+    # Startup logic. The pool is created here and only here, so every request path reads the
+    # one on the app state instead of racing to build its own.
+    app.state.db_pool = await create_pool()
 
     logging.debug(f"Initializing Arborist ({config.ARBORIST_URL}) client for authorization...")
     app.state.arborist_client = ArboristClient(
         arborist_base_url=config.ARBORIST_URL,
     )
-    if not config.DEBUG_SKIP_AUTH:
-        await check_arborist_is_healthy(app)
 
     try:
+        await check_db_connection(app.state.db_pool)
+
+        if not config.DEBUG_SKIP_AUTH:
+            await check_arborist_is_healthy(app)
+
         yield
     finally:
-        await close_pool()
+        # Also runs when a startup check raised, so a failed startup does not leak the pool's
+        # connections.
+        await app.state.db_pool.close()
+        app.state.db_pool = None
 
 
 async def check_arborist_is_healthy(app):
@@ -147,7 +154,7 @@ async def check_rls_is_enabled(conn):
     raise Exception(f"REQUIRED row-level security is not in effect ({detail}). Aborting...")
 
 
-async def check_db_connection():
+async def check_db_connection(pool):
     """
     Simple check to ensure we can talk to the db (asyncpg pool test),
     ensure we are NOT using a superuser or bypassrls role, and ensure
@@ -156,10 +163,12 @@ async def check_db_connection():
     When DEBUG_SKIP_AUTH is True, we skip enforcing those checks, but
     emit a warning if the DB user cannot bypass RLS (i.e., is neither
     SUPERUSER nor has BYPASSRLS).
+
+    Args:
+        pool: The pool created for this app, whose lifetime the caller owns.
     """
     try:
         logging.debug("Startup database connection test initiating. Attempting a simple query...")
-        pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute("SELECT 1;")
 

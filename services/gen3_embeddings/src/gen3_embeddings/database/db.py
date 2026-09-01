@@ -23,8 +23,10 @@ DETAILS
 
 What do we do in this file?
 
-- We create an asyncpg connection pool as a module-level global
-    - The pool is initialized once (on demand) using the DB URL from config
+- We provide a factory for an asyncpg connection pool, but hold no pool ourselves
+    - `create_pool()` builds one from the DB URL in config. The app's lifespan handler calls
+      it once at startup and keeps the result on `app.state.db_pool`, mirroring how the
+      Arborist client is held, so the pool's lifetime is the app's rather than the module's
 
 - We define lightweight dataclasses for Collections and Embeddings
     - These mirror rows from the database and provide `.from_record()` helpers
@@ -110,12 +112,14 @@ from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
-_pool: asyncpg.Pool | None = None
 
-
-async def get_pool():
+async def create_pool() -> asyncpg.Pool:
     """
-    Gets the pool of connections.
+    Create the pool of connections.
+
+    Called once per app, from the lifespan handler, which owns the returned pool and holds it
+    on `app.state.db_pool`. Nothing here is cached: a second call builds a second pool, so
+    request paths must read the one on the app state rather than calling this.
 
     We have a special initialization to support pgvector columns efficiently.
 
@@ -128,31 +132,19 @@ async def get_pool():
 
     Without this, asyncpg defaults to treating it like a string - which is incredibly
     inefficient b/c that's not how it's stored.
-    """
-    global _pool
-    if _pool is None:
-        logging.info(
-            "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
-        )
-        _pool = await asyncpg.create_pool(
-            str(config.DB_CONNECTION_STRING),
-            min_size=config.PGPOOL_MIN_SIZE,
-            max_size=config.PGPOOL_MAX_SIZE,
-            init=register_vector,
-        )
-    return _pool
 
-
-async def close_pool() -> None:
+    Returns:
+        asyncpg.Pool: A new pool, which the caller is responsible for closing.
     """
-    Close the global connection pool and reset it.
-
-    Safe to call when the pool was never created.
-    """
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+    logging.info(
+        "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
+    )
+    return await asyncpg.create_pool(
+        str(config.DB_CONNECTION_STRING),
+        min_size=config.PGPOOL_MIN_SIZE,
+        max_size=config.PGPOOL_MAX_SIZE,
+        init=register_vector,
+    )
 
 
 # Postgres reports a policy violation and a missing table GRANT identically: both are

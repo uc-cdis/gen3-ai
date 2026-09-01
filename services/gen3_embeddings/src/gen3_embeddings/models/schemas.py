@@ -166,13 +166,10 @@ class EmbeddingInfo(BaseModel):
 class SingleEmbeddingResult(BaseModel):
     """One embedding returned as a JSON array of floats."""
 
-    vector: list[float]  # TODO: try to switch to Vector / HalfVector
+    vector: list[float]
     input_index: int | None = None
     embedding_id: UUID
     info: EmbeddingInfo | None = None
-
-    # this is to support Vector / HalfVector
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SingleEmbeddingResultBinary(BaseModel):

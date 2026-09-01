@@ -190,27 +190,20 @@ def app(test_database, monkeypatch):
     """
     Build a fresh FastAPI app wired to the test database, with DEBUG_SKIP_AUTH enabled.
 
+    The app owns its own pool, created and closed by its lifespan, so there is nothing to
+    tear down here. Tests that need a live pool must enter the app's lifespan -- which the
+    `client` fixture does via `with TestClient(app)`.
+
     Yields:
-        FastAPI: The app instance; its connection pool is closed on teardown.
+        FastAPI: The app instance.
     """
     from gen3_embeddings import config
-    from gen3_embeddings.database import db as db_module
     from gen3_embeddings.main import get_app
 
     monkeypatch.setattr(config, "DB_CONNECTION_STRING", test_database["app_dsn"])
     monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", True)
 
-    db_module._pool = None
-
-    app = get_app()
-    yield app
-
-    async def _close_pool():
-        if db_module._pool is not None:
-            await db_module._pool.close()
-            db_module._pool = None
-
-    asyncio.run(_close_pool())
+    return get_app()
 
 
 @pytest.fixture

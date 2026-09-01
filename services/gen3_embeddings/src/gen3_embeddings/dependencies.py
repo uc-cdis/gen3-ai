@@ -69,6 +69,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+import asyncpg
 from fastapi import Request
 
 from common.auth import authorize_request, get_allowed_authz_for_request
@@ -77,11 +78,35 @@ from gen3_embeddings.auth import (
     get_allowed_collection_names_from_authz,
     get_authz_resource_path_from_collection_name,
 )
-from gen3_embeddings.database.db import DataAccessLayer, get_pool
+from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.params import normalized_collection_name
 
 AuthzAction = Literal["read", "create", "update", "delete"]
 """The logical actions this service authorizes. These are the Arborist access methods."""
+
+
+def db_pool_from_request(request: Request) -> asyncpg.Pool:
+    """
+    Return the connection pool built at startup and held on the app state.
+
+    Deliberately does not fall back to creating one. A lazily created pool would be built
+    per-event-loop-race rather than once, and would silently paper over an app whose lifespan
+    never ran, which is also an app that never verified row-level security is in effect.
+
+    Args:
+        request (Request): The incoming request.
+
+    Returns:
+        asyncpg.Pool: The pool from `app.state`.
+
+    Raises:
+        Exception: If the app has no pool, meaning the lifespan handler did not run.
+    """
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise Exception("No database pool on app state. The application lifespan did not run.")
+
+    return pool
 
 
 @dataclass(frozen=True)
@@ -195,9 +220,8 @@ class AuthzDependency:
 
         allowed_collection_names = get_allowed_collection_names_from_authz(allowed_authz)
 
-        pool = await get_pool()
         dal = DataAccessLayer(
-            pool,
+            db_pool_from_request(request),
             allowed_authz=allowed_authz,
             allowed_collection_names=allowed_collection_names,
         )

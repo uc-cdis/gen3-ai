@@ -110,11 +110,11 @@ async def test_check_db_connection_runs_the_rls_check(test_database, monkeypatch
 
     monkeypatch.setattr(main_module, "check_rls_is_enabled", _record)
 
-    monkeypatch.setattr(db_module, "_pool", None)
+    pool = await db_module.create_pool()
     try:
-        await main_module.check_db_connection()
+        await main_module.check_db_connection(pool)
     finally:
-        await db_module.close_pool()
+        await pool.close()
 
     assert called, "check_db_connection did not invoke check_rls_is_enabled"
 
