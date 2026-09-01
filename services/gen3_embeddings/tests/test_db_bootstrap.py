@@ -53,7 +53,9 @@ async def test_tables_exist(test_database):
 
 @pytest.mark.asyncio
 async def test_rls_enabled_and_policies_exist(test_database):
-    """Row-level security is enabled on both embedding tables and the expected authz policies are present."""
+    """RLS is enabled on every table we own and the expected authz policies are present."""
+    protected = ("embeddings_vector", "embeddings_halfvec", "collections")
+
     conn = await asyncpg.connect(test_database["app_dsn"])
     try:
         rows = await conn.fetch(
@@ -63,23 +65,25 @@ async def test_rls_enabled_and_policies_exist(test_database):
             JOIN pg_class ON pg_class.relname = pg_tables.tablename
             JOIN pg_namespace ns ON ns.oid = pg_class.relnamespace
             WHERE ns.nspname = 'public'
-              AND tablename IN ('embeddings_vector', 'embeddings_halfvec')
-            """
+              AND tablename = ANY($1::text[])
+            """,
+            list(protected),
         )
         by_table = {r["tablename"]: r["rowsecurity"] for r in rows}
-        assert by_table["embeddings_vector"] is True
-        assert by_table["embeddings_halfvec"] is True
+        assert by_table == dict.fromkeys(protected, True)
 
         policy_rows = await conn.fetch(
             """
             SELECT tablename, policyname
             FROM pg_policies
             WHERE schemaname = 'public'
-              AND tablename IN ('embeddings_vector', 'embeddings_halfvec')
-            """
+              AND tablename = ANY($1::text[])
+            """,
+            list(protected),
         )
         policies = {(r["tablename"], r["policyname"]) for r in policy_rows}
         assert ("embeddings_vector", "authz_policy_vector") in policies
         assert ("embeddings_halfvec", "authz_policy_halfvec") in policies
+        assert ("collections", "authz_policy_collections") in policies
     finally:
         await conn.close()

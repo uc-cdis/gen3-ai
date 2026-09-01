@@ -45,16 +45,23 @@ What do we do in this file?
       because resolving authz requires a network call to the Gen3 policy engine and this
       layer should only ever talk to the database
 
-- We implement Row Level Security (RLS) integration for embeddings tables
-    - Before each logical operation on embeddings, `_with_rls()` sets a
-      per-transaction PostgreSQL parameter `app.allowed_authz` using:
+- We implement Row Level Security (RLS) integration for every table we own
+    - Before each logical operation, `_with_rls()` sets two per-transaction
+      PostgreSQL parameters:
           SELECT set_config('app.allowed_authz', $1, true);
+          SELECT set_config('app.allowed_collection_names', $2, true);
       where `$1` is a text representation of the user's allowed authz resources
+      and `$2` is those same grants reduced to collection names
     - Because `set_config(..., true)` uses a local/transaction-scoped setting,
       each request runs with its own authz context even when using a pooled
       connection
     - The embeddings tables (e.g., `embeddings_vector`, `embeddings_halfvec`)
       define RLS policies that consult `current_setting('app.allowed_authz', true)`
+      and compare it to each row's `authz` column
+    - `collections` has no `authz` column, because a collection's authz identity IS
+      its name: the resource path is derived from it by convention. So its policy
+      consults `current_setting('app.allowed_collection_names', true)` and compares
+      it to `collection_name`
 
 - We support multiple vector types as isolated domains
     - Collections store a `vector_type` (e.g., 'vector', 'halfvec')
@@ -66,11 +73,14 @@ What do we do in this file?
       a uniform interface with configurable distance metrics, min/max thresholds,
       and filters on metadata
 
-- We filter collections by an explicitly supplied set of names
-    - Collections themselves do not have RLS or authz tags stored in the table
-    - So collection methods take an `allowed_collection_names` argument, resolved by the
-      route layer. This layer filters by that set but never decides what belongs in it;
-      an empty set means "no collections", which is fail-closed
+- We carry the caller's authz context on the DAL instance, not on each call
+    - `allowed_authz` and `allowed_collection_names` are constructor arguments, resolved
+      once per request by `gen3_embeddings.dependencies`. This layer hands them to Postgres
+      but never decides what belongs in them; empty means "nothing", which is fail-closed
+    - Some methods additionally short-circuit in Python on the same set before issuing a
+      query. Postgres is the enforcement point; those checks only save a round trip, or
+      turn "not authorized" into a specific error rather than an empty result. The two
+      cannot disagree, because both read the same field
 """
 
 from dataclasses import dataclass
@@ -78,7 +88,7 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
-from asyncpg.exceptions import UniqueViolationError
+from asyncpg.exceptions import InsufficientPrivilegeError, UniqueViolationError
 from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
@@ -93,6 +103,7 @@ from gen3_embeddings.database.errors import (
     EmbeddingWriteInconsistencyError,
     InvalidCollectionNameError,
     MetadataLengthMismatchError,
+    RowLevelSecurityDeniedError,
 )
 from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
@@ -142,6 +153,42 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
+
+
+# Postgres reports a policy violation and a missing table GRANT identically: both are
+# SQLSTATE 42501 (asyncpg's InsufficientPrivilegeError), and neither populates `table_name`
+# or any other distinguishing field. So the message text is the only discriminator, and it
+# has to be, because the two mean opposite things -- one is the caller's fault, the other is
+# a broken deployment.
+_RLS_VIOLATION_TEXT = "violates row-level security policy"
+
+
+def _rls_denial_or_reraise(exc: InsufficientPrivilegeError) -> Exception:
+    """
+    Classify an insufficient-privilege error as a caller denial or a deployment fault.
+
+    Args:
+        exc (InsufficientPrivilegeError): The error Postgres raised.
+
+    Returns:
+        Exception: A `RowLevelSecurityDeniedError` to raise in place of `exc`, when a policy
+        rejected the row the caller asked to write.
+
+    Raises:
+        InsufficientPrivilegeError: Re-raises `exc` unchanged for anything else, most
+            importantly `permission denied for table ...` -- a missing GRANT is a broken
+            deployment and must stay a 500 rather than being reported as the caller's fault.
+    """
+    # `str(exc)` rather than `exc.message`: asyncpg declares `message` on PostgresMessage but
+    # only populates it for server-raised errors, so it is None for a locally constructed one
+    # and is untyped either way. For server errors the two are identical strings.
+    if _RLS_VIOLATION_TEXT not in str(exc):
+        raise exc
+
+    return RowLevelSecurityDeniedError(
+        "Not authorized to store a row under the requested authz. The authz value must be a "
+        "resource you hold this action on."
+    )
 
 
 @dataclass(frozen=True)
@@ -303,51 +350,87 @@ class DataAccessLayer:
     """
     Database interface for collections and embeddings, scoped to one caller's authz.
 
-    Each instance carries the authz resources the caller may act on for the current
-    request, which embedding operations hand to Postgres row-level security via `_with_rls`.
-    The `collections` table has no RLS policy, so collection methods instead filter by an
-    `allowed_collection_names` set that the route layer resolves and passes in.
+    Each instance carries the authz context the caller holds for the current request, in the
+    two forms the database's policies key on: `allowed_authz` for the embeddings tables,
+    whose rows carry an `authz` column, and `allowed_collection_names` for `collections`,
+    whose rows are identified by name. Both are resolved by
+    `gen3_embeddings.dependencies` and simply handed to Postgres by `_with_rls`; nothing in
+    this class interprets or extends them.
     """
 
-    def __init__(self, pool: asyncpg.Pool, allowed_authz: list[str] | None = None):
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        allowed_authz: list[str] | None = None,
+        allowed_collection_names: set[str] | None = None,
+    ):
         """
-        Bind the DAL to a connection pool and the caller's allowed authz resources.
+        Bind the DAL to a connection pool and the caller's authz context.
 
         Args:
             pool (asyncpg.Pool): Shared connection pool.
             allowed_authz (list[str] | None): Authz resource paths the caller may act on.
                 Omitted or empty means no resources are allowed, which is a valid
                 fail-closed state rather than "allow everything".
+            allowed_collection_names (set[str] | None): The same grants reduced to
+                collection names. Omitted or empty means no collections, also fail-closed.
         """
         self.pool = pool
-        # Empty list means "no resources allowed", which is valid for RLS
+        # Empty means "nothing allowed", which is valid (and safe) for RLS
         self.allowed_authz = allowed_authz or []
+        self.allowed_collection_names = allowed_collection_names or set()
 
     async def _with_rls(self, fn, *args, **kwargs):
         """
-        Run a DB operation with RLS (row level security) configured
-        via the provided `allowed_authz` values.
+        Run a DB operation inside a transaction carrying the caller's RLS context.
 
-        The caller (route layer) is responsible for:
-        - determining the allowed_authz list from the user's authz mapping.
+        Both settings are written for every operation regardless of which tables `fn`
+        touches. Setting only the one a query "needs" would mean a later query added to the
+        same operation, or a policy added to another table, silently ran with a setting that
+        had never been set. Writing both makes the transaction's authz context complete.
+
+        `is_local=true` scopes them to this transaction, so a pooled connection cannot carry
+        one caller's context into another caller's query.
+
+        Args:
+            fn: Coroutine function taking an open connection as its first argument.
+            *args: Passed through to `fn`.
+            **kwargs: Passed through to `fn`.
+
+        Returns:
+            Whatever `fn` returns.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # the true value means is_local is set to true, the new value will only apply during the current transaction.
-                await conn.execute("SELECT set_config('app.allowed_authz', $1::text[]::text, true)", self.allowed_authz)
-                return await fn(conn, *args, **kwargs)
+                await conn.execute(
+                    """
+                    SELECT
+                        set_config('app.allowed_authz', $1::text[]::text, true),
+                        set_config('app.allowed_collection_names', $2::text[]::text, true)
+                    """,
+                    self.allowed_authz,
+                    list(self.allowed_collection_names),
+                )
+                try:
+                    return await fn(conn, *args, **kwargs)
+                except InsufficientPrivilegeError as exc:
+                    raise _rls_denial_or_reraise(exc) from exc
 
     async def create_collection(
         self,
         collection_name: str,
         description: str | None,
         dimensions: int,
-        allowed_collection_names: set[str],
         ai_model_name: str | None = None,
         vector_type: VectorType = VectorType.vector,
     ) -> Collection:
         """
         Create a collection, if the caller is allowed to use that name.
+
+        The name check here is what turns "not authorized" into a specific 403 rather than
+        the bare `InsufficientPrivilegeError` the table's RLS WITH CHECK would raise. The
+        policy still applies underneath, so removing this check would change the error, not
+        the outcome.
 
         Args:
             collection_name (str): Name of the collection to create.
@@ -364,10 +447,10 @@ class DataAccessLayer:
             CollectionAlreadyExistsError: If the name is already taken.
             CollectionCreateFailedError: If the insert returned no row.
         """
-        if collection_name not in allowed_collection_names:
+        if collection_name not in self.allowed_collection_names:
             raise CollectionNameNotAllowedError(f"Not authorized to create collection with name {collection_name}")
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             try:
                 stmt = await conn.prepare(
                     """
@@ -384,9 +467,9 @@ class DataAccessLayer:
                 raise CollectionCreateFailedError("Failed to create collection")
             return Collection.from_record(row)
 
-    async def get_collection_by_name(
-        self, collection_name: str, allowed_collection_names: set[str]
-    ) -> Collection | None:
+        return await self._with_rls(_query)
+
+    async def get_collection_by_name(self, collection_name: str) -> Collection | None:
         """
         Look up a collection by name, if the caller is allowed to see it.
 
@@ -394,10 +477,9 @@ class DataAccessLayer:
             collection_name (str): Name of the collection; normalized before lookup.
 
         Returns:
-            Collection | None: The collection, or None if it does not exist **or** the
-            caller is not authorized for it. The two cases are deliberately
-            indistinguishable so callers cannot probe for collection names; callers
-            typically surface this as a 404.
+            Collection | None: The collection, or None if it does not exist **or** RLS hid
+            it from this caller. The two cases are deliberately indistinguishable so callers
+            cannot probe for collection names; callers typically surface this as a 404.
 
         Raises:
             InvalidCollectionNameError: If `collection_name` is not a valid collection name.
@@ -407,15 +489,14 @@ class DataAccessLayer:
         except ValueError as exc:
             raise InvalidCollectionNameError(str(exc)) from exc
 
-        if collection_name not in allowed_collection_names:
-            return None
-
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
             row = await stmt.fetchrow(collection_name)
             return Collection.from_record(row) if row else None
 
-    async def get_collection_by_id(self, collection_id: int, allowed_collection_names: set[str]) -> Collection | None:
+        return await self._with_rls(_query)
+
+    async def get_collection_by_id(self, collection_id: int) -> Collection | None:
         """
         Look up a collection by primary key, if the caller is allowed to see it.
 
@@ -423,26 +504,26 @@ class DataAccessLayer:
             collection_id (int): Primary key of the collection.
 
         Returns:
-            Collection | None: The collection, or None if it does not exist **or** the
-            caller is not authorized for it.
+            Collection | None: The collection, or None if it does not exist **or** RLS hid
+            it from this caller.
         """
-        if not allowed_collection_names:
-            return None
-        async with self.pool.acquire() as conn:
+
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = $1::bigint")
             row = await stmt.fetchrow(collection_id)
-            if row and row.collection_name in allowed_collection_names:
-                return Collection.from_record(row)
-            else:
-                return None
+            return Collection.from_record(row) if row else None
 
-    async def update_collection(
-        self, collection_name: str, description: str | None, allowed_collection_names: set[str]
-    ) -> Collection | None:
+        return await self._with_rls(_query)
+
+    async def update_collection(self, collection_name: str, description: str | None) -> Collection | None:
         """
         Update a collection's mutable fields, if the caller is allowed to.
 
         Passing `description=None` updates nothing and simply returns the current row.
+
+        `collection_name` is only ever a WHERE predicate here, never something this method
+        assigns: the name is what the table's RLS policy keys on, so renaming a collection
+        would move it to a different authz resource. There is no API path to do that.
 
         Args:
             collection_name (str): Name of the collection to update.
@@ -450,13 +531,10 @@ class DataAccessLayer:
 
         Returns:
             Collection | None: The collection after the update, or None if it does not
-            exist **or** the caller is not authorized for it.
+            exist **or** RLS hid it from this caller.
         """
-        if collection_name not in allowed_collection_names:
-            return None
-
         set_parts = []
-        params = [collection_name]
+        params: list[Any] = [collection_name]
         param_idx = 2
 
         if description is not None:
@@ -464,7 +542,7 @@ class DataAccessLayer:
             params.append(description)
             param_idx += 1
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             if not set_parts:
                 # nothing to update
                 stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
@@ -484,35 +562,46 @@ class DataAccessLayer:
             row = await stmt.fetchrow(*params)
             return Collection.from_record(row) if row else None
 
-    async def delete_collection(self, collection_name: str, allowed_collection_names: set[str]) -> bool:
+        return await self._with_rls(_query)
+
+    async def delete_collection(self, collection_name: str) -> bool:
         """
         Delete a collection and, by cascade, every embedding in it.
+
+        The cascade is a referential-integrity action, which Postgres runs without applying
+        RLS. So deleting a collection removes every embedding in it, including rows the
+        caller could not have selected under its own `app.allowed_authz`. That is the point
+        of the collection-level grant, and it is why `delete` on a collection is a
+        meaningfully broader permission than `delete` on its embeddings.
 
         Args:
             collection_name (str): Name of the collection to delete.
 
         Returns:
-            bool: True only if a row was actually deleted. False if the caller is not
-            authorized for this collection, or if no collection by that name existed.
+            bool: True only if a row was actually deleted. False if RLS hid the collection
+            from this caller, or if no collection by that name existed.
         """
-        if collection_name not in allowed_collection_names:
-            return False
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             result = await conn.execute(
                 "DELETE FROM collections WHERE collection_name = $1::text",
                 collection_name,
             )
             return affected_row_count(result) > 0
 
+        return await self._with_rls(_query)
+
     async def list_collections(
         self,
-        allowed_collection_names: set[str],
         offset: int = 0,
         limit: int = 100,
     ) -> list[Collection]:
         """
         List the collections the caller is authorized for.
+
+        RLS restricts the rows, so this is a plain paged SELECT. The name predicate is gone
+        from the SQL: it would duplicate the policy, and a `WHERE collection_name = ANY(...)`
+        that disagreed with the policy would be a second, invisible authorization rule.
 
         Args:
             offset (int): Number of rows to skip.
@@ -526,23 +615,24 @@ class DataAccessLayer:
             wants every collection and needs to know whether it got them all can ask for
             one more than its own ceiling and check whether that extra row came back.
         """
-        # If no allowed names, return empty result
-        if not allowed_collection_names:
+        # nothing can be visible, so skip the round trip
+        if not self.allowed_collection_names:
             return []
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare(
                 """
                 SELECT *
                 FROM collections
-                WHERE collection_name = ANY($1::text[])
                 ORDER BY collection_name
-                LIMIT $3::int
-                OFFSET $2::int
+                LIMIT $2::int
+                OFFSET $1::int
                 """
             )
-            rows = await stmt.fetch(list(allowed_collection_names), offset, limit)
+            rows = await stmt.fetch(offset, limit)
             return [Collection.from_record(r) for r in rows]
+
+        return await self._with_rls(_query)
 
     async def create_embeddings_bulk(
         self,
@@ -984,11 +1074,12 @@ class DataAccessLayer:
 
         return await self._with_rls(_query)
 
-    async def get_collection_by_id_bulk(
-        self, collection_ids: list[int], allowed_collection_names: set[str]
-    ) -> list[Collection]:
+    async def get_collection_by_id_bulk(self, collection_ids: list[int]) -> list[Collection]:
         """
         Fetch several collections by primary key, keeping only those the caller may see.
+
+        The post-fetch filter this used to apply is now the table's RLS policy, so
+        unauthorized ids simply return no row.
 
         Args:
             collection_ids (list[int]): Primary keys to look up.
@@ -998,15 +1089,16 @@ class DataAccessLayer:
             shorter than `collection_ids`, and empty if the caller has no allowed
             collections.
         """
-        # If user has no allowed collection names, return empty
-        if not allowed_collection_names:
+        # nothing can be visible, so skip the round trip
+        if not self.allowed_collection_names:
             return []
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = ANY($1::bigint[])")
             rows = await stmt.fetch(collection_ids)
-            filtered_rows = [row for row in rows if row["collection_name"] in allowed_collection_names]
-            return [Collection.from_record(r) for r in filtered_rows]
+            return [Collection.from_record(r) for r in rows]
+
+        return await self._with_rls(_query)
 
     # -------- Search --------
 

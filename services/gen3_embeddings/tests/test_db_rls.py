@@ -151,12 +151,14 @@ async def test_rls_with_check_rejects_insert_outside_allowed_authz(test_database
 @pytest.mark.asyncio
 async def test_rls_is_forced_so_table_owners_cannot_bypass_it(test_database):
     """
-    Both embedding tables have RLS FORCEd.
+    Every table we own has RLS FORCEd.
 
     Without FORCE, whichever role owns these tables bypasses every policy silently. The
     service's startup check rejects SUPERUSER and BYPASSRLS but does not check ownership,
     so FORCE is what makes RLS hold if the app ever connects as the owner.
     """
+    protected = (*EMBEDDING_TABLES, "collections")
+
     conn = await asyncpg.connect(test_database["app_dsn"])
     try:
         rows = await conn.fetch(
@@ -166,9 +168,160 @@ async def test_rls_is_forced_so_table_owners_cannot_bypass_it(test_database):
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])
             """,
-            list(EMBEDDING_TABLES),
+            list(protected),
         )
         forced = {r["relname"]: r["relforcerowsecurity"] for r in rows}
-        assert forced == {"embeddings_vector": True, "embeddings_halfvec": True}
+        assert forced == dict.fromkeys(protected, True)
     finally:
         await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# collections
+#
+# `collections` has no `authz` column: a collection's authz identity is its name, so its
+# policy keys on `collection_name` against `app.allowed_collection_names`. These mirror the
+# embeddings cases above, because the failure modes are the same ones.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_collections_rls_scopes_visible_rows_to_allowed_names(test_database):
+    """With one collection name set, only that collection is visible."""
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        await conn.execute("SELECT set_config('app.allowed_collection_names', $1::text[]::text, false)", ["docs"])
+        visible = await conn.fetch("SELECT collection_name FROM collections ORDER BY collection_name")
+        assert [r["collection_name"] for r in visible] == ["docs"]
+
+        await conn.execute(
+            "SELECT set_config('app.allowed_collection_names', $1::text[]::text, false)", ["docs", "images"]
+        )
+        widened = await conn.fetch("SELECT collection_name FROM collections ORDER BY collection_name")
+        assert [r["collection_name"] for r in widened] == ["docs", "images"]
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_collections_rls_denies_all_rows_when_names_never_set(test_database):
+    """A connection that never sets the collection-name setting sees nothing."""
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        assert await conn.fetchval("SELECT count(*) FROM collections") == 0
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_collections_rls_fails_closed_after_transaction_local_setting_reverts(test_database):
+    """
+    Reusing a pooled connection after an RLS-scoped transaction denies rather than errors.
+
+    Same trap as the embeddings policies: a transaction-local setting reverts to the empty
+    string, and `''::text[]` is a `malformed array literal` error, not an empty array.
+    """
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.allowed_collection_names', $1::text[]::text, true)", ["docs"])
+            assert await conn.fetchval("SELECT count(*) FROM collections") == 1
+
+        assert await conn.fetchval("SELECT count(*) FROM collections") == 0
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_collections_rls_with_check_rejects_insert_of_unallowed_name(test_database):
+    """WITH CHECK blocks creating a collection under a name the caller does not hold."""
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        await conn.execute("SELECT set_config('app.allowed_collection_names', $1::text[]::text, false)", ["mine"])
+
+        insert = "INSERT INTO collections (collection_name, dimensions, vector_type) VALUES ($1, 3, 'vector')"
+
+        with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+            await conn.execute(insert, "not_mine")
+
+        await conn.execute(insert, "mine")
+        assert await conn.fetchval("SELECT count(*) FROM collections") == 1
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_embedding_insert_works_while_its_collection_is_hidden(test_database):
+    """
+    The foreign key to `collections` does not require the collection to be visible.
+
+    Postgres runs referential integrity checks without applying row security, so an
+    embedding write only needs `app.allowed_authz`. Pinned because the opposite would make
+    every embedding write depend on the collections policy too, and the failure would look
+    like a spurious foreign key violation.
+    """
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        collection_id = await asyncpg.connect(test_database["admin_dsn"])
+        try:
+            col_id = await collection_id.fetchval("SELECT min(id) FROM collections")
+        finally:
+            await collection_id.close()
+
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.allowed_authz', $1::text[]::text, true)", [DOCS_AUTHZ])
+            # deliberately leave app.allowed_collection_names unset, hiding every collection
+            assert await conn.fetchval("SELECT count(*) FROM collections") == 0
+
+            await conn.execute(
+                """
+                INSERT INTO embeddings_vector (collection_id, embedding, embedding_hash, authz)
+                VALUES ($1::bigint, '[0,1,0]', gen_random_uuid(), $2)
+                """,
+                col_id,
+                DOCS_AUTHZ,
+            )
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_collection_cascades_past_embeddings_rls(test_database):
+    """
+    Deleting a collection removes embeddings the caller could not have selected.
+
+    The cascade is a referential integrity action, so it is not filtered by the embeddings
+    policy. This is intended -- `delete` on a collection is deliberately broader than
+    `delete` on its embeddings -- but it is surprising enough to pin.
+    """
+    await _seed_two_authz_paths(test_database["admin_dsn"])
+
+    conn = await asyncpg.connect(test_database["app_dsn"])
+    try:
+        async with conn.transaction():
+            # may act on the collection, holds no authz on any embedding in it
+            await conn.execute("SELECT set_config('app.allowed_collection_names', $1::text[]::text, true)", ["docs"])
+            await conn.execute("SELECT set_config('app.allowed_authz', $1::text[]::text, true)", ["/nothing"])
+
+            assert await conn.fetchval("SELECT count(*) FROM embeddings_vector") == 0
+            await conn.execute("DELETE FROM collections WHERE collection_name = 'docs'")
+    finally:
+        await conn.close()
+
+    admin = await asyncpg.connect(test_database["admin_dsn"])
+    try:
+        # the collection had every embedding row, since _seed_two_authz_paths points them all
+        # at the lowest collection id
+        assert await admin.fetchval("SELECT count(*) FROM embeddings_vector") == 0
+    finally:
+        await admin.close()

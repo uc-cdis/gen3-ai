@@ -6,18 +6,14 @@ which is cheaper for large vectors. They are declared `POST` so the UUID list ca
 sent in the request body, but they only read.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from common.fastapi.responses import (
     AUTH_RESPONSES,
     not_found_response,
 )
-from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.database.models import Collection
-from gen3_embeddings.dependencies import (
-    get_allowed_collection_names_for_read_operations,
-    get_data_access_layer_for_read_operations,
-)
+from gen3_embeddings.dependencies import AuthzContext, authz
 from gen3_embeddings.models.helpers import (
     collection_to_model,
     embedding_to_binary_result,
@@ -50,27 +46,25 @@ embeddings_bulk_router = APIRouter()
     responses={**AUTH_RESPONSES},
 )
 async def get_embeddings_bulk_unknown_collections(
-    request: Request,
     embedding_uuids: EmbeddingUUIDs,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
+    # POST, but this only reads. No collection in the path, so RLS is the only filter.
+    ctx: AuthzContext = Depends(authz("read")),
 ) -> EmbeddingResponseBinaryWithCollections:
     """
     Read a selection of embeddings by UUID across any collection.
 
     Args:
-        request (Request): The request object.
         embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
         exclude_info (bool): If True, exclude the 'info' block for each embedding.
-        dal (DataAccessLayer): Data access layer dependency.
+        ctx (AuthzContext): Authorization context for this request.
 
     Returns:
         EmbeddingResponseBinaryWithCollections including collection metadata
         for each embedding.
     """
 
-    embs = await dal.get_embeddings_bulk(
+    embs = await ctx.dal.get_embeddings_bulk(
         embedding_ids=embedding_uuids,
         vector_type=None,
     )
@@ -82,7 +76,7 @@ async def get_embeddings_bulk_unknown_collections(
     collection_ids = list({e.collection_id for e in embs})
     collections: dict[int, Collection] = {}
 
-    col_list = await dal.get_collection_by_id_bulk(collection_ids, allowed_collection_names=allowed_collection_names)
+    col_list = await ctx.dal.get_collection_by_id_bulk(collection_ids)
 
     for col in col_list:
         collections[col.id] = col
@@ -133,37 +127,35 @@ async def get_embeddings_bulk_unknown_collections(
     tags=["Embeddings (Bulk Read)"],
 )
 async def get_embeddings_bulk_from_collection(
-    request: Request,
     collection_name: CollectionName,
     embedding_uuids: EmbeddingUUIDs,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
+    # POST, but this only reads. Declaring the action is what resolved the "how to handle
+    # authz here?" this handler used to carry: the verb no longer decides anything.
+    ctx: AuthzContext = Depends(authz("read")),
 ) -> EmbeddingResponseBinary:
     """
-    TODO: post here but actually reading, how to hanle authz here?
-
     Read a selection of embeddings by UUID from a specific collection.
 
     Args:
-        request (Request): The request object.
         collection_name (str): Name of the collection to read from.
         embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
         exclude_info (bool): If True, exclude the 'info' block for each embedding.
-        dal (DataAccessLayer): Data access layer dependency.
+        ctx (AuthzContext): Authorization context for this request.
 
     Returns:
         EmbeddingResponse containing the embeddings found in the specified collection.
 
     Raises:
-        HTTPException: 404 if the collection is not found.
+        HTTPException: 403 if the caller may not read this collection; 404 if it does not
+            exist.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
 
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    rows = await dal.get_embeddings_bulk_from_collection_ordered(
+    rows = await ctx.dal.get_embeddings_bulk_from_collection_ordered(
         embedding_ids=embedding_uuids,
         collection=collection,
     )

@@ -19,6 +19,29 @@ class CollectionNameNotAllowedError(DataAccessError):
     """The caller may not use this collection name."""
 
 
+class RowLevelSecurityDeniedError(DataAccessError):
+    """
+    A policy's WITH CHECK rejected the row a write tried to produce.
+
+    Only writes reach this, because only writes can fail loudly. A policy has two halves and
+    they behave differently:
+
+    - USING governs visibility for SELECT/UPDATE/DELETE. A row the caller may not see is
+      simply absent -- zero rows, no error -- which is why a denied read surfaces as a 404
+      or an empty list rather than here.
+    - WITH CHECK governs the NEW row on INSERT and UPDATE. This is the only half that
+      raises, and it means the caller asked to store an `authz` value (or a
+      `collection_name`) outside their grants.
+
+    The policy-engine check in the route layer normally rejects that first. This is the
+    backstop for when it cannot: `DEBUG_SKIP_AUTH` skips the check entirely, and the policy
+    engine's `auth_request` and `auth_mapping` answers can disagree.
+
+    Without this translation the asyncpg `InsufficientPrivilegeError` escapes as a 500,
+    reporting a caller's authorization failure as a server fault.
+    """
+
+
 class CollectionAlreadyExistsError(DataAccessError):
     """A collection with this name already exists."""
 

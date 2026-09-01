@@ -53,7 +53,13 @@ DescriptionField = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
 """Free text stored on a collection."""
 
 AuthzField = Annotated[str, Field(max_length=MAX_AUTHZ_LENGTH)]
-"""An authz resource path, which is sent to the policy engine and stored on every row."""
+"""
+An authz resource path, checked against the policy engine and stored on the row.
+
+Any resource path the caller holds the relevant action on, not just a collection's own
+`/vectorstore/collections/{name}`. Length is the only constraint the service imposes; the
+policy engine decides whether the path means anything.
+"""
 
 Metadata = Annotated[dict, AfterValidator(validate_metadata)]
 """Embedding metadata, bounded by serialized size, top-level key count, and nesting depth."""
@@ -276,6 +282,9 @@ class UpdateCollectionBody(BaseModel):
 class UpdateEmbeddingBody(BaseModel):
     """
     Request body for updating an embedding.
+
+    Every field is optional and only supplied ones are written. Setting `authz` moves the
+    embedding to a different resource path, which you must hold `update` on.
     """
 
     embedding: Vector | None = None
@@ -316,7 +325,11 @@ class EmbeddingToCreate(BaseModel):
 class CreateEmbeddingsBody(BaseModel):
     """
     Data for creating embeddings in a collection.
-    authz example: "authz": "/vectorstore/collections/my_collection"
+
+    `authz` is applied to every embedding in the request, and may be any resource path you
+    hold the action on -- e.g. "/programs/my_program/projects/my_project" or
+    "/vectorstore/collections/my_collection". It defaults to the collection's own path when
+    omitted, and a later PUT can change it.
     """
 
     authz: AuthzField | None = None

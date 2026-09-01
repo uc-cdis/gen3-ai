@@ -3,7 +3,7 @@
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette import status
 
 from common.fastapi.responses import (
@@ -12,14 +12,9 @@ from common.fastapi.responses import (
     NO_CONTENT_RESPONSE,
     not_found_response,
 )
-from gen3_embeddings.auth import (
-    authorize_request,
-    get_authz_resource_path_from_collection_name,
-    parse_and_auth_request,
-)
+from gen3_embeddings.auth import get_authz_resource_path_from_collection_name
 from gen3_embeddings.config import DEFAULT_PAGE_SIZE, logging
-from gen3_embeddings.database.db import DataAccessLayer
-from gen3_embeddings.dependencies import get_allowed_collection_names, get_data_access_layer
+from gen3_embeddings.dependencies import AuthzContext, authz
 from gen3_embeddings.models.helpers import (
     embedding_to_result,
     normalize_authz,
@@ -50,23 +45,19 @@ embeddings_router = APIRouter()
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embedding_from_collection(
-    request: Request,
     collection_name: CollectionName,
     embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
     Read a single embedding from a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SingleEmbeddingResult
@@ -74,11 +65,11 @@ async def get_embedding_from_collection(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    emb = await dal.get_embedding_by_collection_and_id(
+    emb = await ctx.dal.get_embedding_by_collection_and_id(
         collection=collection,
         embedding_id=embedding_uuid,
     )
@@ -105,25 +96,21 @@ async def get_embedding_from_collection(
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_embedding_in_collection(
-    request: Request,
     collection_name: CollectionName,
     embedding_uuid: UUID,
     body: UpdateEmbeddingBody,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    ctx: AuthzContext = Depends(authz("update")),
 ):
     """
     Update the embedding vector for a given collection and embedding ID.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
         body: Request body containing the new embedding vector and/or metadata.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SingleEmbeddingResult containing the updated embedding.
@@ -131,7 +118,7 @@ async def update_embedding_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found; 400 if update fails.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -139,24 +126,20 @@ async def update_embedding_in_collection(
     if body.embedding is not None and len(body.embedding) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
-    # If authz is being updated, check update permission on new authz paths
-    authz = normalize_authz(body.authz)
-    if authz is not None:
-        if authz == "":
+    # If authz is being updated, check update permission on the new authz path
+    authz_path = normalize_authz(body.authz)
+    if authz_path is not None:
+        if authz_path == "":
             raise HTTPException(status_code=400, detail="authz cannot be empty when provided")
 
-        await authorize_request(
-            request=request,
-            authz_access_method="update",
-            authz_resources=[authz],
-        )
+        await ctx.require(authz_path)
 
-    emb = await dal.update_embedding(
+    emb = await ctx.dal.update_embedding(
         collection=collection,
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
-        new_authz=authz,
+        new_authz=authz_path,
     )
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
@@ -187,20 +170,17 @@ async def update_embedding_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def put_embeddings_in_collection(
-    request: Request,
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    # An upsert both creates and updates, so both are demanded on the collection. `update`
+    # is the primary action, so it is the one that scopes row-level security.
+    ctx: AuthzContext = Depends(authz("update", also_require=("create",))),
 ):
     """
-    TODO: implementaion for StringArrayInput and ai_model
-
     Create or update one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
@@ -212,12 +192,11 @@ async def put_embeddings_in_collection(
         - the embedding authz paths.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         EmbeddingResponse containing the created embeddings.
@@ -226,8 +205,7 @@ async def put_embeddings_in_collection(
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
 
     """
-
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -237,32 +215,12 @@ async def put_embeddings_in_collection(
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
     embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
-    # 1) Check 'create' and 'update' on collection
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
-    await authorize_request(
-        request=request,
-        authz_access_method="create",
-        authz_resources=[default_collection_authz],
-    )
-    await authorize_request(
-        request=request,
-        authz_access_method="update",
-        authz_resources=[default_collection_authz],
-    )
-
-    # 2) Check 'create' and 'update' on embedding authz paths
+    # The collection path was already checked for both actions by the dependency. A
+    # body-supplied path is a different resource, so it needs the same pair of checks.
     if embedding_authz_path != default_collection_authz:
-        logging.debug(f"authorize_request for `create` and `update` on embedding authz paths {embedding_authz_path}")
-        await authorize_request(
-            request=request,
-            authz_access_method="create",
-            authz_resources=[embedding_authz_path],
-        )
-        await authorize_request(
-            request=request,
-            authz_access_method="update",
-            authz_resources=[embedding_authz_path],
-        )
+        logging.debug(f"authorizing `create` and `update` on embedding authz path {embedding_authz_path}")
+        await ctx.require(embedding_authz_path, action="create")
+        await ctx.require(embedding_authz_path, action="update")
 
     vectors_no_id: list[list[float]] = []
     metadata_list_no_id: list[dict] = []
@@ -296,7 +254,7 @@ async def put_embeddings_in_collection(
 
     updated_from_ids = []
     for i, (emb_id, emb_vec, meta) in enumerate(items_with_id):
-        emb = await dal.update_embedding(
+        emb = await ctx.dal.update_embedding(
             collection=collection,
             embedding_id=emb_id,
             embedding=emb_vec,
@@ -313,7 +271,7 @@ async def put_embeddings_in_collection(
 
     created_or_updated = []
     if vectors_no_id:
-        created_or_updated = await dal.upsert_embeddings_bulk(
+        created_or_updated = await ctx.dal.upsert_embeddings_bulk(
             collection=collection,
             embeddings=vectors_no_id,
             authz=embedding_authz_path,
@@ -362,23 +320,19 @@ async def put_embeddings_in_collection(
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_embedding(
-    request: Request,
     collection_name: CollectionName,
     embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    ctx: AuthzContext = Depends(authz("delete")),
 ):
     """
     Delete an embedding from a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding to delete.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         None on success.
@@ -386,11 +340,11 @@ async def delete_embedding(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    success = await dal.delete_embedding(
+    success = await ctx.dal.delete_embedding(
         collection=collection,
         embedding_id=embedding_uuid,
     )
@@ -415,27 +369,23 @@ async def delete_embedding(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def list_embeddings_in_collection(
-    request: Request,
     collection_name: CollectionName,
     exclude_info: bool = Query(False, alias="exclude_info"),
     page: Page = 1,
     page_size: PageSize = DEFAULT_PAGE_SIZE,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
     List all embeddings within a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         exclude_info: If True, omit the 'info' block in each embedding result.
         page: Page number for pagination (1-based).
         page_size: Number of items per page.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         PaginatedEmbeddingResponse containing all embeddings in the collection.
@@ -443,14 +393,14 @@ async def list_embeddings_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     offset = (page - 1) * page_size
     limit = page_size
 
-    embs = await dal.list_embeddings_in_collection(
+    embs = await ctx.dal.list_embeddings_in_collection(
         collection=collection,
         offset=offset,
         limit=limit,
@@ -498,21 +448,15 @@ async def list_embeddings_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def create_embeddings_in_collection(
-    request: Request,
     collection_name: CollectionName,
     body: CreateEmbeddingsBody,
     ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names),
+    ctx: AuthzContext = Depends(authz("create")),
 ):
     """
-
-    TODO: implementaion for StringArrayInput and ai_model
-
     Create one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
@@ -524,12 +468,11 @@ async def create_embeddings_in_collection(
         - the embedding authz paths.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         EmbeddingResponse containing the created embeddings.
@@ -537,7 +480,7 @@ async def create_embeddings_in_collection(
     Raises:
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -547,22 +490,11 @@ async def create_embeddings_in_collection(
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
     embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
-    # 1) Check create on collection authz
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
-    await authorize_request(
-        request=request,
-        authz_access_method="create",
-        authz_resources=[default_collection_authz],
-    )
-
-    # 2) Check create on embedding authz paths
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
+    # The collection path was already checked by the dependency; a body-supplied path is a
+    # different resource and needs its own check.
     if embedding_authz_path != default_collection_authz:
-        await authorize_request(
-            request=request,
-            authz_access_method="create",
-            authz_resources=[embedding_authz_path],
-        )
+        logging.debug(f"authorizing `create` on embedding authz path {embedding_authz_path}")
+        await ctx.require(embedding_authz_path)
 
     vectors: list[list[float]] = []
     metadata_list: list[dict] = []
@@ -588,7 +520,7 @@ async def create_embeddings_in_collection(
 
     logging.debug(f"Creating embeddings in collection.id: `{collection.id}`...")
 
-    created = await dal.create_embeddings_bulk(
+    created = await ctx.dal.create_embeddings_bulk(
         collection=collection,
         embeddings=vectors,
         authz=embedding_authz_path,

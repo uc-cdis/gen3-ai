@@ -48,6 +48,8 @@ CREATE TABLE public.collections (
     updated_at timestamp with time zone DEFAULT now()
 );
 
+ALTER TABLE ONLY public.collections FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: collections_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -273,6 +275,13 @@ ALTER TABLE ONLY public.embeddings_vector
 
 
 --
+-- Name: collections authz_policy_collections; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY authz_policy_collections ON public.collections USING ((collection_name = ANY (COALESCE((NULLIF(current_setting('app.allowed_collection_names'::text, true), ''::text))::text[], '{}'::text[])))) WITH CHECK ((collection_name = ANY (COALESCE((NULLIF(current_setting('app.allowed_collection_names'::text, true), ''::text))::text[], '{}'::text[]))));
+
+
+--
 -- Name: embeddings_halfvec authz_policy_halfvec; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -285,6 +294,12 @@ CREATE POLICY authz_policy_halfvec ON public.embeddings_halfvec USING ((authz = 
 
 CREATE POLICY authz_policy_vector ON public.embeddings_vector USING ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[])))) WITH CHECK ((authz = ANY (COALESCE((NULLIF(current_setting('app.allowed_authz'::text, true), ''::text))::text[], '{}'::text[]))));
 
+
+--
+-- Name: collections; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.collections ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: embeddings_halfvec; Type: ROW SECURITY; Schema: public; Owner: -
@@ -314,4 +329,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260817150236'),
     ('20260826120000'),
     ('20260826120100'),
-    ('20260826120200');
+    ('20260826120200'),
+    ('20260831120000');

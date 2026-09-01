@@ -106,6 +106,20 @@ docker run --name pgvector \
 
 Create an app user with limited permissions. A superuser can bypass RLS, and the app won't allow a superuser. for example create an app user and load some test data:
 
+> **Note:** `collections`, `embeddings_vector` and `embeddings_halfvec` all have row-level
+> security enabled and FORCEd. Querying them as the app user returns nothing unless the
+> transaction sets the settings the policies read: `app.allowed_collection_names` for
+> `collections`, and `app.allowed_authz` for the embeddings tables. The seed SQL below runs
+> as the admin superuser, which bypasses RLS. To poke around as the app user:
+>
+> ```sql
+> BEGIN;
+> SELECT set_config('app.allowed_collection_names', ARRAY['public']::text[]::text, true);
+> SELECT set_config('app.allowed_authz', ARRAY['/vectorstore/collections/public']::text[]::text, true);
+> SELECT * FROM collections;
+> COMMIT;
+> ```
+
 ```bash
 PGPASSWORD=adminpass psql -h localhost -p 5432 -U adminuser -d gen3embeddings
 ```
@@ -831,6 +845,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 ## TODO
 
 - ai model
+- raw test search
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
 - dimensions limit? create warnings on limitions on indexing for bigger dimension vectors

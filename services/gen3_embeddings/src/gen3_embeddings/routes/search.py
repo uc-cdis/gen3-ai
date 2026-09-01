@@ -1,6 +1,6 @@
 """Routes for vector similarity search within and across collections."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from common.fastapi.responses import (
     AUTH_RESPONSES,
@@ -8,12 +8,8 @@ from common.fastapi.responses import (
     not_found_response,
 )
 from gen3_embeddings.config import MAX_COLLECTIONS_PER_SEARCH, MAX_COLLECTIONS_SEARCHED
-from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.database.models import Collection, Embedding
-from gen3_embeddings.dependencies import (
-    get_allowed_collection_names_for_read_operations,
-    get_data_access_layer_for_read_operations,
-)
+from gen3_embeddings.dependencies import AuthzContext, authz
 from gen3_embeddings.models.helpers import collection_to_model, embedding_to_result
 from gen3_embeddings.models.schemas import (
     SearchRequestBody,
@@ -47,35 +43,31 @@ vectorstore_search_router = APIRouter()
     tags=["Vectorstore Search"],
 )
 async def search_in_collection(
-    request: Request,
     body: SearchRequestBody,
     collection_name: CollectionName,
     ai_model: AiModel = None,
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
+    # POST, but this only reads. The action is declared, so the verb is irrelevant.
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
-    TODO: support for ai_model
-    TODO: raw text search
-
     Perform a vector search within a specific collection.
 
     Args:
-        request: The request object.
         body: SearchRequestBody containing the query vector and parameters.
         collection_name: Name of the collection to search.
         ai_model: Optional model name; not used in this minimal implementation.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SearchResponse containing search hits for this collection.
 
     Raises:
-        HTTPException: 404 if collection is not found; 400 if input is invalid.
+        HTTPException: 403 if the caller may not read this collection; 404 if it does not
+            exist; 400 if input is invalid.
     """
-    collection = await dal.get_collection_by_name(collection_name, allowed_collection_names=allowed_collection_names)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="collection not found")
 
@@ -90,7 +82,7 @@ async def search_in_collection(
     if len(query_vector) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
 
-    rows = await dal.search_embeddings_in_collection(
+    rows = await ctx.dal.search_embeddings_in_collection(
         collection=collection,
         query_vector=query_vector,
         top_k=body.top_k,
@@ -148,22 +140,19 @@ async def search_in_collection(
     tags=["Vectorstore Search"],
 )
 async def search_across_collections(
-    request: Request,
     body: SearchRequestBody,
     collections: RequestedCollectionNames = None,
     ai_model: AiModel = None,
     vector_type: VectorType = Query(VectorType.vector, alias="vector_type"),
     exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-    allowed_collection_names: set[str] = Depends(get_allowed_collection_names_for_read_operations),
+    # No collection in the path, so there is no single resource to check: the caller sees
+    # whatever their `read` grants make visible, which may be nothing.
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
-    TODO: support for ai_model
-
     Perform a vector search across multiple collections.
 
     Args:
-        request: The request object.
         body: SearchRequestBody containing the query vector and parameters.
         collections: Optional collection names to restrict the search to, parsed and bounded
             from the comma-separated query parameter. None means every collection the caller
@@ -171,7 +160,7 @@ async def search_across_collections(
         ai_model: Optional model name; not used in this minimal implementation.
         vector_type: The type of vector (vector or halfvec) to search against.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SearchResponse containing search hits across collections.
@@ -183,7 +172,7 @@ async def search_across_collections(
     if collections is not None:
         collections_list: list[Collection] = []
         for name in collections:
-            col = await dal.get_collection_by_name(name, allowed_collection_names=allowed_collection_names)
+            col = await ctx.dal.get_collection_by_name(name)
             if not col:
                 raise HTTPException(status_code=400, detail=f"Invalid collection or unauthorized: {name}")
             collections_list.append(col)
@@ -192,8 +181,7 @@ async def search_across_collections(
         # the alphabetically-first page as if it were everything. `list_collections` orders
         # by collection_name, so silently taking its default limit here would search the
         # first N collections by name and return a ranking that looks complete.
-        collections_list = await dal.list_collections(
-            allowed_collection_names=allowed_collection_names,
+        collections_list = await ctx.dal.list_collections(
             limit=MAX_COLLECTIONS_SEARCHED + 1,
         )
         if len(collections_list) > MAX_COLLECTIONS_SEARCHED:
@@ -219,7 +207,7 @@ async def search_across_collections(
     if not isinstance(body.input, list) or not all(isinstance(x, (int, float)) for x in body.input):
         raise HTTPException(status_code=400, detail="input must be a numeric vector")
 
-    rows = await dal.search_embeddings_across_collections(
+    rows = await ctx.dal.search_embeddings_across_collections(
         collections=collections_list,
         query_vector=body.input,
         top_k=body.top_k,

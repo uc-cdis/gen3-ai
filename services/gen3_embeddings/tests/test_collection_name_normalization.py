@@ -110,15 +110,15 @@ def test_authz_check_uses_the_normalized_name(client, allow_authz, monkeypatch, 
     """
     The Arborist resource path is built from the normalized name.
 
-    This is what the `CollectionName` annotation uniquely buys: the authorization check runs
-    as a route dependency, before any DAL call, so if the path parameter were still raw then
-    Arborist would be asked about `/vectorstore/collections/DOCS` while the DAL compared
-    against `docs`. Since Arborist is case-sensitive, those two gates would disagree.
+    The `authz` dependency normalizes the path parameter itself, before any DAL call, so if
+    it used the raw value then Arborist would be asked about
+    `/vectorstore/collections/DOCS` while the DAL compared against `docs`. Since Arborist is
+    case-sensitive, those two gates would disagree.
 
     Tests bypass Arborist via DEBUG_SKIP_AUTH, so assert on the resource path that would be
     sent rather than on the response status.
     """
-    from gen3_embeddings import auth as auth_module
+    from gen3_embeddings import dependencies as dependencies_module
 
     allow_authz("docs")
     create = client.post(
@@ -129,10 +129,10 @@ def test_authz_check_uses_the_normalized_name(client, allow_authz, monkeypatch, 
 
     checked_resources: list[list[str]] = []
 
-    async def fake_authorize_request(*, request, authz_access_method, authz_resources):
+    async def fake_authorize_request(*, authz_resources, authz_access_method, request, authz_config):
         checked_resources.append(authz_resources)
 
-    monkeypatch.setattr(auth_module, "authorize_request", fake_authorize_request)
+    monkeypatch.setattr(dependencies_module, "authorize_request", fake_authorize_request)
 
     response = client.get(f"/vectorstore/collections/{requested}")
     assert response.status_code == 200, response.text

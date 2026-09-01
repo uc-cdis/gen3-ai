@@ -1,289 +1,84 @@
-"""Authentication and Gen3 policy-engine (Arborist) authorization for this service."""
+"""
+This service's authz resource convention.
+
+The generic authorization machinery -- token handling, policy-engine calls, authz-mapping
+retrieval, per-request caching, the HTTP-verb-to-CRUD mapping -- lives in `common.auth`.
+What is specific to this service, and therefore lives here, is only:
+
+- `AUTHZ`: the `AuthzConfig` binding this service's Arborist service name, token audience,
+  and ArboristClient to those generic functions.
+- the COLLECTION resource-path convention, in both directions: name to path, and a caller's
+  granted paths back to collection names.
+
+TWO KINDS OF AUTHZ RESOURCE
+---------------------------
+
+The convention in this module applies to COLLECTIONS ONLY. Do not read it as a constraint on
+authz generally, because embeddings work differently and the difference matters:
+
+- A COLLECTION's authz resource is DERIVED and FIXED: it is always
+  `/vectorstore/collections/{collection_name}`, because the table has no authz column and a
+  collection's name is its authz identity. That is why `collections`' RLS policy keys on
+  `collection_name`, and why this module can translate between the two forms at all.
+
+- An EMBEDDING's authz is STORED, ARBITRARY, and MUTABLE. It is whatever string the caller
+  put in the `authz` column: `/programs/foo/projects/bar`, `/open`, anything. It defaults to
+  the containing collection's path when a request does not supply one, but that is only a
+  default, not a rule -- POST and PUT accept any `authz` in the body, and PUT can change an
+  existing embedding's `authz` to a different value later. All the service requires is that
+  the caller holds the relevant action on whatever path they name.
+
+So `get_allowed_collection_names_from_authz` below deliberately narrows a caller's grants to
+the collection-shaped ones, and its result feeds ONLY the `collections` policy. The
+embeddings policy is fed the caller's grants UNNARROWED (see
+`common.auth.get_allowed_authz_from_mapping`, which filters by service and method but never
+by path shape), which is what lets an embedding carry an authz path this service knows
+nothing about.
+
+Routes do not call this module directly. They declare an action with
+`gen3_embeddings.dependencies.authz`, which is the single place those two halves are
+assembled. See the module docstring there for the layering.
+
+NOTE on `ALLOW_ANONYMOUS_ACCESS`: `common.auth.authorize_request` returns early when it is
+set, but `common.auth.get_user_authz_mapping` still requires a token. So enabling it does
+not make this service readable anonymously -- resolving which collections a caller may see
+goes through the mapping, which 401s without a token. `DEBUG_SKIP_AUTH` is the flag that
+actually bypasses this service end to end.
+"""
 
 from collections.abc import Mapping
-from typing import Any
 
-from authutils.token.fastapi import access_token
-from fastapi import HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from gen3authz.client.arborist.async_client import ArboristClient
-from gen3authz.client.arborist.errors import ArboristError
 from starlette.requests import Request
-from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_500_INTERNAL_SERVER_ERROR
 
+from common.auth import AuthzConfig, get_allowed_authz_from_mapping
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.models.helpers import normalize_collection_name
-from gen3_embeddings.params import CollectionName
 
-get_bearer_token = HTTPBearer(auto_error=False)
+# Base path for COLLECTION resources. Not a prefix embedding authz has to sit under: see the
+# module docstring.
+AUTHZ_RESOURCE_BASE = "/vectorstore/collections"
+
+# Audience this service expects in an access token. Pinned rather than derived from the
+# request host, which is what `common.auth` does by default.
+AUTHZ_TOKEN_AUDIENCE = "gen3"
 
 
-async def authorize_request(
-    authz_access_method: str,
-    authz_resources: list[str] | None = None,
-    token: HTTPAuthorizationCredentials | None = None,
-    request: Request | None = None,
-):
+def _arborist_client_from_request(request: Request | None):
     """
-    Authorizes the incoming request based on the provided token and Arborist access policies.
+    Return the ArboristClient built at startup and held on the app state.
+
+    Using the app-state client rather than a module-level one is what makes the configured
+    `ARBORIST_URL` take effect, and lets tests substitute a client.
 
     Args:
-        authz_access_method (str): The Arborist access method to check (default is "access").
-        authz_resources (list[str]): The list of resources to check against
-        token (HTTPAuthorizationCredentials): an authorization token (optional, you can also provide request
-            and this can be parsed from there). this has priority over any token from request.
-        request: The incoming HTTP request. Used to parse tokens from header.
+        request (Request | None): The incoming request.
+
+    Returns:
+        ArboristClient: The client from `app.state`.
 
     Raises:
-        HTTPException: Raised if authorization fails.
-
-    Note:
-        If `DEBUG_SKIP_AUTH` is enabled
-        and no token is provided, the check is also bypassed.
-    """
-    if config.DEBUG_SKIP_AUTH and not token:
-        logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, BYPASSING authorization check")
-        return
-
-    token = await _get_token(token, request)
-
-    # either this was provided or we've tried to get it from the Bearer header
-    if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
-
-    # try to get the ID so the debug log has more information
-    try:
-        user_id = await get_user_id(token, request)
-    except HTTPException as exc:
-        logging.info(f"Unable to determine user_id. Defaulting to `Unknown`. Exc: {exc}")
-        user_id = "Unknown"
-
-    arborist_client = _get_arborist_client(request)
-
-    try:
-        is_authorized = await arborist_client.auth_request(
-            token.credentials,
-            service=config.AUTHZ_SERVICE_NAME,
-            methods=authz_access_method,
-            resources=authz_resources,
-        )
-    except ArboristError as exc:
-        logging.error(
-            f"ArboristError during auth_request: {exc}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Could not verify, parse, and/or validate the provided access token.",
-        ) from exc
-    except Exception as exc:
-        logging.error(exc.detail if hasattr(exc, "detail") else exc, exc_info=True)
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authorization service error while checking access policies.",
-        ) from exc
-
-    if not is_authorized:
-        logging.info(f"user `{user_id}` does not have `{authz_access_method}` access on `{authz_resources}`")
-        raise HTTPException(status_code=HTTP_403_FORBIDDEN)
-
-
-async def get_user_id(token: HTTPAuthorizationCredentials | None = None, request: Request | None = None) -> int | Any:
-    """
-    Retrieves the user ID from the provided token/request
-
-    Args:
-        token (HTTPAuthorizationCredentials): an authorization token (optional, you can also provide request
-            and this can be parsed from there). this has priority over any token from request.
-        request: The incoming HTTP request. Used to parse tokens from header.
-
-    Returns:
-        str: The user's ID.
-
-    Raises:
-        HTTPException: Raised if the token is missing or invalid.
-
-    Note:
-        If `DEBUG_SKIP_AUTH` is enabled and no token is provided, user_id is set to "0".
-    """
-    if config.DEBUG_SKIP_AUTH and not token:
-        logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING user_id = 0")
-        return "0"
-
-    if request:
-        cached = getattr(request.state, "user_id", None)
-        if cached is not None:
-            return cached
-
-    token_claims = await _get_token_claims(token, request)
-    if "sub" not in token_claims:
-        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
-
-    user_id = token_claims["sub"]
-
-    if request:
-        request.state.user_id = user_id
-
-    return user_id
-
-
-async def get_user_authz_mapping(
-    token: HTTPAuthorizationCredentials | None = None, request: Request | None = None
-) -> Mapping:
-    """
-    Retrieve the user authorization mapping from the Gen3 Policy Engine
-
-    In DEBUG_SKIP_AUTH mode and when no token is provided, this function
-    returns an empty mapping instead of performing a call to Gen3 Policy Engine.
-
-    Args:
-        token (HTTPAuthorizationCredentials | None): The HTTP
-            bearer token supplied in the Authorization header
-        request (Request | None): The FastAPI request object, used to
-            get the Gen3 Policy Engine client
-
-    Returns:
-        Mapping: The authorization mapping returned by the Gen3 Policy Engine client,
-        or an empty mapping if DEBUG_SKIP_AUTH is enabled and no token is
-        provided
-    """
-    if config.DEBUG_SKIP_AUTH and not token:
-        logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING no authz mapping")
-        return {}
-
-    if request:
-        cached = getattr(request.state, "user_authz_mapping", None)
-        if cached is not None:
-            return cached
-
-    token = await _get_token(token, request)
-
-    # either this was provided or we've tried to get it from the Bearer header
-    if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
-
-    logging.debug("Got user's token. Using it to get authz mapping...")
-
-    arborist_client = _get_arborist_client(request)
-
-    try:
-        authz_mapping = await arborist_client.auth_mapping(jwt=token.credentials)
-    except ArboristError as exc:
-        logging.error(
-            f"ArboristError while retrieving authz mapping: {exc}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Could not verify, parse, and/or validate the provided access token.",
-        ) from exc
-    except Exception as exc:
-        logging.error(
-            f"Unexpected error while retrieving authz mapping from Arborist: {exc}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authorization service error while retrieving access policies.",
-        ) from exc
-
-    logging.debug(f"Got user's authz mapping: {authz_mapping}")
-
-    if request:
-        request.state.user_authz_mapping = authz_mapping
-
-    return authz_mapping
-
-
-async def _get_token_claims(
-    token: HTTPAuthorizationCredentials | str | None = None,
-    request: Request | None = None,
-) -> dict:
-    """
-    Retrieves and validates token claims from the provided token.
-
-    handler for proccessing token
-
-    Args:
-        token (HTTPAuthorizationCredentials): an authorization token (optional, you can also provide request
-            and this can be parsed from there). this has priority over any token from request.
-        request: The incoming HTTP request. Used to parse tokens from header.
-
-    Returns:
-        dict: The token claims.
-
-    Raises:
-        HTTPException: Raised if the token is missing or invalid.
-    """
-    if request:
-        cached = getattr(request.state, "token_claims", None)
-        if cached is not None:
-            return cached
-
-    token = await _get_token(token, request)
-    # either this was provided or we've tried to get it from the Bearer header
-    if not token:
-        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED)
-
-    audience = "gen3"
-
-    try:
-        # NOTE: token can be None if no Authorization header was provided, we expect
-        #       this to cause a downstream exception since it is invalid
-        logging.debug(f"checking access token for scopes: `user` and `openid` and audience: `{audience}`")
-        g = access_token("user", "openid", audience=audience, purpose="access")
-        token_claims = await g(token)
-    except Exception as exc:
-        logging.error(exc.detail if hasattr(exc, "detail") else exc, exc_info=True)
-        raise HTTPException(
-            HTTP_401_UNAUTHORIZED,
-            "Could not verify, parse, and/or validate the provided access token.",
-        ) from exc
-
-    if request:
-        request.state.token_claims = token_claims
-
-    return token_claims
-
-
-async def _get_token(token: HTTPAuthorizationCredentials | str | None, request: Request | None):
-    """
-    Retrieves the token from the request's Bearer header or if there's no request, returns token
-
-    Args:
-        token (HTTPAuthorizationCredentials): The provided token, if available.
-        request: The incoming HTTP request.
-
-    Returns:
-        The obtained token.
-    """
-    if token:
-        return token
-
-    if request:
-        cached = getattr(request.state, "bearer_token", None)
-        if cached is not None:
-            return cached
-
-        token = await get_bearer_token(request)
-        request.state.bearer_token = token
-        return token
-
-    return token
-
-
-def _get_arborist_client(request: Request | None) -> ArboristClient:
-    """
-    Retrieves the Arborist client from the request's application state.
-
-    This is primary broken out as a separate helper function to ease testing.
-
-    Args:
-        request: The incoming HTTP request containing the application state
-
-    Returns:
-        ArboristClient: The Arborist client instance from the application state
+        Exception: If there is no request to read the app state from.
     """
     if not request:
         raise Exception("Expected a request, got None. Cannot determine Arborist Client from app state from request.")
@@ -291,16 +86,26 @@ def _get_arborist_client(request: Request | None) -> ArboristClient:
     return request.app.state.arborist_client
 
 
+AUTHZ = AuthzConfig(
+    service_name=config.AUTHZ_SERVICE_NAME,
+    audience=AUTHZ_TOKEN_AUDIENCE,
+    arborist_resolver=_arborist_client_from_request,
+)
+
+
 def get_authz_resource_path_from_collection_name(collection_name: str) -> str:
     """
     Build the Arborist resource path for a vector collection.
-    base is hard coded to "/vectorstore/collections"
+
+    Args:
+        collection_name (str): Collection name, or "" for the base resource.
+
+    Returns:
+        str: The resource path.
     """
-    base = "/vectorstore/collections"
     if collection_name == "":
-        return base
-    else:
-        return f"{base}/{collection_name}"
+        return AUTHZ_RESOURCE_BASE
+    return f"{AUTHZ_RESOURCE_BASE}/{collection_name}"
 
 
 def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str]:
@@ -329,17 +134,16 @@ def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str
         set[str]: Canonical collection names the caller may act on. Empty is a valid
         fail-closed result meaning "no collections", not "all collections".
     """
-    base = "/vectorstore/collections"
     allowed: set[str] = set()
 
     for item in allowed_authz:
         if not isinstance(item, str):
             continue
-        if item == base:
+        if item == AUTHZ_RESOURCE_BASE:
             # base resource: may mean "can access all collections", depending on policy
             # for now, we'll pass
             continue
-        if item.startswith(base + "/"):
+        if item.startswith(AUTHZ_RESOURCE_BASE + "/"):
             # e.g. "/vectorstore/collections/my_collection"
             parts = item.split("/")
             if parts:
@@ -366,132 +170,21 @@ def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str
     return allowed
 
 
-def get_allowed_authz_from_mapping(
-    authz_mapping: Mapping,
-    method: str,
-    service: str | None = None,
-) -> list[str]:
+def get_allowed_collection_names_from_mapping(authz_mapping: Mapping, method: str) -> set[str]:
     """
-    Given Arborist authz_mapping, return all resource paths for which the user has
-    `method` access in `service`.
+    Go straight from a policy-engine mapping to allowed collection names for one action.
 
-    - `method` is the logical CRUD action: "read", "create", "update", "delete"
-    - `service` is typically config.AUTHZ_SERVICE_NAME ("gen3-embeddings").
-
-    The mapping looks like:
-      {
-         "/vector/indices/collection_name": [
-            {"service": "gen3-embeddings", "method": "read"},
-            {"service": "gen3-embeddings", "method": "create"},
-         ],
-         ...
-      }
-    """
-    service = service or config.AUTHZ_SERVICE_NAME
-    allowed: list[str] = []
-
-    for resource, perms in authz_mapping.items():
-        if not isinstance(perms, list):
-            continue
-        for entry in perms:
-            entry_service = entry.get("service")
-            entry_method = entry.get("method")
-            if (entry_service in {service, "*"}) and (entry_method in {method, "*"}):
-                allowed.append(resource)
-                break
-
-    return allowed
-
-
-def _get_crud_action_from_request(request: Request) -> str:
-    """
-    Return 'read', 'create', 'update', or 'delete' based on the HTTP verb.
-    """
-    method = request.method.upper()
-    action = "unknown"
-
-    if method == "GET":
-        action = "read"
-    if method == "POST":
-        action = "create"
-    if method in {"PUT", "PATCH"}:
-        action = "update"
-    if method == "DELETE":
-        action = "delete"
-
-    return action
-
-
-async def parse_and_auth_request(request: Request, collection_name: CollectionName):
-    """
-    Authorize the request with arborist to ensure the request can be made.
-
-    `collection_name` arrives normalized (see `params.CollectionName`), so the resource path
-    checked here is the same string the data access layer compares against, and it matches
-    the collection as actually stored. Arborist resource paths are case-sensitive, so a
-    policy must name the collection in that same normalized form to grant access.
+    Composes `common.auth.get_allowed_authz_from_mapping` with this service's path
+    convention. Provided for callers that already hold a mapping; request-scoped code should
+    use `gen3_embeddings.dependencies.authz` instead, which caches the mapping.
 
     Args:
-        request: fastapi request entity.
-        collection_name: Normalized name of the collection to authorize access to.
-
-    Raises:
-        HTTPException based on authorize_request outcome
-    """
-    user_id = await get_user_id(request=request)
-
-    method = _get_crud_action_from_request(request=request)
-    resource = get_authz_resource_path_from_collection_name(collection_name)
-
-    logging.debug(f"Checking authorization for user: {user_id}. Method: {method}. Resource: {resource}.")
-    await authorize_request(
-        request=request,
-        authz_access_method=method,
-        authz_resources=[resource],
-    )
-
-
-async def get_allowed_authz_for_request(request: Request) -> list[str]:
-    """
-    Compute the allowed authz resource tags for this request, based on
-    the user's authz mapping and the HTTP → CRUD mapping.
-
-    This is used by the route layer to supply allowed_authz into the
-    data access layer (DAL) for RLS.
-    """
-    method = _get_crud_action_from_request(request)
-    return await get_allowed_authz_for_request_with_method(request=request, method=method)
-
-
-async def get_allowed_authz_for_request_with_method(request: Request, method: str) -> list[str]:
-    """
-    Return the resource paths this caller may act on with a specific access method.
-
-    The result is cached per (request, method), since a single request may need more than
-    one method's resource set and each miss costs a call to the policy engine.
-
-    Args:
-        request (Request): The incoming request.
-        method (str): Access method to filter by, e.g. "read", "create", "update", "delete".
+        authz_mapping (Mapping): Mapping as returned by the policy engine.
+        method (str): Logical CRUD action, e.g. "read".
 
     Returns:
-        list[str]: Authz resource paths the caller holds `method` on. Empty if none, which
-        is a valid fail-closed result.
-
-    Raises:
-        HTTPException: 401 if no valid token is present, 500 if the policy engine errors.
+        set[str]: Canonical collection names the caller may act on with `method`.
     """
-    cache_attr = f"allowed_authz_{method}"
-    cached = getattr(request.state, cache_attr, None)
-    if cached is not None:
-        logging.debug(f"allowed_authz for {method} fetched from request cache")
-        return cached
-
-    user_authz_mapping = await get_user_authz_mapping(request=request)
-    allowed_authz = get_allowed_authz_from_mapping(
-        authz_mapping=user_authz_mapping,
-        method=method,
+    return get_allowed_collection_names_from_authz(
+        get_allowed_authz_from_mapping(authz_mapping, method=method, service=AUTHZ.service_name)
     )
-    setattr(request.state, cache_attr, allowed_authz)
-    logging.debug(f"allowed_authz for {method}: {allowed_authz}")
-    return allowed_authz

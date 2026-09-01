@@ -21,7 +21,7 @@ from gen3_embeddings.routes.search import vectorstore_search_router
 
 # Tables whose authz enforcement depends on row-level security. Verified at startup by
 # check_rls_is_enabled, since nothing else would notice if RLS were turned off.
-RLS_PROTECTED_TABLES = ("embeddings_vector", "embeddings_halfvec")
+RLS_PROTECTED_TABLES = ("embeddings_vector", "embeddings_halfvec", "collections")
 
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)

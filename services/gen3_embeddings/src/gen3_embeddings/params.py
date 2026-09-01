@@ -7,13 +7,13 @@ collection name gets the same normalized value without having to remember to cal
 `normalize_collection_name` itself.
 
 That matters because the authorization check and the database lookup compare the name
-against different things: `parse_and_auth_request` builds an Arborist resource path from it,
-while the DAL compares it to the caller's allowed collection names. If only one side is
+against different things: `dependencies.authz` builds an Arborist resource path from it,
+while the database compares it to the caller's allowed collection names. If only one side is
 normalized, the two gates disagree - a mixed-case path could be denied by the policy engine
-yet accepted by the DAL, or vice versa.
+yet accepted by row-level security, or vice versa.
 
 This module deliberately depends only on FastAPI and the model helpers, so both the routes
-and `auth` can import it without a circular import.
+and `dependencies` can import it without a circular import.
 
 It is also where the caller-controlled path, query, and body parameters get their upper
 bounds. The equivalents for request *bodies* live on the schemas in `models.schemas`, but a

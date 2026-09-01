@@ -225,6 +225,9 @@ def allow_authz(monkeypatch):
     """
     Patch authz resolution to simulate the caller having access to specific collections.
 
+    Grants every action on the named collections, which is what most tests want. Tests that
+    care about the distinction between actions should use `allow_authz_per_action` instead.
+
     Example:
         allow_authz("alpha", "beta")
     """
@@ -233,18 +236,64 @@ def allow_authz(monkeypatch):
     def _apply(*collection_names: str):
         allowed = [f"/vectorstore/collections/{name}" for name in collection_names]
 
-        async def fake_get_allowed_authz_for_request(request):
-            return allowed
-
-        async def fake_get_allowed_authz_for_request_with_method(request, method: str):
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
             return allowed
 
         monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
-        monkeypatch.setattr(
-            dependencies_module,
-            "get_allowed_authz_for_request_with_method",
-            fake_get_allowed_authz_for_request_with_method,
-        )
         return allowed
+
+    return _apply
+
+
+@pytest.fixture
+def allow_authz_paths(monkeypatch):
+    """
+    Patch authz resolution with literal resource paths, of any shape.
+
+    Unlike `allow_authz`, this does not prepend the collection base path. An embedding's
+    `authz` is an arbitrary stored string, so testing that requires granting paths that are
+    not collection-shaped.
+
+    Example:
+        allow_authz_paths("/vectorstore/collections/docs", "/programs/foo/projects/bar")
+    """
+    from gen3_embeddings import dependencies as dependencies_module
+
+    def _apply(*paths: str):
+        allowed = list(paths)
+
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
+            return allowed
+
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        return allowed
+
+    return _apply
+
+
+@pytest.fixture
+def allow_authz_per_action(monkeypatch):
+    """
+    Patch authz resolution with a different grant per action.
+
+    This is what makes it testable that a route authorizes the action it actually performs
+    rather than the one its HTTP verb implies: a caller granted only `read` must still be
+    able to POST to a search or bulk-read endpoint.
+
+    Example:
+        allow_authz_per_action(read=("alpha",), create=())
+    """
+    from gen3_embeddings import dependencies as dependencies_module
+
+    def _apply(**by_action: tuple[str, ...]):
+        paths_by_action = {
+            action: [f"/vectorstore/collections/{name}" for name in names] for action, names in by_action.items()
+        }
+
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
+            return paths_by_action.get(method, [])
+
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        return paths_by_action
 
     return _apply

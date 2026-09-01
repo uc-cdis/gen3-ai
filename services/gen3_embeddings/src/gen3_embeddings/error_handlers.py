@@ -23,6 +23,7 @@ from gen3_embeddings.database.errors import (
     EmbeddingWriteInconsistencyError,
     InvalidCollectionNameError,
     MetadataLengthMismatchError,
+    RowLevelSecurityDeniedError,
 )
 
 # Anything not listed here falls back to 500, so a new DataAccessError cannot accidentally
@@ -34,6 +35,7 @@ DATA_ACCESS_ERROR_STATUS: dict[type[DataAccessError], int] = {
     EmbeddingDimensionMismatchError: status.HTTP_400_BAD_REQUEST,
     EmbeddingNotRepresentableError: status.HTTP_400_BAD_REQUEST,
     CollectionNameNotAllowedError: status.HTTP_403_FORBIDDEN,
+    RowLevelSecurityDeniedError: status.HTTP_403_FORBIDDEN,
     CollectionAlreadyExistsError: status.HTTP_409_CONFLICT,
     EmbeddingsAlreadyExistError: status.HTTP_409_CONFLICT,
     DuplicateEmbeddingError: status.HTTP_409_CONFLICT,
