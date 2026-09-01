@@ -168,7 +168,11 @@ async def _process_uploaded_files(
 
 
 @ai_models_uploads_router.post(
-    "/api/models/{namespace}/{repo}/upload", response_model=MultipartUploadResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/upload",
+    response_model=MultipartUploadResponse,
+    summary="Upload model files",
+    description="Upload one or more files to create or update a model repository revision. Files are stored and tracked with their content hashes.",
+    tags=["Models"],
 )
 async def upload_model(
     namespace: str,
@@ -271,6 +275,7 @@ async def upload_model(
     "/api/models/{namespace}/{repo}/revisions",
     response_model=RevisionModel,
     summary="Create revision",
+    description="Create a new revision for an existing repository with an optional revision identifier and ETag.",
     tags=["Models"],
 )
 async def create_model_revision(
@@ -296,7 +301,11 @@ async def create_model_revision(
 
 
 @ai_models_uploads_router.post(
-    "/api/models/{namespace}/{repo}/upload-url", response_model=UploadUrlResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/upload-url",
+    response_model=UploadUrlResponse,
+    summary="Generate upload URL",
+    description="Generate a presigned URL for uploading a file directly to object storage for a specific repository revision.",
+    tags=["Models"],
 )
 async def generate_upload_url(
     namespace: str, repo: str, request: UploadUrlRequest, _: None = Depends(verify_authorization)
@@ -315,7 +324,11 @@ async def generate_upload_url(
 
 
 @ai_models_uploads_router.post(
-    "/api/models/{namespace}/{repo}/complete-upload", response_model=RevisionModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/complete-upload",
+    response_model=RevisionModel,
+    summary="Complete file upload",
+    description="Finalize an upload by creating or updating a revision and tracking records for all uploaded files in object storage.",
+    tags=["Models"],
 )
 async def complete_upload(
     namespace: str,

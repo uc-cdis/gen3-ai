@@ -66,7 +66,11 @@ async def list_models_route(
 
 
 @ai_models_repositories_router.get(
-    "/api/models/{namespace}/{repo}", response_model=RepositoryInfoModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}",
+    response_model=RepositoryInfoModel,
+    summary="Get repository information",
+    description="Retrieve detailed information about a model repository including its metadata and main revision files.",
+    tags=["Models"],
 )
 async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
     """
@@ -100,7 +104,11 @@ async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
 
 
 @ai_models_repositories_router.post(
-    "/api/models/{namespace}/{repo}", response_model=RepositoryMetadataModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}",
+    response_model=RepositoryMetadataModel,
+    summary="Create a new model repository",
+    description="Create metadata for a new model repository with optional description and tags.",
+    tags=["Models"],
 )
 async def create_repository(
     namespace: str,
@@ -133,6 +141,7 @@ async def create_repository(
     "/api/models/{namespace}/{repo}",
     response_model=RepositoryMetadataModel,
     summary="Update repository metadata",
+    description="Update mutable metadata fields such as description and tags for a model repository.",
     tags=["Models"],
 )
 async def update_repository(

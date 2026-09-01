@@ -115,6 +115,7 @@ async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
     "/api/models/{namespace}/{repo}/revisions/{revision}",
     response_model=RevisionModel,
     summary="Get revision metadata",
+    description="Retrieve detailed metadata for a specific revision of a model repository including commit hash and ETag.",
     tags=["Models"],
 )
 async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionModel:
@@ -215,7 +216,11 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
 
 
 @ai_models_files_router.get(
-    "/api/models/{namespace}/{repo}/files", response_model=FileListResponseModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files",
+    response_model=FileListResponseModel,
+    summary="List model files",
+    description="List all tracked files in a repository revision with their metadata including size and content hashes.",
+    tags=["Models"],
 )
 async def list_model_files(namespace: str, repo: str, revision: str = "main") -> FileListResponseModel:
     """
@@ -243,7 +248,11 @@ async def list_model_files(namespace: str, repo: str, revision: str = "main") ->
 
 
 @ai_models_files_router.get(
-    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=FileMetadataModel, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files/{file_id}",
+    response_model=FileMetadataModel,
+    summary="Get file metadata",
+    description="Retrieve metadata for a specific file in a repository including size, content hash, and storage location.",
+    tags=["Models"],
 )
 async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadataModel:
     """
@@ -275,7 +284,11 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
 
 
 @ai_models_files_router.delete(
-    "/api/models/{namespace}/{repo}/files/{file_id}", response_model=RevisionDeleteResponse, tags=["Models"]
+    "/api/models/{namespace}/{repo}/files/{file_id}",
+    response_model=RevisionDeleteResponse,
+    summary="Delete a file",
+    description="Delete a tracked file from a repository revision. This removes the file tracking record but may not immediately delete storage.",
+    tags=["Models"],
 )
 async def delete_model_file(
     namespace: str, repo: str, file_id: str, _: None = Depends(verify_authorization)
@@ -301,6 +314,8 @@ async def delete_model_file(
 @ai_models_files_router.delete(
     "/api/models/{namespace}/{repo}/revisions/{revision}",
     response_model=RevisionDeleteResponse,
+    summary="Delete a revision",
+    description="Delete a specific revision and all files tracked under it from the repository.",
     tags=["Models"],
 )
 async def delete_model_revision(
