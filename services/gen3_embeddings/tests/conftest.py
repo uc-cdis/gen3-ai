@@ -13,6 +13,18 @@ from fastapi.testclient import TestClient
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# Every test fakes authz resolution rather than talking to a policy engine (see `allow_authz`),
+# and that only produces the intended result if the boundary check in `common.auth` is bypassed.
+# That check reads `common.config.DEBUG_SKIP_AUTH`, which starlette resolves from the
+# environment when the module is first imported -- so patching a service-level config object
+# later, as the `app` fixture does, cannot reach it.
+#
+# Local runs picked the value up from a git-ignored `.env`. CI has no such file, so it
+# authenticated for real and answered 401 to every request that named a collection. Setting it
+# here, above any import that pulls in `common.config`, makes the suite self-contained instead
+# of dependent on untracked files. `setdefault` leaves a deliberate override in place.
+os.environ.setdefault("DEBUG_SKIP_AUTH", "True")
+
 
 def _quote_ident(value: str) -> str:
     """Double-quote a Postgres identifier, escaping any embedded quotes."""
