@@ -27,9 +27,14 @@ jobs:
     name: Post-Commit Validation of Pre-Commit Checks (Includes Linting)
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
-      UV_VERSION: '0.12.3'
+      # Kept current by `just update_versions`. To hold one back when the latest is broken, add
+      # `# allow-old-version` inline (once per file).
+      #
+      # IMPORTANT: If you are reading this and `# allow-old-version` is present, try removing it and
+      # running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
+      UV_VERSION: '0.12.7'
       JUST_VERSION: '1.58.0'
-      DBMATE_VERSION: 'latest'
+      DBMATE_VERSION: 'v2.35.1'
       # Note: skipping updating versions b/c workflows can't edit workflow files easily
       COMMAND: 'SKIP=update_versions pre-commit run -a'
     secrets: inherit
@@ -45,9 +50,13 @@ jobs:
     name: Manual Synk Scan for uv
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      # Kept current by `just update_versions`. To hold one back when the latest is broken, add
+      # `# allow-old-version` inline (once per file). Temporary only: if you are reading this and
+      # a marker is present, try removing it; if CI passes, leave it off.
+      UV_VERSION: '0.12.7'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
+      DBMATE_VERSION: 'v2.35.1'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
       - name: Check out code
@@ -75,7 +84,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/${{ env.DBMATE_VERSION }}/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
@@ -93,9 +102,13 @@ jobs:
     needs: [ security, post-commit-check ]
     runs-on: ubuntu-latest
     env:
-      UV_VERSION: '0.12.3'
+      # Kept current by `just update_versions`. To hold one back when the latest is broken, add
+      # `# allow-old-version` inline (once per file). Temporary only: if you are reading this and
+      # a marker is present, try removing it; if CI passes, leave it off.
+      UV_VERSION: '0.12.7'
       JUST_VERSION: '1.58.0'
       PYTHON_VERSION: '3.13'
+      DBMATE_VERSION: 'v2.35.1'
       PGHOST: 'localhost'
       PGPORT: 5432
       PGUSER: 'postgres'
@@ -120,7 +133,7 @@ jobs:
 
       - name: Install dbmate
         run: |
-          sudo curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64
+          sudo curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/download/${{ env.DBMATE_VERSION }}/dbmate-linux-amd64
           sudo chmod +x /usr/local/bin/dbmate
           /usr/local/bin/dbmate --help
 
@@ -143,7 +156,7 @@ jobs:
   image-build-push-1:
     name: Build Image and Push - Gen3 Embeddings
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
-    needs: [security]
+    needs: [post-commit-check, security, unit-test]
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       DOCKERFILE_BUILD_CONTEXT: '.'

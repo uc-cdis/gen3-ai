@@ -113,6 +113,21 @@ report_error_if_failed() {
   fi
 }
 
+# Report a space-separated list of targets that failed, returning 1 so the caller
+# still exits non-zero. Targets in a `SERVICE="all"` fan-out are independent, so
+# callers accumulate failures into a string and report once at the end rather than
+# letting `set -e` abort the loop and skip every target queued behind the failure.
+report_failed_targets() {
+  local command=$1
+  local failed=${2# }
+
+  if [[ -z $failed ]]; then
+    return 0
+  fi
+  report_error_if_failed 1 "$command" "failed for" "$failed" ""
+  return 1
+}
+
 # remove any VIRTUAL_ENV to remove uv warnings about envs that aren't this one
 unset VIRTUAL_ENV
 
@@ -135,5 +150,20 @@ set_postgres_defaults() {
   if [[ -z ${PGUSER:-} ]]; then
     echo "PGUSER not set, using postgres..."
     export PGUSER="postgres"
+  fi
+}
+
+# Migrations need CREATE on schema public, and creating the database needs CREATEDB.
+# A service whose tables use row level security deliberately runs as a role with neither,
+# so we cannot reuse PGUSER. Defaults to PGUSER/PGPASSWORD, which works for any
+# service whose runtime role is already an admin.
+set_postgres_admin_defaults() {
+  if [[ -z ${DB_MIGRATION_USER:-} ]]; then
+    echo "DB_MIGRATION_USER not set, using PGUSER (${PGUSER})..."
+    export DB_MIGRATION_USER="${PGUSER}"
+  fi
+
+  if [[ -z ${DB_MIGRATION_PASSWORD:-} ]]; then
+    export DB_MIGRATION_PASSWORD="${PGPASSWORD:-}"
   fi
 }

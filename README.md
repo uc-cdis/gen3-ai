@@ -84,6 +84,17 @@ PGPASSWORD=postgres
 PGDATABASE={service}
 ```
 
+`PGUSER` is the role the service itself connects as. `just db_setup` and `just db_migrate`
+run migrations, which needs `CREATEDB` and `CREATE` on schema `public`, so they use
+`DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead. Those default to `PGUSER`/`PGPASSWORD`
+and only need to be set when the service runs as a restricted role - `gen3_embeddings`
+does, because its tables use row level security and it refuses to start as a superuser:
+
+```bash
+DB_MIGRATION_USER=postgres
+DB_MIGRATION_PASSWORD=postgres
+```
+
 You can also configure a **global config** which overrides common configuration
 in a `.env` in the root of the repo `cloned-gen3-ai-repo/.env`:
 
@@ -147,9 +158,11 @@ Note that the pre-commit in this repo relies on `just` commands and is relativel
   - Prepared statements for extra security and parsing of inputs
 * No ORM. `asyncpg` with shared code in `libraries/common`, services using a Data Access Layer (DAL) pattern
 
-### Metrics
+### Observability
 
-See [these docs](./docs/metrics.md) for more info.
+Traces, metrics, and logs, plus how to check each one is working: see
+[these docs](./docs/observability.md). For a local Prometheus specifically, see
+[these docs](./docs/metrics.md).
 
 ## Development Details
 
