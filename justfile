@@ -324,7 +324,17 @@ db_setup SERVICE="all": _check_dependencies
 
         service_name="{{SERVICE}}"
         set_postgres_defaults
-        psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" 2>/dev/null || echo "Database exists."
+        set_postgres_admin_defaults
+        if CREATE_OUT=$(PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${DB_MIGRATION_USER}\";" 2>&1); then
+            echo "Created database '${PGDATABASE}' owned by '${DB_MIGRATION_USER}'."
+        elif grep -q "already exists" <<<"$CREATE_OUT"; then
+            # Only "already exists" is benign
+            echo "Database '${PGDATABASE}' exists."
+        else
+            # All other errors
+            echo -e "${RED}** ERROR: could not create database '${PGDATABASE}' as '${DB_MIGRATION_USER}': ${CREATE_OUT} **${RESET}"
+            exit 1
+        fi
     fi
 
 # Generate OpenAPI specification and build API docs (`just openapi true` opens the result)
@@ -645,16 +655,13 @@ _run_dbmate SERVICE ACTION ARGS="":
 
     service_name="{{SERVICE}}"
     set_postgres_defaults
+    set_postgres_admin_defaults
 
     MIGRATIONS_DIR="${DIR}/db/migrations"
     if [ -d "$MIGRATIONS_DIR" ]; then
-        export PGPASSWORD="${PGPASSWORD}"
-        CONN_STR="${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
-
-        if [ "{{SERVICE}}" = "gen3_embeddings" ]; then
-            export DB_APP_USER="${DB_APP_USER:=app_user}"
-            export DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD:=app_user_password}"
-        fi
+        # dbmate creates its schema_migrations table and runs DDL, so it connects as the
+        # migration role rather than the role the service uses at runtime.
+        CONN_STR="${PGDRIVER:=postgresql}://${DB_MIGRATION_USER}:${DB_MIGRATION_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
 
         dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait {{ACTION}} {{ARGS}}
         dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait status

@@ -84,6 +84,17 @@ PGPASSWORD=postgres
 PGDATABASE={service}
 ```
 
+`PGUSER` is the role the service itself connects as. `just db_setup` and `just db_migrate`
+run migrations, which needs `CREATEDB` and `CREATE` on schema `public`, so they use
+`DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead. Those default to `PGUSER`/`PGPASSWORD`
+and only need to be set when the service runs as a restricted role - `gen3_embeddings`
+does, because its tables use row level security and it refuses to start as a superuser:
+
+```bash
+DB_MIGRATION_USER=postgres
+DB_MIGRATION_PASSWORD=postgres
+```
+
 You can also configure a **global config** which overrides common configuration
 in a `.env` in the root of the repo `cloned-gen3-ai-repo/.env`:
 

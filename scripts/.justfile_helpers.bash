@@ -137,3 +137,18 @@ set_postgres_defaults() {
     export PGUSER="postgres"
   fi
 }
+
+# Migrations need CREATE on schema public, and creating the database needs CREATEDB.
+# A service whose tables use row level security deliberately runs as a role with neither,
+# so we cannot reuse PGUSER. Defaults to PGUSER/PGPASSWORD, which works for any
+# service whose runtime role is already an admin.
+set_postgres_admin_defaults() {
+  if [[ -z ${DB_MIGRATION_USER:-} ]]; then
+    echo "DB_MIGRATION_USER not set, using PGUSER (${PGUSER})..."
+    export DB_MIGRATION_USER="${PGUSER}"
+  fi
+
+  if [[ -z ${DB_MIGRATION_PASSWORD:-} ]]; then
+    export DB_MIGRATION_PASSWORD="${PGPASSWORD:-}"
+  fi
+}
