@@ -1,8 +1,9 @@
 """Routes for creating, reading, updating, and deleting embeddings within collections."""
 
+from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
 
 from common.fastapi.responses import (
@@ -11,70 +12,53 @@ from common.fastapi.responses import (
     NO_CONTENT_RESPONSE,
     not_found_response,
 )
-from gen3_embeddings.auth import (
-    authorize_request,
-    get_authz_resource_path_from_collection_name,
-    parse_and_auth_request,
-)
-from gen3_embeddings.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, logging
-from gen3_embeddings.database.db import (
-    DataAccessLayer,
-    get_data_access_layer,
-    get_data_access_layer_for_read_operations,
-)
-from gen3_embeddings.database.models import Collection
+from gen3_embeddings.auth import get_authz_resource_path_from_collection_name
+from gen3_embeddings.config import DEFAULT_PAGE_SIZE, logging
+from gen3_embeddings.dependencies import AuthzContext, authz
 from gen3_embeddings.models.helpers import (
-    collection_to_model,
-    embedding_to_binary_result,
     embedding_to_result,
     normalize_authz,
 )
 from gen3_embeddings.models.schemas import (
     CreateEmbeddingsBody,
     EmbeddingResponse,
-    EmbeddingResponseBinary,
-    EmbeddingResponseBinaryWithCollections,
     PaginatedEmbeddingResponse,
     SingleEmbeddingResult,
-    SingleEmbeddingResultBinary,
     UpdateEmbeddingBody,
 )
+from gen3_embeddings.params import AiModel, CollectionName, EmbeddingUUID, ExcludeInfo, Page, PageSize
+from gen3_embeddings.routes.helpers import dual_path
 
 embeddings_router = APIRouter()
 
 
-@embeddings_router.get(
+@dual_path(
+    embeddings_router,
+    "get",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
     summary="Read embedding from collection",
     description="Returns a single embedding from a collection, looked up by its UUID.",
+    response_description="The requested embedding, as a JSON array of floats.",
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.get(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def get_embedding_from_collection(
-    request: Request,
-    collection_name: str,
-    embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    collection_name: CollectionName,
+    embedding_uuid: EmbeddingUUID,
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
     Read a single embedding from a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SingleEmbeddingResult
@@ -82,11 +66,11 @@ async def get_embedding_from_collection(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    emb = await dal.get_embedding_by_collection_and_id(
+    emb = await ctx.dal.get_embedding_by_collection_and_id(
         collection=collection,
         embedding_id=embedding_uuid,
     )
@@ -96,7 +80,9 @@ async def get_embedding_from_collection(
     return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
-@embeddings_router.put(
+@dual_path(
+    embeddings_router,
+    "put",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     response_model=SingleEmbeddingResult,
     response_model_exclude_none=True,
@@ -105,35 +91,28 @@ async def get_embedding_from_collection(
         "Replaces the vector and/or metadata of an existing embedding, looked up by its UUID. "
         "A new vector must match the collection's dimensions."
     ),
+    response_description="The embedding as it stands after the update.",
     responses={
         **AUTH_RESPONSES,
         **BAD_REQUEST_RESPONSE,
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.put(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def update_embedding_in_collection(
-    request: Request,
-    collection_name: str,
-    embedding_uuid: UUID,
+    collection_name: CollectionName,
+    embedding_uuid: EmbeddingUUID,
     body: UpdateEmbeddingBody,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    ctx: AuthzContext = Depends(authz("update")),
 ):
     """
     Update the embedding vector for a given collection and embedding ID.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding.
         body: Request body containing the new embedding vector and/or metadata.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         SingleEmbeddingResult containing the updated embedding.
@@ -141,7 +120,7 @@ async def update_embedding_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found; 400 if update fails.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -149,24 +128,20 @@ async def update_embedding_in_collection(
     if body.embedding is not None and len(body.embedding) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
-    # If authz is being updated, check update permission on new authz paths
-    authz = normalize_authz(body.authz)
-    if authz is not None:
-        if authz == "":
+    # If authz is being updated, check update permission on the new authz path
+    authz_path = normalize_authz(body.authz)
+    if authz_path is not None:
+        if authz_path == "":
             raise HTTPException(status_code=400, detail="authz cannot be empty when provided")
 
-        await authorize_request(
-            request=request,
-            authz_access_method="update",
-            authz_resources=[authz],
-        )
+        await ctx.require(authz_path)
 
-    emb = await dal.update_embedding(
+    emb = await ctx.dal.update_embedding(
         collection=collection,
         embedding_id=embedding_uuid,
         embedding=body.embedding,
         metadata=body.metadata,
-        new_authz=authz,
+        new_authz=authz_path,
     )
     if not emb:
         raise HTTPException(status_code=400, detail="Failed to update embedding")
@@ -174,7 +149,9 @@ async def update_embedding_in_collection(
     return embedding_to_result(emb=emb, collection=collection, exclude_info=False)
 
 
-@embeddings_router.put(
+@dual_path(
+    embeddings_router,
+    "put",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create or update embeddings in collection",
@@ -187,7 +164,15 @@ async def update_embedding_in_collection(
         "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
         "used.\n"
         "- You need both `create` and `update` permission on the collection path and on the "
-        "resulting embedding paths."
+        "resulting embedding paths.\n\n"
+        "Set `embedding_id` on an item to replace that specific existing embedding; an id that "
+        "does not exist is rejected rather than created. Items without an `embedding_id` are "
+        "created, or updated in place if an identical vector, metadata, and authz combination is "
+        "already in the collection."
+    ),
+    response_description=(
+        "The created or updated embeddings, in the same order as the request. Each carries the "
+        "`input_index` it came from."
     ),
     responses={
         **AUTH_RESPONSES,
@@ -195,24 +180,17 @@ async def update_embedding_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.put(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def put_embeddings_in_collection(
-    request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     body: CreateEmbeddingsBody,
-    ai_model: str | None = Query(None, alias="ai_model"),
-    exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    ai_model: AiModel = None,
+    exclude_info: ExcludeInfo = False,
+    # An upsert both creates and updates, so both are demanded on the collection. `update`
+    # is the primary action, so it is the one that scopes row-level security.
+    ctx: AuthzContext = Depends(authz("update", also_require=("create",))),
 ):
     """
-    TODO: implementaion for StringArrayInput and ai_model
-
     Create or update one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
@@ -224,12 +202,11 @@ async def put_embeddings_in_collection(
         - the embedding authz paths.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         EmbeddingResponse containing the created embeddings.
@@ -238,8 +215,7 @@ async def put_embeddings_in_collection(
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
 
     """
-
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -249,32 +225,12 @@ async def put_embeddings_in_collection(
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
     embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
-    # 1) Check 'create' and 'update' on collection
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
-    await authorize_request(
-        request=request,
-        authz_access_method="create",
-        authz_resources=[default_collection_authz],
-    )
-    await authorize_request(
-        request=request,
-        authz_access_method="update",
-        authz_resources=[default_collection_authz],
-    )
-
-    # 2) Check 'create' and 'update' on embedding authz paths
+    # The collection path was already checked for both actions by the dependency. A
+    # body-supplied path is a different resource, so it needs the same pair of checks.
     if embedding_authz_path != default_collection_authz:
-        logging.debug(f"authorize_request for `create` and `update` on embedding authz paths {embedding_authz_path}")
-        await authorize_request(
-            request=request,
-            authz_access_method="create",
-            authz_resources=[embedding_authz_path],
-        )
-        await authorize_request(
-            request=request,
-            authz_access_method="update",
-            authz_resources=[embedding_authz_path],
-        )
+        logging.debug(f"authorizing `create` and `update` on embedding authz path {embedding_authz_path}")
+        await ctx.require(embedding_authz_path, action="create")
+        await ctx.require(embedding_authz_path, action="update")
 
     vectors_no_id: list[list[float]] = []
     metadata_list_no_id: list[dict] = []
@@ -284,25 +240,31 @@ async def put_embeddings_in_collection(
         emb = item.embedding
         meta = item.metadata or {}
 
-        if len(emb) != collection.dimensions:
+        # `EmbeddingToCreate.embedding` is `Vector | TextChunks`, so a list of text chunks
+        # validates too. Embedding raw text is not wired up yet, so reject it here rather
+        # than letting str elements reach the vector column. The union is
+        # `list[float] | list[str]`, so the list is homogeneous and element 0 decides.
+        if emb and isinstance(emb[0], str):
+            raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
+        vector = cast(list[float], emb)
+
+        if len(vector) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
+                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
             )
 
-        emb_vector = [float(x) for x in emb]
-
         if item.embedding_id is not None:
-            items_with_id.append((item.embedding_id, emb_vector, meta))
+            items_with_id.append((item.embedding_id, vector, meta))
         else:
-            vectors_no_id.append(emb_vector)
+            vectors_no_id.append(vector)
             metadata_list_no_id.append(meta)
 
     logging.debug(f"PUT (upsert) embeddings in collection.id: `{collection.id}`...")
 
     updated_from_ids = []
     for i, (emb_id, emb_vec, meta) in enumerate(items_with_id):
-        emb = await dal.update_embedding(
+        emb = await ctx.dal.update_embedding(
             collection=collection,
             embedding_id=emb_id,
             embedding=emb_vec,
@@ -319,7 +281,7 @@ async def put_embeddings_in_collection(
 
     created_or_updated = []
     if vectors_no_id:
-        created_or_updated = await dal.upsert_embeddings_bulk(
+        created_or_updated = await ctx.dal.upsert_embeddings_bulk(
             collection=collection,
             embeddings=vectors_no_id,
             authz=embedding_authz_path,
@@ -353,7 +315,9 @@ async def put_embeddings_in_collection(
     return EmbeddingResponse(embeddings=results)
 
 
-@embeddings_router.delete(
+@dual_path(
+    embeddings_router,
+    "delete",
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete embedding from collection",
@@ -366,27 +330,19 @@ async def put_embeddings_in_collection(
         **not_found_response("Collection or embedding"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.delete(
-    "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def delete_embedding(
-    request: Request,
-    collection_name: str,
-    embedding_uuid: UUID,
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    collection_name: CollectionName,
+    embedding_uuid: EmbeddingUUID,
+    ctx: AuthzContext = Depends(authz("delete")),
 ):
     """
     Delete an embedding from a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         embedding_uuid: UUID of the embedding to delete.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         None on success.
@@ -394,11 +350,11 @@ async def delete_embedding(
     Raises:
         HTTPException: 404 if the collection or embedding is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    success = await dal.delete_embedding(
+    success = await ctx.dal.delete_embedding(
         collection=collection,
         embedding_id=embedding_uuid,
     )
@@ -408,7 +364,9 @@ async def delete_embedding(
     return None
 
 
-@embeddings_router.get(
+@dual_path(
+    embeddings_router,
+    "get",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=PaginatedEmbeddingResponse,
     summary="Read all embeddings from collection",
@@ -416,36 +374,29 @@ async def delete_embedding(
         "Returns the embeddings in a collection, one page at a time. "
         "Set `exclude_info=true` to omit the `info` block from each result."
     ),
+    response_description="A page of embeddings from the collection.",
     responses={
         **AUTH_RESPONSES,
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.get(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def list_embeddings_in_collection(
-    request: Request,
-    collection_name: str,
-    exclude_info: bool = Query(False, alias="exclude_info"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    collection_name: CollectionName,
+    exclude_info: ExcludeInfo = False,
+    page: Page = 1,
+    page_size: PageSize = DEFAULT_PAGE_SIZE,
+    ctx: AuthzContext = Depends(authz("read")),
 ):
     """
     List all embeddings within a specific collection.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         exclude_info: If True, omit the 'info' block in each embedding result.
         page: Page number for pagination (1-based).
         page_size: Number of items per page.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         PaginatedEmbeddingResponse containing all embeddings in the collection.
@@ -453,14 +404,14 @@ async def list_embeddings_in_collection(
     Raises:
         HTTPException: 404 if the collection is not found.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     offset = (page - 1) * page_size
     limit = page_size
 
-    embs = await dal.list_embeddings_in_collection(
+    embs = await ctx.dal.list_embeddings_in_collection(
         collection=collection,
         offset=offset,
         limit=limit,
@@ -484,7 +435,9 @@ async def list_embeddings_in_collection(
     )
 
 
-@embeddings_router.post(
+@dual_path(
+    embeddings_router,
+    "post",
     "/vectorstore/collections/{collection_name}/embeddings",
     response_model=EmbeddingResponse,
     summary="Create embeddings in collection",
@@ -498,7 +451,13 @@ async def list_embeddings_in_collection(
         "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
         "used.\n"
         "- You need `create` permission on the collection path and on the resulting embedding "
-        "paths."
+        "paths.\n\n"
+        "IDs are assigned by the service. An `embedding_id` set on an item is ignored here; use "
+        "`PUT` if you need to write to a specific existing embedding."
+    ),
+    response_description=(
+        "The created embeddings, in the same order as the request. Each carries the `input_index` "
+        "it came from and the `embedding_id` assigned to it."
     ),
     responses={
         **AUTH_RESPONSES,
@@ -506,25 +465,15 @@ async def list_embeddings_in_collection(
         **not_found_response("Collection"),
     },
     tags=["Embeddings"],
-    dependencies=[Depends(parse_and_auth_request)],
-)
-@embeddings_router.post(
-    "/vectorstore/collections/{collection_name}/embeddings/",
-    include_in_schema=False,
-    dependencies=[Depends(parse_and_auth_request)],
 )
 async def create_embeddings_in_collection(
-    request: Request,
-    collection_name: str,
+    collection_name: CollectionName,
     body: CreateEmbeddingsBody,
-    ai_model: str | None = Query(None, alias="ai_model"),
-    exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer),
+    ai_model: AiModel = None,
+    exclude_info: ExcludeInfo = False,
+    ctx: AuthzContext = Depends(authz("create")),
 ):
     """
-
-    TODO: implementaion for StringArrayInput and ai_model
-
     Create one or more embeddings in a specific collection.
 
     This minimal implementation only accepts raw numeric vectors.
@@ -536,12 +485,11 @@ async def create_embeddings_in_collection(
         - the embedding authz paths.
 
     Args:
-        request: The request object.
         collection_name: Name of the collection.
         body: Request body containing a list of embedding vectors.
         ai_model: Optional model name; not used in this minimal version.
         exclude_info: If True, omit the 'info' block in each embedding result.
-        dal: Data access layer dependency.
+        ctx: Authorization context for this request.
 
     Returns:
         EmbeddingResponse containing the created embeddings.
@@ -549,7 +497,7 @@ async def create_embeddings_in_collection(
     Raises:
         HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
     """
-    collection = await dal.get_collection_by_name(collection_name)
+    collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -559,22 +507,11 @@ async def create_embeddings_in_collection(
     default_collection_authz = get_authz_resource_path_from_collection_name(collection_name)
     embedding_authz_path = normalize_authz(body.authz) or default_collection_authz
 
-    # 1) Check create on collection authz
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
-    await authorize_request(
-        request=request,
-        authz_access_method="create",
-        authz_resources=[default_collection_authz],
-    )
-
-    # 2) Check create on embedding authz paths
-    logging.debug(f"authorize_request for `create` on collection {default_collection_authz}")
+    # The collection path was already checked by the dependency; a body-supplied path is a
+    # different resource and needs its own check.
     if embedding_authz_path != default_collection_authz:
-        await authorize_request(
-            request=request,
-            authz_access_method="create",
-            authz_resources=[embedding_authz_path],
-        )
+        logging.debug(f"authorizing `create` on embedding authz path {embedding_authz_path}")
+        await ctx.require(embedding_authz_path)
 
     vectors: list[list[float]] = []
     metadata_list: list[dict] = []
@@ -583,19 +520,24 @@ async def create_embeddings_in_collection(
         emb = item.embedding
         meta = item.metadata or {}
 
-        if len(emb) != collection.dimensions:
+        # See the matching guard in the PUT handler: text chunks validate against the
+        # `Vector | TextChunks` union but cannot be stored as a vector yet.
+        if emb and isinstance(emb[0], str):
+            raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
+        vector = cast(list[float], emb)
+
+        if len(vector) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(emb)}, expected {collection.dimensions} for collection",
+                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
             )
 
-        # TODO: use numpy float16 instead
-        vectors.append([float(x) for x in emb])
+        vectors.append(vector)
         metadata_list.append(meta)
 
     logging.debug(f"Creating embeddings in collection.id: `{collection.id}`...")
 
-    created = await dal.create_embeddings_bulk(
+    created = await ctx.dal.create_embeddings_bulk(
         collection=collection,
         embeddings=vectors,
         authz=embedding_authz_path,
@@ -608,157 +550,3 @@ async def create_embeddings_in_collection(
         results.append(res)
 
     return EmbeddingResponse(embeddings=results)
-
-
-# TODO: let's move /bulk endpoints to a new embeddings_bulk.py so we match the API organization better
-@embeddings_router.post(
-    "/embeddings/bulk",
-    tags=["Embeddings (Bulk Read)"],
-    summary="Read select embeddings from unknown collections",
-    description=(
-        "Returns the requested embeddings by UUID without needing to know which collection each "
-        "one belongs to, along with the metadata for every collection involved. Vectors are "
-        "returned in a binary encoding. UUIDs that do not resolve are omitted from the response "
-        "rather than raising an error.\n\n"
-        "This uses `POST` so the UUID list can be sent in the request body, but it does not "
-        "create anything."
-    ),
-    responses={**AUTH_RESPONSES},
-)
-@embeddings_router.post(
-    "/embeddings/bulk/",
-    include_in_schema=False,
-)
-async def get_embeddings_bulk_unknown_collections(
-    request: Request,
-    embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-) -> EmbeddingResponseBinaryWithCollections:
-    """
-    Read a selection of embeddings by UUID across any collection.
-
-    Args:
-        request (Request): The request object.
-        embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
-        exclude_info (bool): If True, exclude the 'info' block for each embedding.
-        dal (DataAccessLayer): Data access layer dependency.
-
-    Returns:
-        EmbeddingResponseBinaryWithCollections including collection metadata
-        for each embedding.
-    """
-
-    embs = await dal.get_embeddings_bulk(
-        embedding_ids=embedding_uuids,
-        vector_type=None,
-    )
-    if not embs:
-        return EmbeddingResponseBinaryWithCollections(embeddings=[], collections=[])
-
-    emb_by_id = {e.embedding_id: e for e in embs}
-
-    collection_ids = list({e.collection_id for e in embs})
-    collections: dict[int, Collection] = {}
-
-    col_list = await dal.get_collection_by_id_bulk(collection_ids)
-
-    for col in col_list:
-        collections[col.id] = col
-
-    results: list[SingleEmbeddingResultBinary] = []
-    # Preserve the original order and input collection
-    for input_index, emb_id in enumerate(embedding_uuids):
-        emb = emb_by_id.get(emb_id)
-        if not emb:
-            continue
-        col = collections.get(emb.collection_id)
-        if not col:
-            continue
-
-        res = embedding_to_binary_result(
-            emb=emb,
-            collection=col,
-            input_index=input_index,
-            exclude_info=exclude_info,
-            precision=col.vector_type.precision,
-        )
-        results.append(res)
-
-    return EmbeddingResponseBinaryWithCollections(
-        embeddings=results,
-        collections=[collection_to_model(col) for col in collections.values()],
-    )
-
-
-@embeddings_router.post(
-    "/vectorstore/collections/{collection_name}/embeddings/bulk",
-    # do NOT add a response model class in this path operation decorator
-    # just rely on it in the typed return. FastAPI docs say this is more performant
-    summary="Read select embeddings from collection",
-    description=(
-        "Returns the requested embeddings by UUID from a single known collection. Vectors are "
-        "returned in a binary encoding. UUIDs that do not resolve within the collection are "
-        "omitted from the response rather than raising an error.\n\n"
-        "This uses `POST` so the UUID list can be sent in the request body, but it does not "
-        "create anything."
-    ),
-    responses={
-        **AUTH_RESPONSES,
-        **not_found_response("Collection"),
-    },
-    tags=["Embeddings (Bulk Read)"],
-)
-@embeddings_router.post(
-    "/vectorstore/collections/{collection_name}/embeddings/bulk/",
-    include_in_schema=False,
-)
-async def get_embeddings_bulk_from_collection(
-    request: Request,
-    collection_name: str,
-    embedding_uuids: list[UUID] = Body(..., examples=["embedding_uuid_0", "embedding_uuid_1"]),
-    exclude_info: bool = Query(False, alias="exclude_info"),
-    dal: DataAccessLayer = Depends(get_data_access_layer_for_read_operations),
-) -> EmbeddingResponseBinary:
-    """
-    TODO: post here but actually reading, how to hanle authz here?
-
-    Read a selection of embeddings by UUID from a specific collection.
-
-    Args:
-        request (Request): The request object.
-        collection_name (str): Name of the collection to read from.
-        embedding_uuids (list[UUID]): List of embedding UUIDs to fetch.
-        exclude_info (bool): If True, exclude the 'info' block for each embedding.
-        dal (DataAccessLayer): Data access layer dependency.
-
-    Returns:
-        EmbeddingResponse containing the embeddings found in the specified collection.
-
-    Raises:
-        HTTPException: 404 if the collection is not found.
-    """
-    collection = await dal.get_collection_by_name(collection_name)
-
-    if not collection:
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    rows = await dal.get_embeddings_bulk_from_collection_ordered(
-        embedding_ids=embedding_uuids,
-        collection=collection,
-    )
-
-    precision = collection.vector_type.precision
-
-    binary_results = [
-        embedding_to_binary_result(
-            emb=emb,
-            collection=collection,
-            input_index=input_index,
-            exclude_info=exclude_info,
-            precision=precision,
-        )
-        for input_index, emb in rows
-    ]
-
-    return EmbeddingResponseBinary(embeddings=binary_results, count=len(binary_results))

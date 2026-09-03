@@ -13,18 +13,20 @@ of how to manage connections or interact with the db directly. Connections are
 managed via an asyncpg connection pool and FastAPI's dependency injection
 provides a DAL instance per-request.
 
-Each DAL instance is also bound to the current user's authorization context:
-the caller's allowed authz resources are computed once (via the request) and
-stored on the DAL instance, so downstream DAL methods do not need to be passed
-`allowed_authz` explicitly.
+Each DAL instance is bound to the caller's authz resources for RLS purposes, but it does
+not resolve or interpret them: `gen3_embeddings.dependencies` resolves authz at the HTTP
+boundary and hands the results in. Nothing in this file talks to anything but the database,
+and nothing here raises HTTP errors - see `database/errors.py`.
 
 DETAILS
 -------
 
 What do we do in this file?
 
-- We create an asyncpg connection pool as a module-level global
-    - The pool is initialized once (on demand) using the DB URL from config
+- We provide a factory for an asyncpg connection pool, but hold no pool ourselves
+    - `create_pool()` builds one from the DB URL in config. The app's lifespan handler calls
+      it once at startup and keeps the result on `app.state.db_pool`, mirroring how the
+      Arborist client is held, so the pool's lifetime is the app's rather than the module's
 
 - We define lightweight dataclasses for Collections and Embeddings
     - These mirror rows from the database and provide `.from_record()` helpers
@@ -38,24 +40,30 @@ What do we do in this file?
     - Each DAL instance carries a per-request `allowed_authz` list, derived
       from the current user's Arborist authz mapping
 
-- We provide a `get_data_access_layer()` function which yields an instance
-  of the DAL bound to:
-    - the global asyncpg connection pool, and
-    - the current request's `allowed_authz` values
-  This function is used as a FastAPI dependency, so each request handler
-  can receive a DAL instance without managing connections or authz context
-  manually.
+- We are deliberately free of HTTP and authz concerns
+    - DAL methods raise the domain errors in `database/errors.py`; the mapping to status
+      codes lives in `gen3_embeddings.error_handlers`
+    - The FastAPI dependencies that build a DAL live in `gen3_embeddings.dependencies`,
+      because resolving authz requires a network call to the Gen3 policy engine and this
+      layer should only ever talk to the database
 
-- We implement Row Level Security (RLS) integration for embeddings tables
-    - Before each logical operation on embeddings, `_with_rls()` sets a
-      per-transaction PostgreSQL parameter `app.allowed_authz` using:
+- We implement Row Level Security (RLS) integration for every table we own
+    - Before each logical operation, `_with_rls()` sets two per-transaction
+      PostgreSQL parameters:
           SELECT set_config('app.allowed_authz', $1, true);
+          SELECT set_config('app.allowed_collection_names', $2, true);
       where `$1` is a text representation of the user's allowed authz resources
+      and `$2` is those same grants reduced to collection names
     - Because `set_config(..., true)` uses a local/transaction-scoped setting,
       each request runs with its own authz context even when using a pooled
       connection
     - The embeddings tables (e.g., `embeddings_vector`, `embeddings_halfvec`)
       define RLS policies that consult `current_setting('app.allowed_authz', true)`
+      and compare it to each row's `authz` column
+    - `collections` has no `authz` column, because a collection's authz identity IS
+      its name: the resource path is derived from it by convention. So its policy
+      consults `current_setting('app.allowed_collection_names', true)` and compares
+      it to `collection_name`
 
 - We support multiple vector types as isolated domains
     - Collections store a `vector_type` (e.g., 'vector', 'halfvec')
@@ -67,36 +75,51 @@ What do we do in this file?
       a uniform interface with configurable distance metrics, min/max thresholds,
       and filters on metadata
 
-- We apply authz-aware filtering for collections at the application layer
-    - Collections themselves do not have RLS or authz tags stored in the table
-    - Instead, the DAL derives allowed collection names from the per-request
-      `allowed_authz` paths (e.g., "/vectorstore/collections/{collection_name}")
-      and filters collection-level queries accordingly where needed
+- We carry the caller's authz context on the DAL instance, not on each call
+    - `allowed_authz` and `allowed_collection_names` are constructor arguments, resolved
+      once per request by `gen3_embeddings.dependencies`. This layer hands them to Postgres
+      but never decides what belongs in them; empty means "nothing", which is fail-closed
+    - Some methods additionally short-circuit in Python on the same set before issuing a
+      query. Postgres is the enforcement point; those checks only save a round trip, or
+      turn "not authorized" into a specific error rather than an empty result. The two
+      cannot disagree, because both read the same field
 """
 
-import json
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 import asyncpg
-from asyncpg.exceptions import UniqueViolationError
-from fastapi import HTTPException, Request
+from asyncpg.exceptions import InsufficientPrivilegeError, UniqueViolationError
 from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
-from gen3_embeddings.auth import get_allowed_authz_for_request, get_allowed_authz_for_request_with_method
 from gen3_embeddings.config import logging
-from gen3_embeddings.database.helpers import build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.database import hashing
+from gen3_embeddings.database.errors import (
+    CollectionAlreadyExistsError,
+    CollectionCreateFailedError,
+    CollectionNameNotAllowedError,
+    DuplicateEmbeddingError,
+    EmbeddingsAlreadyExistError,
+    EmbeddingWriteInconsistencyError,
+    InvalidCollectionNameError,
+    MetadataLengthMismatchError,
+    RowLevelSecurityDeniedError,
+)
+from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
-_pool: asyncpg.Pool | None = None
 
-
-async def get_pool():
+async def create_pool() -> asyncpg.Pool:
     """
-    Gets the pool of connections.
+    Create the pool of connections.
+
+    Called once per app, from the lifespan handler, which owns the returned pool and holds it
+    on `app.state.db_pool`. Nothing here is cached: a second call builds a second pool, so
+    request paths must read the one on the app state rather than calling this.
 
     We have a special initialization to support pgvector columns efficiently.
 
@@ -109,141 +132,281 @@ async def get_pool():
 
     Without this, asyncpg defaults to treating it like a string - which is incredibly
     inefficient b/c that's not how it's stored.
+
+    Returns:
+        asyncpg.Pool: A new pool, which the caller is responsible for closing.
     """
-    global _pool
-    if _pool is None:
-        logging.info(
-            "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
-        )
-        _pool = await asyncpg.create_pool(
-            str(config.DB_CONNECTION_STRING),
-            min_size=config.PGPOOL_MIN_SIZE,
-            max_size=config.PGPOOL_MAX_SIZE,
-            init=register_vector,
-        )
-    return _pool
+    logging.info(
+        "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
+    )
+    return await asyncpg.create_pool(
+        str(config.DB_CONNECTION_STRING),
+        min_size=config.PGPOOL_MIN_SIZE,
+        max_size=config.PGPOOL_MAX_SIZE,
+        init=register_vector,
+    )
 
 
-async def close_pool() -> None:
+# Postgres reports a policy violation and a missing table GRANT identically: both are
+# SQLSTATE 42501 (asyncpg's InsufficientPrivilegeError), and neither populates `table_name`
+# or any other distinguishing field. So the message text is the only discriminator, and it
+# has to be, because the two mean opposite things -- one is the caller's fault, the other is
+# a broken deployment.
+_RLS_VIOLATION_TEXT = "violates row-level security policy"
+
+
+def _rls_denial_or_reraise(exc: InsufficientPrivilegeError) -> Exception:
     """
-    Close the global connection pool and reset it.
-
-    Safe to call when the pool was never created.
-    """
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
-
-
-async def get_data_access_layer(request: Request):
-    """
-    Yield a DAL scoped to the authz the caller holds for this request's HTTP method.
-
-    The method is derived from the verb (GET -> read, POST -> create, PUT/PATCH -> update,
-    DELETE -> delete), so the DAL only ever sees rows the caller holds that specific
-    permission on.
+    Classify an insufficient-privilege error as a caller denial or a deployment fault.
 
     Args:
-        request (Request): Incoming request, used to resolve the caller's authz mapping.
+        exc (InsufficientPrivilegeError): The error Postgres raised.
 
-    Yields:
-        DataAccessLayer: DAL bound to the connection pool and the caller's allowed authz.
+    Returns:
+        Exception: A `RowLevelSecurityDeniedError` to raise in place of `exc`, when a policy
+        rejected the row the caller asked to write.
+
+    Raises:
+        InsufficientPrivilegeError: Re-raises `exc` unchanged for anything else, most
+            importantly `permission denied for table ...` -- a missing GRANT is a broken
+            deployment and must stay a 500 rather than being reported as the caller's fault.
     """
-    pool = await get_pool()
-    allowed_authz = await get_allowed_authz_for_request(request)
-    dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
-    yield dal
+    # `str(exc)` rather than `exc.message`: asyncpg declares `message` on PostgresMessage but
+    # only populates it for server-raised errors, so it is None for a locally constructed one
+    # and is untyped either way. For server errors the two are identical strings.
+    if _RLS_VIOLATION_TEXT not in str(exc):
+        raise exc
+
+    return RowLevelSecurityDeniedError(
+        "Not authorized to store a row under the requested authz. The authz value must be a "
+        "resource you hold this action on."
+    )
 
 
-async def get_data_access_layer_for_read_operations(request: Request):
+@dataclass(frozen=True)
+class _BulkWriteBatch:
     """
-    Yield a DAL scoped to the caller's `read` authz, regardless of HTTP method.
+    A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
 
-    Use this for endpoints that read data but are declared POST because the query does not
-    fit in a query string (bulk reads and search). Depending on `get_data_access_layer`
-    there would scope the DAL to `create` permissions instead, authorizing the wrong action.
+    Vectors travel as one flat float4[] that the INSERT slices per row, and the per-row
+    columns travel as parallel arrays. That is what keeps the whole batch on asyncpg's binary
+    encoding path: nothing here is a JSON document, so no float is ever formatted as text.
+    """
+
+    dimensions: int
+    # len == row_count * dimensions, row-major
+    flat_vectors: list[float]
+    # canonical JSON text, one per unique row; also what the metadata hash was taken over
+    metadata_json: list[str]
+    embedding_hashes: list[UUID]
+    metadata_hashes: list[UUID]
+    # for each index in the caller's original list, which unique row it maps to
+    original_to_unique: list[int]
+    has_duplicates: bool
+
+    @property
+    def row_count(self) -> int:
+        """Number of unique rows the INSERT will write."""
+        return len(self.embedding_hashes)
+
+    @property
+    def row_keys(self) -> list[tuple[UUID, UUID]]:
+        """
+        The (embedding_hash, metadata_hash) pair identifying each unique row, in row order.
+
+        Deduplication is by exactly this pair, so it is unique across the batch and usable to
+        match RETURNING rows back to inputs without relying on the order Postgres emits them.
+        """
+        return list(zip(self.embedding_hashes, self.metadata_hashes))
+
+
+def _prepare_bulk_write(
+    collection: Collection,
+    embeddings: list[list[float]],
+    metadata_list: list[dict] | None,
+) -> _BulkWriteBatch:
+    """
+    Hash a batch of embeddings and drop the duplicates within it.
+
+    Deduplication is on (embedding_hash, metadata_hash); `authz` is a single value for the
+    whole call, so it is constant within a batch and cannot distinguish rows. Because the
+    hashes are taken at storage precision, two inputs that differ only in digits the column
+    cannot store now collapse here, which is what the database's unique constraint would
+    consider them anyway.
 
     Args:
-        request (Request): Incoming request, used to resolve the caller's authz mapping.
+        collection (Collection): Target collection; supplies dimensions and vector type.
+        embeddings (list[list[float]]): Vectors to write.
+        metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
 
-    Yields:
-        DataAccessLayer: DAL bound to the connection pool and the caller's `read` authz.
+    Returns:
+        _BulkWriteBatch: The deduplicated batch, ready to bind.
+
+    Raises:
+        MetadataLengthMismatchError: If `metadata_list` is a different length than
+            `embeddings`.
+        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
+            dimensionality.
+        EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
+            vector type.
     """
-    pool = await get_pool()
-    allowed_authz = await get_allowed_authz_for_request_with_method(request, method="read")
-    dal = DataAccessLayer(pool, allowed_authz=allowed_authz)
-    yield dal
+    if metadata_list is None:
+        metadata_list = [{} for _ in embeddings]
+    elif len(metadata_list) != len(embeddings):
+        raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
+
+    vector_type = VectorType(collection.vector_type)
+    # one conversion for the whole batch; its rows are the bytes Postgres will store, which
+    # is both what gets hashed and what gets bound
+    array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
+    embedding_hashes = hashing.hash_rows(array)
+
+    unique_row_indices: list[int] = []
+    unique_metadata_json: list[str] = []
+    unique_embedding_hashes: list[UUID] = []
+    unique_metadata_hashes: list[UUID] = []
+    # key -> unique row index
+    seen: dict[tuple[UUID, UUID], int] = {}
+    # for each original index i, which unique index j it maps to
+    original_to_unique: list[int] = []
+    has_duplicates = False
+
+    for index, (embedding_hash, metadata) in enumerate(zip(embedding_hashes, metadata_list)):
+        metadata_json = hashing.canonical_metadata_json(metadata)
+        metadata_hash = hashing.hash_metadata_json(metadata_json)
+        key = (embedding_hash, metadata_hash)
+
+        if key in seen:
+            original_to_unique.append(seen[key])
+            has_duplicates = True
+            continue
+
+        unique_index = len(unique_row_indices)
+        seen[key] = unique_index
+        original_to_unique.append(unique_index)
+        unique_row_indices.append(index)
+        unique_metadata_json.append(metadata_json)
+        unique_embedding_hashes.append(embedding_hash)
+        unique_metadata_hashes.append(metadata_hash)
+
+    return _BulkWriteBatch(
+        dimensions=collection.dimensions,
+        flat_vectors=hashing.flatten_rows(array, unique_row_indices),
+        metadata_json=unique_metadata_json,
+        embedding_hashes=unique_embedding_hashes,
+        metadata_hashes=unique_metadata_hashes,
+        original_to_unique=original_to_unique,
+        has_duplicates=has_duplicates,
+    )
+
+
+def _bulk_write_results(rows: list[asyncpg.Record], batch: _BulkWriteBatch) -> list[Embedding]:
+    """
+    Map the rows a bulk write returned back onto the caller's original input order.
+
+    RETURNING order is not something Postgres promises, so rows are matched by the hash pair
+    they came back with rather than by position. Every unique row has a distinct pair by
+    construction, so the match is exact.
+
+    Args:
+        rows (list[asyncpg.Record]): Rows from the INSERT's RETURNING clause.
+        batch (_BulkWriteBatch): The batch that was written.
+
+    Returns:
+        list[Embedding]: One Embedding per embedding the caller passed in, in that order.
+            Inputs that deduplicated onto the same row share an object.
+
+    Raises:
+        EmbeddingWriteInconsistencyError: If the returned rows do not correspond exactly to
+            the rows requested, which would mean a row was silently dropped or duplicated.
+    """
+    if len(rows) != batch.row_count:
+        raise EmbeddingWriteInconsistencyError("Internal error: mismatch between unique upsert results and inputs.")
+
+    rows_by_key = {(row["embedding_hash_v2"], row["metadata_hash_v2"]): row for row in rows}
+    try:
+        unique_results = [Embedding.from_record(rows_by_key[key]) for key in batch.row_keys]
+    except KeyError as exc:
+        raise EmbeddingWriteInconsistencyError(
+            "Internal error: a written embedding could not be matched back to its input."
+        ) from exc
+
+    if not batch.has_duplicates:
+        # nothing collapsed, so unique order is already the caller's order
+        return unique_results
+
+    return [unique_results[unique_index] for unique_index in batch.original_to_unique]
 
 
 class DataAccessLayer:
     """
     Database interface for collections and embeddings, scoped to one caller's authz.
 
-    Each instance carries the authz resources the caller may act on for the current
-    request. Embedding operations hand that set to Postgres row-level security via
-    `_with_rls`; collection operations filter on it in Python instead, because the
-    `collections` table has no RLS policy.
+    Each instance carries the authz context the caller holds for the current request, in the
+    two forms the database's policies key on: `allowed_authz` for the embeddings tables,
+    whose rows carry an `authz` column, and `allowed_collection_names` for `collections`,
+    whose rows are identified by name. Both are resolved by
+    `gen3_embeddings.dependencies` and simply handed to Postgres by `_with_rls`; nothing in
+    this class interprets or extends them.
     """
 
-    def __init__(self, pool: asyncpg.Pool, allowed_authz: list[str] | None = None):
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        allowed_authz: list[str] | None = None,
+        allowed_collection_names: set[str] | None = None,
+    ):
         """
-        Bind the DAL to a connection pool and the caller's allowed authz resources.
+        Bind the DAL to a connection pool and the caller's authz context.
 
         Args:
             pool (asyncpg.Pool): Shared connection pool.
             allowed_authz (list[str] | None): Authz resource paths the caller may act on.
                 Omitted or empty means no resources are allowed, which is a valid
                 fail-closed state rather than "allow everything".
+            allowed_collection_names (set[str] | None): The same grants reduced to
+                collection names. Omitted or empty means no collections, also fail-closed.
         """
         self.pool = pool
-        # Empty list means "no resources allowed", which is valid for RLS
+        # Empty means "nothing allowed", which is valid (and safe) for RLS
         self.allowed_authz = allowed_authz or []
+        self.allowed_collection_names = allowed_collection_names or set()
 
     async def _with_rls(self, fn, *args, **kwargs):
         """
-        Run a DB operation with RLS (row level security) configured
-        via the provided `allowed_authz` values.
+        Run a DB operation inside a transaction carrying the caller's RLS context.
 
-        The caller (route layer) is responsible for:
-        - determining the allowed_authz list from the user's authz mapping.
+        Both settings are written for every operation regardless of which tables `fn`
+        touches. Setting only the one a query "needs" would mean a later query added to the
+        same operation, or a policy added to another table, silently ran with a setting that
+        had never been set. Writing both makes the transaction's authz context complete.
+
+        `is_local=true` scopes them to this transaction, so a pooled connection cannot carry
+        one caller's context into another caller's query.
+
+        Args:
+            fn: Coroutine function taking an open connection as its first argument.
+            *args: Passed through to `fn`.
+            **kwargs: Passed through to `fn`.
+
+        Returns:
+            Whatever `fn` returns.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # the true value means is_local is set to true, the new value will only apply during the current transaction.
-                await conn.execute("SELECT set_config('app.allowed_authz', $1::text[]::text, true)", self.allowed_authz)
-                return await fn(conn, *args, **kwargs)
-
-    def _get_allowed_collection_names_from_allowed_authz(self) -> set[str]:
-        """
-        Compute the collection names the user can access from self.allowed_authz,
-        based on the convention:
-
-          /vectorstore/collections
-          /vectorstore/collections/{collection_name}
-        """
-        base = "/vectorstore/collections"
-        allowed: set[str] = set()
-
-        for item in self.allowed_authz:
-            if not isinstance(item, str):
-                continue
-            if item == base:
-                # base resource: may mean "can access all collections", depending on policy
-                # for now, we'll pass
-                continue
-            if item.startswith(base + "/"):
-                # e.g. "/vectorstore/collections/my_collection"
-                parts = item.split("/")
-                if parts:
-                    if len(parts) != 4:
-                        # # Expect exactly: ["", "vectorstore", "collections", "{collection_name}"]
-                        # This covers "/vectorstore/collections/a/b" (len=5), etc.
-                        continue
-                    name = parts[-1]
-                    if name:
-                        allowed.add(name)
-        return allowed
+                await conn.execute(
+                    """
+                    SELECT
+                        set_config('app.allowed_authz', $1::text[]::text, true),
+                        set_config('app.allowed_collection_names', $2::text[]::text, true)
+                    """,
+                    self.allowed_authz,
+                    list(self.allowed_collection_names),
+                )
+                try:
+                    return await fn(conn, *args, **kwargs)
+                except InsufficientPrivilegeError as exc:
+                    raise _rls_denial_or_reraise(exc) from exc
 
     async def create_collection(
         self,
@@ -256,6 +419,11 @@ class DataAccessLayer:
         """
         Create a collection, if the caller is allowed to use that name.
 
+        The name check here is what turns "not authorized" into a specific 403 rather than
+        the bare `InsufficientPrivilegeError` the table's RLS WITH CHECK would raise. The
+        policy still applies underneath, so removing this check would change the error, not
+        the outcome.
+
         Args:
             collection_name (str): Name of the collection to create.
             description (str | None): Human-readable description; the column is nullable.
@@ -267,17 +435,14 @@ class DataAccessLayer:
             Collection: The newly created collection.
 
         Raises:
-            HTTPException: 403 if the caller may not use this collection name, 409 if the
-                name is already taken, 400 if the insert returned no row.
+            CollectionNameNotAllowedError: If the caller may not use this collection name.
+            CollectionAlreadyExistsError: If the name is already taken.
+            CollectionCreateFailedError: If the insert returned no row.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
+        if collection_name not in self.allowed_collection_names:
+            raise CollectionNameNotAllowedError(f"Not authorized to create collection with name {collection_name}")
 
-        if collection_name not in allowed_names:
-            raise HTTPException(
-                status_code=403, detail=f"Not authorized to create collection with name {collection_name}"
-            )
-
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             try:
                 stmt = await conn.prepare(
                     """
@@ -289,13 +454,12 @@ class DataAccessLayer:
                 row = await stmt.fetchrow(collection_name, description, ai_model_name, dimensions, vector_type.value)
             except UniqueViolationError:
                 # collection_name already exists
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Collection '{collection_name}' already exists",
-                )
+                raise CollectionAlreadyExistsError(f"Collection '{collection_name}' already exists")
             if not row:
-                raise HTTPException(status_code=400, detail="Failed to create collection")
+                raise CollectionCreateFailedError("Failed to create collection")
             return Collection.from_record(row)
+
+        return await self._with_rls(_query)
 
     async def get_collection_by_name(self, collection_name: str) -> Collection | None:
         """
@@ -305,28 +469,24 @@ class DataAccessLayer:
             collection_name (str): Name of the collection; normalized before lookup.
 
         Returns:
-            Collection | None: The collection, or None if it does not exist **or** the
-            caller is not authorized for it. The two cases are deliberately
-            indistinguishable so callers cannot probe for collection names; callers
-            typically surface this as a 404.
+            Collection | None: The collection, or None if it does not exist **or** RLS hid
+            it from this caller. The two cases are deliberately indistinguishable so callers
+            cannot probe for collection names; callers typically surface this as a 404.
 
         Raises:
-            HTTPException: 400 if `collection_name` is not a valid collection name.
+            InvalidCollectionNameError: If `collection_name` is not a valid collection name.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-
         try:
             collection_name = normalize_collection_name(collection_name)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise InvalidCollectionNameError(str(exc)) from exc
 
-        if collection_name not in allowed_names:
-            return None
-
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
             row = await stmt.fetchrow(collection_name)
             return Collection.from_record(row) if row else None
+
+        return await self._with_rls(_query)
 
     async def get_collection_by_id(self, collection_id: int) -> Collection | None:
         """
@@ -336,19 +496,16 @@ class DataAccessLayer:
             collection_id (int): Primary key of the collection.
 
         Returns:
-            Collection | None: The collection, or None if it does not exist **or** the
-            caller is not authorized for it.
+            Collection | None: The collection, or None if it does not exist **or** RLS hid
+            it from this caller.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-        if not allowed_names:
-            return None
-        async with self.pool.acquire() as conn:
+
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = $1::bigint")
             row = await stmt.fetchrow(collection_id)
-            if row and row.collection_name in allowed_names:
-                return Collection.from_record(row)
-            else:
-                return None
+            return Collection.from_record(row) if row else None
+
+        return await self._with_rls(_query)
 
     async def update_collection(self, collection_name: str, description: str | None) -> Collection | None:
         """
@@ -356,21 +513,20 @@ class DataAccessLayer:
 
         Passing `description=None` updates nothing and simply returns the current row.
 
+        `collection_name` is only ever a WHERE predicate here, never something this method
+        assigns: the name is what the table's RLS policy keys on, so renaming a collection
+        would move it to a different authz resource. There is no API path to do that.
+
         Args:
             collection_name (str): Name of the collection to update.
             description (str | None): New description, or None to leave it unchanged.
 
         Returns:
             Collection | None: The collection after the update, or None if it does not
-            exist **or** the caller is not authorized for it.
+            exist **or** RLS hid it from this caller.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-
-        if collection_name not in allowed_names:
-            return None
-
         set_parts = []
-        params = [collection_name]
+        params: list[Any] = [collection_name]
         param_idx = 2
 
         if description is not None:
@@ -378,7 +534,7 @@ class DataAccessLayer:
             params.append(description)
             param_idx += 1
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             if not set_parts:
                 # nothing to update
                 stmt = await conn.prepare("SELECT * FROM collections WHERE collection_name = $1::text")
@@ -398,39 +554,34 @@ class DataAccessLayer:
             row = await stmt.fetchrow(*params)
             return Collection.from_record(row) if row else None
 
+        return await self._with_rls(_query)
+
     async def delete_collection(self, collection_name: str) -> bool:
         """
         Delete a collection and, by cascade, every embedding in it.
+
+        The cascade is a referential-integrity action, which Postgres runs without applying
+        RLS. So deleting a collection removes every embedding in it, including rows the
+        caller could not have selected under its own `app.allowed_authz`. That is the point
+        of the collection-level grant, and it is why `delete` on a collection is a
+        meaningfully broader permission than `delete` on its embeddings.
 
         Args:
             collection_name (str): Name of the collection to delete.
 
         Returns:
-            bool: False if the caller is not authorized for this collection. Otherwise the
-            result of the DELETE, which currently reports True even when no row matched.
+            bool: True only if a row was actually deleted. False if RLS hid the collection
+            from this caller, or if no collection by that name existed.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
 
-        if collection_name not in allowed_names:
-            return False
-
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             result = await conn.execute(
                 "DELETE FROM collections WHERE collection_name = $1::text",
                 collection_name,
             )
-            return result.startswith("DELETE")
+            return affected_row_count(result) > 0
 
-    # async def delete_collection(self, collection_name: str) -> bool:
-    #     allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-
-    #     if collection_name not in allowed_names:
-    #         return False
-
-    #     async with self.pool.acquire() as conn:
-    #         stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text")
-    #         result = await stmt.fetch(collection_name)
-    #         return result.startswith("DELETE")
+        return await self._with_rls(_query)
 
     async def list_collections(
         self,
@@ -440,6 +591,10 @@ class DataAccessLayer:
         """
         List the collections the caller is authorized for.
 
+        RLS restricts the rows, so this is a plain paged SELECT. The name predicate is gone
+        from the SQL: it would duplicate the policy, and a `WHERE collection_name = ANY(...)`
+        that disagreed with the policy would be a second, invisible authorization rule.
+
         Args:
             offset (int): Number of rows to skip.
             limit (int): Maximum number of rows to return. Callers that need every
@@ -447,27 +602,29 @@ class DataAccessLayer:
 
         Returns:
             list[Collection]: Authorized collections for this page, empty if the caller
-            has no allowed collections.
+            has no allowed collections. Never more rows than `allowed_collection_names`
+            has entries, since that set is the whole candidate space - so a caller that
+            wants every collection and needs to know whether it got them all can ask for
+            one more than its own ceiling and check whether that extra row came back.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-
-        # If no allowed names, return empty result
-        if not allowed_names:
+        # nothing can be visible, so skip the round trip
+        if not self.allowed_collection_names:
             return []
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare(
                 """
                 SELECT *
                 FROM collections
-                WHERE collection_name = ANY($1::text[])
                 ORDER BY collection_name
-                LIMIT $3::int
-                OFFSET $2::int
+                LIMIT $2::int
+                OFFSET $1::int
                 """
             )
-            rows = await stmt.fetch(list(allowed_names), offset, limit)
+            rows = await stmt.fetch(offset, limit)
             return [Collection.from_record(r) for r in rows]
+
+        return await self._with_rls(_query)
 
     async def create_embeddings_bulk(
         self,
@@ -488,106 +645,59 @@ class DataAccessLayer:
         Returns:
             List of created Embedding instances.
         """
-        if metadata_list is None:
-            metadata_list = [{} for _ in embeddings]
-        elif len(metadata_list) != len(embeddings):
-            raise HTTPException(
-                status_code=400,
-                detail="metadata_list length must match embeddings length",
-            )
-
-        # Deduplicate within the request based on (embedding, metadata, authz)
-        unique_payload_data: list[dict] = []
-        # key -> unique index
-        seen: dict[tuple[str, str, str], int] = {}
-        # for each original index i, which unique index j it maps to
-        original_to_unique: list[int] = []
-        has_duplicates = False
-
-        for emb_vec, metadata in zip(embeddings, metadata_list):
-            # Use json.dumps with sorted keys to make metadata deterministic
-            emb_json = json.dumps(emb_vec)
-            meta_json = json.dumps(metadata or {}, sort_keys=True)
-            key = (emb_json, meta_json, authz)
-
-            if key in seen:
-                j = seen[key]
-                original_to_unique.append(j)
-                has_duplicates = True
-            else:
-                j = len(unique_payload_data)
-                original_to_unique.append(j)
-                seen[key] = j
-                unique_payload_data.append(
-                    {
-                        "collection_id": collection.id,
-                        "embedding": emb_json,
-                        "authz": authz,
-                        "metadata": metadata or {},
-                    }
-                )
-
-        if not unique_payload_data:
+        batch = _prepare_bulk_write(collection, embeddings, metadata_list)
+        if not batch.row_count:
             return []
 
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            # Convert data in bulk to JSON, then use postgres support for JSON -> records
-            # to bulk insert in a single transaction.
-            # convert the entire batch into a single JSON string
-            json_payload = json.dumps(unique_payload_data)
-
             # execute one concurrent safe query
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
-                SELECT
-                    raw.collection_id,
-                    raw.embedding{cast},
-                    raw.authz,
-                    raw.metadata,
-                    md5(raw.embedding)::uuid,
-                    md5(raw.metadata::text)::uuid
-                FROM jsonb_to_recordset($1::jsonb) AS raw(
-                    collection_id bigint,
-                    embedding text,
-                    authz text,
-                    metadata jsonb
+                INSERT INTO {table} (
+                    collection_id, embedding, authz, metadata,
+                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
                 )
-                -- only return what we need back, not the embedding itself b/c it's big
-                -- and we already have it in Python
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
+                SELECT
+                    $1::bigint,
+                    -- one flat float4[] for the batch, sliced per row. asyncpg encodes it in
+                    -- binary, so the vectors never become text on the way here.
+                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
+                    $4::text,
+                    raw.metadata::jsonb,
+                    -- legacy md5 columns, written with the sha256 value so their NOT NULL and
+                    -- unique constraint stay satisfied until the contract migration drops
+                    -- them. See db/migrations/20260826120000_sha256_content_hashes.sql.
+                    raw.embedding_hash,
+                    raw.metadata_hash,
+                    raw.embedding_hash,
+                    raw.metadata_hash
+                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
+                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                -- the hashes come back so results can be matched to inputs by content rather
+                -- than by an order Postgres does not guarantee
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                          embedding_hash_v2, metadata_hash_v2;
                 """
             )
             try:
-                rows = await stmt.fetch(json_payload)
+                rows = await stmt.fetch(
+                    collection.id,
+                    batch.flat_vectors,
+                    batch.dimensions,
+                    authz,
+                    batch.metadata_json,
+                    batch.embedding_hashes,
+                    batch.metadata_hashes,
+                )
             except UniqueViolationError as exc:
-                raise HTTPException(
-                    status_code=409,
-                    detail="One or more embeddings already exist in this collection. "
-                    "No embeddings were created. Use PUT to force update existing embeddings.",
+                raise EmbeddingsAlreadyExistError(
+                    "One or more embeddings already exist in this collection. "
+                    "No embeddings were created. Use PUT to force update existing embeddings."
                 ) from exc
 
-            if len(rows) != len(unique_payload_data):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Internal error: mismatch between unique upsert results and inputs.",
-                )
-
-            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
-
-            if not has_duplicates:
-                # If there were no duplicates in the request, we can return the results directly
-                return unique_results
-            else:
-                # If there were duplicates in the request, we need to map back to the original order
-                results: list[Embedding] = []
-                for orig_idx in range(len(embeddings)):
-                    unique_idx = original_to_unique[orig_idx]
-                    results.append(unique_results[unique_idx])
-
-                return results
+            return _bulk_write_results(rows, batch)
 
         return await self._with_rls(_query)
 
@@ -629,97 +739,54 @@ class DataAccessLayer:
         """
         Bulk upsert multiple embeddings in the given collection.
         """
-        if metadata_list is None:
-            metadata_list = [{} for _ in embeddings]
-        elif len(metadata_list) != len(embeddings):
-            raise HTTPException(
-                status_code=400,
-                detail="metadata_list length must match embeddings length",
-            )
-
-        # Deduplicate within the request based on (embedding, metadata, authz)
-        unique_payload_data: list[dict] = []
-        # key -> unique index
-        seen: dict[tuple[str, str, str], int] = {}
-        # for each original index i, which unique index j it maps to
-        original_to_unique: list[int] = []
-        has_duplicates = False
-
-        for emb_vec, metadata in zip(embeddings, metadata_list):
-            # Use json.dumps with sorted keys to make metadata deterministic
-            emb_json = json.dumps(emb_vec)
-            meta_json = json.dumps(metadata or {}, sort_keys=True)
-            key = (emb_json, meta_json, authz)
-
-            if key in seen:
-                j = seen[key]
-                original_to_unique.append(j)
-                has_duplicates = True
-            else:
-                j = len(unique_payload_data)
-                original_to_unique.append(j)
-                seen[key] = j
-                unique_payload_data.append(
-                    {
-                        "collection_id": collection.id,
-                        "embedding": emb_json,
-                        "authz": authz,
-                        "metadata": metadata or {},
-                    }
-                )
-
-        if not unique_payload_data:
+        batch = _prepare_bulk_write(collection, embeddings, metadata_list)
+        if not batch.row_count:
             return []
 
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
         async def _query(conn):
-            json_payload = json.dumps(unique_payload_data)
-
             stmt = await conn.prepare(
                 f"""
-                INSERT INTO {table} (collection_id, embedding, authz, metadata, embedding_hash, metadata_hash)
-                SELECT
-                    raw.collection_id,
-                    raw.embedding{cast},
-                    raw.authz,
-                    raw.metadata,
-                    md5(raw.embedding)::uuid AS embedding_hash,
-                    md5(raw.metadata::text)::uuid AS metadata_hash
-                FROM jsonb_to_recordset($1::jsonb) AS raw(
-                    collection_id bigint,
-                    embedding text,
-                    authz text,
-                    metadata jsonb
+                INSERT INTO {table} (
+                    collection_id, embedding, authz, metadata,
+                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
                 )
-                ON CONFLICT (collection_id, embedding_hash, metadata_hash, authz)
+                SELECT
+                    $1::bigint,
+                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
+                    $4::text,
+                    raw.metadata::jsonb,
+                    -- legacy md5 columns, see the note in create_embeddings_bulk
+                    raw.embedding_hash,
+                    raw.metadata_hash,
+                    raw.embedding_hash,
+                    raw.metadata_hash
+                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
+                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                -- Conflicts resolve on the v2 index. A new row writes the same value to the
+                -- legacy columns, so anything that would collide there collides here too and
+                -- is handled; a collision with a legacy md5 value would need sha256 and md5
+                -- to agree, which is not a case worth carrying code for.
+                ON CONFLICT (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
                 DO UPDATE SET
                     updated_at = NOW()
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at;
+                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                          embedding_hash_v2, metadata_hash_v2;
                 """
             )
             # If RLS denies insert or update, this will raise an error
-            rows = await stmt.fetch(json_payload)
+            rows = await stmt.fetch(
+                collection.id,
+                batch.flat_vectors,
+                batch.dimensions,
+                authz,
+                batch.metadata_json,
+                batch.embedding_hashes,
+                batch.metadata_hashes,
+            )
 
-            if len(rows) != len(unique_payload_data):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Internal error: mismatch between unique upsert results and inputs.",
-                )
-
-            unique_results: list[Embedding] = [Embedding.from_record(row) for row in rows]
-
-            if not has_duplicates:
-                # If there were no duplicates in the request, we can return the results directly
-                return unique_results
-            else:
-                # If there were duplicates in the request, we need to map back to the original order
-                results: list[Embedding] = []
-                for orig_idx in range(len(embeddings)):
-                    unique_idx = original_to_unique[orig_idx]
-                    results.append(unique_results[unique_idx])
-
-                return results
+            return _bulk_write_results(rows, batch)
 
         return await self._with_rls(_query)
 
@@ -738,39 +805,57 @@ class DataAccessLayer:
         - If `metadata` is provided, update metadata and recompute metadata_hash.
         - If `new_authz` is provided, update authz.
 
-        The combination (collection_id, embedding_hash, metadata_hash, authz)
+        The combination (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
         must remain unique (per the DB constraint).
+
+        Raises:
+            DuplicateEmbeddingError: If the update would collide with another row.
+            EmbeddingDimensionMismatchError: If `embedding` is not the collection's
+                dimensionality.
+            EmbeddingNotRepresentableError: If `embedding` holds a value the collection's
+                vector type cannot store.
         """
-        table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+        vector_type = VectorType(collection.vector_type)
+        table, vector_cast = get_embeddings_table_and_cast(vector_type)
+
+        # hash before opening the transaction; a bad vector is the caller's error, not a
+        # reason to have taken a connection out of the pool
+        embedding_hash = (
+            hashing.hash_vector(embedding, vector_type, collection.dimensions) if embedding is not None else None
+        )
+        # the same canonical text is both stored and hashed, so this row's hash matches what
+        # a bulk write of identical metadata would produce
+        metadata_json = hashing.canonical_metadata_json(metadata) if metadata is not None else None
+        metadata_hash = hashing.hash_metadata_json(metadata_json) if metadata_json is not None else None
 
         async def _query(conn):
             set_parts = []
             params = [collection.id, embedding_id]
             param_idx = 3
 
-            # embedding: update vector and embedding_hash
+            # embedding: update vector and embedding_hash. The vector binds natively (pgvector
+            # registers a binary codec on the pool), so it is never serialized to text.
             if embedding is not None:
-                # store embedding as JSON text, then cast in SQL
-                embedding_json = json.dumps(embedding)
                 set_parts.append(f"embedding = ${param_idx}{vector_cast}")
                 params.append(embedding)
                 param_idx += 1
 
-                # recompute embedding_hash from the same JSON text representation
-                set_parts.append(f"embedding_hash = md5(${param_idx}::text)::uuid")
-                params.append(embedding_json)
+                # legacy md5 column gets the sha256 value too; see
+                # db/migrations/20260826120000_sha256_content_hashes.sql
+                set_parts.append(f"embedding_hash = ${param_idx}::uuid")
+                set_parts.append(f"embedding_hash_v2 = ${param_idx}::uuid")
+                params.append(embedding_hash)
                 param_idx += 1
 
             # metadata: update metadata and metadata_hash
             if metadata is not None:
-                metadata_json = json.dumps(metadata)
                 set_parts.append(f"metadata = ${param_idx}::jsonb")
                 params.append(metadata_json)
                 param_idx += 1
 
-                # recompute metadata_hash from metadata::text
-                set_parts.append(f"metadata_hash = md5(${param_idx}::text)::uuid")
-                params.append(metadata_json)
+                set_parts.append(f"metadata_hash = ${param_idx}::uuid")
+                set_parts.append(f"metadata_hash_v2 = ${param_idx}::uuid")
+                params.append(metadata_hash)
                 param_idx += 1
 
             # authz: update authz
@@ -805,13 +890,10 @@ class DataAccessLayer:
                 row = await stmt.fetchrow(*params)
             except UniqueViolationError as exc:
                 # updating caused a collision with another row that has the same
-                # (collection_id, embedding_hash, metadata_hash, authz)
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "Update would create a duplicate embedding "
-                        "with same vector, metadata, and authz in this collection."
-                    ),
+                # (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
+                raise DuplicateEmbeddingError(
+                    "Update would create a duplicate embedding "
+                    "with same vector, metadata, and authz in this collection."
                 ) from exc
 
             return Embedding.from_record(row) if row else None
@@ -831,8 +913,8 @@ class DataAccessLayer:
             embedding_id (UUID): Identifier of the embedding to delete.
 
         Returns:
-            bool: Result of the DELETE, which currently reports True even when no row
-            matched or RLS hid the row from this caller.
+            bool: True only if a row was actually deleted. False if no such embedding
+            existed in the collection, or if RLS hid it from this caller.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -842,7 +924,7 @@ class DataAccessLayer:
                 collection.id,
                 embedding_id,
             )
-            return result.startswith("DELETE")
+            return affected_row_count(result) > 0
 
         return await self._with_rls(_query)
 
@@ -988,6 +1070,9 @@ class DataAccessLayer:
         """
         Fetch several collections by primary key, keeping only those the caller may see.
 
+        The post-fetch filter this used to apply is now the table's RLS policy, so
+        unauthorized ids simply return no row.
+
         Args:
             collection_ids (list[int]): Primary keys to look up.
 
@@ -996,17 +1081,16 @@ class DataAccessLayer:
             shorter than `collection_ids`, and empty if the caller has no allowed
             collections.
         """
-        allowed_names = self._get_allowed_collection_names_from_allowed_authz()
-
-        # If user has no allowed collection names, return empty
-        if not allowed_names:
+        # nothing can be visible, so skip the round trip
+        if not self.allowed_collection_names:
             return []
 
-        async with self.pool.acquire() as conn:
+        async def _query(conn):
             stmt = await conn.prepare("SELECT * FROM collections WHERE id = ANY($1::bigint[])")
             rows = await stmt.fetch(collection_ids)
-            filtered_rows = [row for row in rows if row["collection_name"] in allowed_names]
-            return [Collection.from_record(r) for r in filtered_rows]
+            return [Collection.from_record(r) for r in rows]
+
+        return await self._with_rls(_query)
 
     # -------- Search --------
 
@@ -1064,6 +1148,8 @@ class DataAccessLayer:
 
         The collections list will be filtered to only those whose vector_type matches
         the given `vector_type` AND whose dimensions match the query vector length.
+        A collection that matches neither cannot hold a hit for this query, so no
+        collection matching means no hits: the result is empty rather than an error.
         """
         if not collections:
             return []
@@ -1073,18 +1159,11 @@ class DataAccessLayer:
         query_dims = len(query_vector)
 
         for col in collections:
-            if col.vector_type == vector_type.value and col.dimensions == query_dims:
+            if col.vector_type == vector_type and col.dimensions == query_dims:
                 filtered_collections.append(col)
 
         if not filtered_collections:
-            # No collections meet the requested vector_type and dimension
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "No collections available with the requested vector_type "
-                    f"'{vector_type.value}' and dimensions {query_dims}"
-                ),
-            )
+            return []
 
         table, cast = get_embeddings_table_and_cast(vector_type)
         collection_ids = [col.id for col in filtered_collections]

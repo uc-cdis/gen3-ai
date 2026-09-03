@@ -106,6 +106,20 @@ docker run --name pgvector \
 
 Create an app user with limited permissions. A superuser can bypass RLS, and the app won't allow a superuser. for example create an app user and load some test data:
 
+> **Note:** `collections`, `embeddings_vector` and `embeddings_halfvec` all have row-level
+> security enabled and FORCEd. Querying them as the app user returns nothing unless the
+> transaction sets the settings the policies read: `app.allowed_collection_names` for
+> `collections`, and `app.allowed_authz` for the embeddings tables. The seed SQL below runs
+> as the admin superuser, which bypasses RLS. To poke around as the app user:
+>
+> ```sql
+> BEGIN;
+> SELECT set_config('app.allowed_collection_names', ARRAY['public']::text[]::text, true);
+> SELECT set_config('app.allowed_authz', ARRAY['/vectorstore/collections/public']::text[]::text, true);
+> SELECT * FROM collections;
+> COMMIT;
+> ```
+
 ```bash
 PGPASSWORD=adminpass psql -h localhost -p 5432 -U adminuser -d gen3embeddings
 ```
@@ -589,19 +603,35 @@ uv run --directory "./services/gen3_embeddings" \
 ### Run tests
 
 ```bash
+# from the repo root; this is what CI runs
+just test gen3_embeddings
+
+# or directly, from this directory
 uv run pytest -n auto . -vv
+```
 
-uv pip install pytest-cov
+Coverage of `src/gen3_embeddings` is measured on every run and printed as a table of
+uncovered line numbers per file. It is configured in `pyproject.toml`
+(`[tool.pytest.ini_options]` and `[tool.coverage.*]`), so there is nothing to install or to
+pass on the command line, and CI reports the same number as a local run.
 
-uv run pytest -n auto . -vv \
-  --cov=gen3_embeddings \
-  --cov-report=term-missing \
-  --cov-report=html
+The suite fails if total coverage drops below **90%** (`fail_under`), separately from whether
+the tests themselves passed -- read the last two lines of the output to tell the two apart.
 
-uv run pytest -n auto . --maxfail=1 --disable-warnings \
-  --cov=gen3_embeddings.database.db \
-  --cov=gen3_embeddings.database.helpers \
-  --cov-report=term-missing
+```bash
+# a browsable line-by-line report in htmlcov/ (gitignored)
+uv run pytest -n auto . --cov-report=html
+
+# one module, e.g. while writing tests for it
+uv run pytest -n auto . --cov=gen3_embeddings.database.db --cov-report=term-missing
+```
+
+When running a subset of the tests, turn coverage off with `--no-cov`. Part of the suite
+covers only part of the package, so the 90% gate would otherwise fail a run whose tests all
+passed:
+
+```bash
+uv run pytest tests/test_db_dal.py -q --no-cov
 ```
 
 ### Sample manual tests
@@ -831,11 +861,10 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 ## TODO
 
 - ai model
-- support DEBUG_SKIP_AUTH True for RLS
+- raw test search
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
 - add support for index
-- output page_size value use the actual output size or the defined page size?
-- delete functions need some work
-- move get_allowed_authz_for_request logic out of db.py
 - dimensions limit? create warnings on limitions on indexing for bigger dimension vectors
 - re-evaluate running the snyk test now that they support uv
+- It would be nice if when searching by metadata you could specify more than 1 value to match, a situation where one needed to match 2 different studies (which were metadata) and wanted to do it in one query
+- check ALLOW_ANONYMOUS_ACCESS and DEBUG_SKIP_AUTH flow
