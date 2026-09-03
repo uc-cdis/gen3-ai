@@ -147,9 +147,11 @@ Note that the pre-commit in this repo relies on `just` commands and is relativel
   - Prepared statements for extra security and parsing of inputs
 * No ORM. `asyncpg` with shared code in `libraries/common`, services using a Data Access Layer (DAL) pattern
 
-### Metrics
+### Observability
 
-See [these docs](./docs/metrics.md) for more info.
+Traces, metrics, and logs, plus how to check each one is working: see
+[these docs](./docs/observability.md). For a local Prometheus specifically, see
+[these docs](./docs/metrics.md).
 
 ## Development Details
 

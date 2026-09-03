@@ -93,34 +93,50 @@ lock SERVICE="all": _check_dependencies
     fi
 
 # Let you know what tools are missing and try to install
+# Reports missing tools as warnings and always exits 0, so callers that only need
+# a subset of the tooling (e.g. CI jobs that never touch the database) still pass.
+# Recipes that actually need a tool are expected to fail on their own.
 [group('basic')]
 setup:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -uo pipefail
     source scripts/.justfile_helpers.bash
+
+    missing=""
 
     print_header "just setup:" "verifying" "uv" "installation..."
     if command -v uv >/dev/null 2>&1; then
         echo "uv is installed. version: $(uv --version)"
     else
         echo -e "${YELLOW}** WARNING: uv not found in \$PATH. Installing... **${RESET}"
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+            echo -e "${YELLOW}** WARNING: uv install failed. See: https://docs.astral.sh/uv/getting-started/installation **${RESET}"
+            missing="$missing uv"
+        fi
     fi
 
     print_header "just setup:" "verifying" "PostgreSQL client (psql)" "installation..."
     if command -v psql >/dev/null 2>&1; then
         echo "psql is installed. version: $(psql --version)"
     else
-        echo -e "${RED}** ERROR: psql not found. Please install PostgreSQL. **${RESET}"
-        exit 1
+        echo -e "${YELLOW}** WARNING: psql not found. Please install PostgreSQL. **${RESET}"
+        missing="$missing psql"
     fi
 
     print_header "just setup:" "verifying" "dbmate" "installation..."
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
     else
-        echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
-        exit 1
+        if [[ "${GITHUB_ACTIONS:-}" = "true" ]]; then
+            echo -e "${YELLOW}** WARNING: dbmate not found in CI. Installing... **${RESET}"
+            curl -fsSL "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64" -o dbmate
+            chmod +x dbmate
+            sudo mv dbmate /usr/local/bin/dbmate
+            echo "dbmate is installed. version: $(dbmate --version)"
+        else
+            echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
+            exit 1
+        fi
     fi
 
     print_header "just setup:" "verifying" "pre-commit" "installation..."
@@ -128,15 +144,26 @@ setup:
         echo "pre-commit is installed. version: $(pre-commit --version)"
     else
         echo -e "${YELLOW}** WARNING: pre-commit not found. Installing... **${RESET}"
-        pip install pre-commit
+        if ! pip install pre-commit; then
+            echo -e "${YELLOW}** WARNING: pre-commit install failed. See: https://pre-commit.com/#install **${RESET}"
+            missing="$missing pre-commit"
+        fi
     fi
 
-    hook_path="$(git rev-parse --git-path hooks/pre-commit)"
-    if [[ ! -f "$hook_path" ]] || ! grep -q 'pre-commit' "$hook_path"; then
-        echo -e "${YELLOW}** WARNING: pre-commit git hook not found or incomplete. Installing... **${RESET}"
-        pre-commit install --overwrite
+    if command -v pre-commit >/dev/null 2>&1; then
+        hook_path="$(git rev-parse --git-path hooks/pre-commit)"
+        if [[ ! -f "$hook_path" ]] || ! grep -q 'pre-commit' "$hook_path"; then
+            echo -e "${YELLOW}** WARNING: pre-commit git hook not found or incomplete. Installing... **${RESET}"
+            pre-commit install --overwrite || echo -e "${YELLOW}** WARNING: could not install the pre-commit git hook **${RESET}"
+        fi
+        echo "pre-commit git hook is installed."
     fi
-    echo "pre-commit git hook is installed."
+
+    if [[ -n "$missing" ]]; then
+        echo
+        echo -e "${YELLOW}** WARNING: just setup finished with missing tools:${missing} **${RESET}"
+        echo -e "${YELLOW}Recipes that need them will fail until they are installed.${RESET}"
+    fi
 
 # Detect vulnerabilities in service(s) dependencies
 [group('basic')]
@@ -157,9 +184,9 @@ snyk SERVICE="all": _check_dependencies
 
         print_header "just snyk:" "scanning" "{{SERVICE}}" "service..."
 
-        # export a requirements file without local imports
-        # since the local imports are reflected in the overall requirements and confuse snyk
-        uv --directory "$TARGET" export --no-emit-local --format requirements.txt > "{{SERVICE}}_requirements.txt"
+        # export a requirements file without local imports or hashes
+        # --no-hashes prevents pip from forcing strict hash verification on Git repos
+        uv --directory "$TARGET" export --no-emit-local --no-hashes --format requirements.txt > "{{SERVICE}}_requirements.txt"
 
         # snyk, at the moment, requires pip in an env to actually test things. uv envs don't depend on pip
         # so we need to create a new virtual env.
@@ -195,9 +222,11 @@ test SERVICE="all": _check_dependencies
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test libraries/{}
             echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test {}
             just _warn
         else
+            for lib in {{LIBRARIES}}; do just test "libraries/$lib"; done
             for service in {{SERVICES}}; do just test "$service"; done
         fi
     else
@@ -302,6 +331,13 @@ db_setup SERVICE="all": _check_dependencies
         fi
 
         service_name="{{SERVICE}}"
+        # PG* is the canonical Postgres variable set. DB_* is a legacy app-level alias
+        # that may still exist in older service .env files, so prefer PGDATABASE and
+        # warn instead of failing hard if both are present but differ.
+        if [[ -z "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" ]]; then export PGDATABASE="${DB_DATABASE}"; fi
+        if [[ -n "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" && "${PGDATABASE}" != "${DB_DATABASE}" ]]; then
+            echo -e "${YELLOW}** WARNING: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Using PGDATABASE for the setup step. **${RESET}"
+        fi
         set_postgres_defaults
         psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" 2>/dev/null || echo "Database exists."
     fi
@@ -346,9 +382,15 @@ update_versions: _check_dependencies
 
     UV_LATEST=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | jq -r .tag_name)
     JUST_LATEST=$(curl -s https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
+    DBMATE_LATEST=$(curl -s https://api.github.com/repos/amacneil/dbmate/releases/latest | jq -r .tag_name)
 
     if [[ ! $UV_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid UV tag${RESET}"; exit 1; fi
     if [[ ! $JUST_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid JUST tag${RESET}"; exit 1; fi
+    if [[ ! $DBMATE_LATEST =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo -e "${RED}ERROR: Invalid DBMATE tag${RESET}"; exit 1; fi
+
+    # the workflows build a GitHub release download URL (tag keeps the "v"), while Dockerfile.k8s
+    # pulls a ghcr image tag (no "v"). Both must resolve to the same dbmate build.
+    DBMATE_LATEST_NO_V="${DBMATE_LATEST#v}"
 
     for file in .github/workflows/*.yml; do
         if grep -E "UV_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
@@ -362,8 +404,23 @@ update_versions: _check_dependencies
         else
             sed -i.bak -E "s/(JUST_VERSION:[[:space:]]*')[^']*'/\\1${JUST_LATEST}'/g" "$file"
         fi
+
+        if grep -E "DBMATE_VERSION:.*#[[:space:]]*allow-old-version" "$file" > /dev/null; then
+            echo "Skipping DBMATE in $file"
+        else
+            sed -i.bak -E "s/(DBMATE_VERSION:[[:space:]]*')[^']*'/\\1${DBMATE_LATEST}'/g" "$file"
+        fi
         rm -f "$file.bak"
     done
+
+    if [ -f Dockerfile.k8s ]; then
+        if grep -E "^#[[:space:]]*allow-old-version" Dockerfile.k8s > /dev/null; then
+            echo "Skipping DBMATE in Dockerfile.k8s"
+        else
+            sed -i.bak -E "s/(ARG DBMATE_VERSION=)[^[:space:]]*/\\1${DBMATE_LATEST_NO_V}/" Dockerfile.k8s
+            rm -f Dockerfile.k8s.bak
+        fi
+    fi
     echo "Up to date!"
 
 # Delete all .venv and .lock files (irreversible)
@@ -430,7 +487,7 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         just format "{{SERVICE}}"
 
         print_header "just lint:" "ruff check" "$TARGET" "..."
-        uv run --directory "$TARGET" ruff check ./src --fix {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ruff check . --fix {{EXTRA_ARG}}
 
         just sql_lint "{{SERVICE}}"
 
@@ -463,7 +520,7 @@ typecheck SERVICE="all" EXTRA_ARG="": _check_dependencies
         if [[ "$TARGET" == *services* ]]; then just install "{{SERVICE}}"; fi
 
         print_header "just typecheck:" "ty check" "$TARGET" "..."
-        uv run --directory "$TARGET" ty check ./src {{EXTRA_ARG}}
+        uv run --directory "$TARGET" ty check . {{EXTRA_ARG}}
     fi
 
 # Lint .sql files
@@ -553,7 +610,7 @@ whitespace_lint: _check_dependencies
 
 # Run a service in docker
 [group('run')]
-@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="4141": _check_dependencies
+@docker_run SERVICE EXTERNAL_PORT="8001" INTERNAL_PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
@@ -562,15 +619,14 @@ whitespace_lint: _check_dependencies
     docker rm "{{SERVICE}}" 2>/dev/null || true
     docker run --name "{{SERVICE}}" --env-file "services/{{SERVICE}}/.env" -p {{EXTERNAL_PORT}}:{{INTERNAL_PORT}} "{{SERVICE}}:latest"
 
-# Run a service using gunicorn
+# Run a service using uvicorn (pass PORT to run more than one service at once)
 [group('run')]
-@run SERVICE: _check_dependencies
+@run SERVICE PORT="8000": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
-    print_header "just run:" "running" "{{SERVICE}}" "service..."
-    export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=1
-    uv run --directory "./services/{{SERVICE}}" opentelemetry-instrument gunicorn {{SERVICE}}.main:app_instance -k uvicorn.workers.UvicornWorker -c ../../deployments/k8s/services/{{SERVICE}}/gunicorn.conf.py --access-logfile - --error-logfile -
+    print_header "just run:" "running" "{{SERVICE}}" "service on port {{PORT}}..."
+    uv run --directory "./services/{{SERVICE}}" uvicorn {{SERVICE}}.main:app_instance --host 0.0.0.0 --port {{PORT}}
 
 _warn:
     #!/usr/bin/env bash

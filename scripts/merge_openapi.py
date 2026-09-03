@@ -26,16 +26,8 @@ def merge_openapi(service_specs):
         },
         "servers": [
             {
-                "url": "http://localhost:4141",
-                "description": "Local Development: gen3_ai_model_repo"
-            },
-            {
-                "url": "http://localhost:4142",
-                "description": "Local Development: gen3_embeddings"
-            },
-            {
-                "url": "http://localhost:4143",
-                "description": "Local Development: gen3_inference"
+                "url": "http://localhost:8000",
+                "description": "Local Development (every service defaults to this port; run `just run <service> <port>` to serve several at once)"
             },
             {
                 "url": "https://example.com/ai",

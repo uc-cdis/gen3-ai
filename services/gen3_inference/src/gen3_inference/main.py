@@ -50,6 +50,9 @@ def get_app() -> FastAPI:
         Args:
             request (Request): the incoming HTTP request
             call_next (Callable): function to call (this is handled by FastAPI's middleware support)
+
+        Returns:
+            Response: The response produced downstream, or a 500 built from an unhandled error.
         """
         start_time = time.perf_counter()
         try:

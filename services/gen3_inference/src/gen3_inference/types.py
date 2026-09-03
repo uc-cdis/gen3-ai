@@ -32,9 +32,9 @@ class OpenResponsesError(Error):
 
     def to_json(self) -> dict:
         """
-        Render this error in the envelope the Open Responses spec requires.
+        Convert the error to a JSON-compatible dictionary.
 
         Returns:
-            dict: The error wrapped under a single top-level `error` key.
+            dict: A dictionary containing the serialized error payload.
         """
         return {"error": json.loads(self.model_dump_json())}

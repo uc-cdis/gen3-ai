@@ -1,21 +1,27 @@
-# Define build arguments
-ARG AZLINUX_BASE_VERSION=3.13-pythonnginx
+ARG AZLINUX_BASE_VERSION=3.13-pythonuv
 ARG SERVICE_NAME
+# Pinned to match DBMATE_VERSION in .github/workflows/tests_and_build.yml, so the binary that
+# runs migrations in the init container is the one CI validated them against.
+#
+# Kept current by `just update_versions`. To hold it back when the latest is broken, put
+# `# allow-old-version` on its own line above the ARG; Docker treats a mid-line `#` as an
+# argument, not a comment, so it cannot go inline the way it does in the workflows.
+#
+# IMPORTANT: If you are reading this and `# allow-old-version` is present, try removing it and
+# running `just update_versions` and if CI passes, leave it off! We want to stay up to date.
+ARG DBMATE_VERSION=2.35.1
 
-# Base image
+# Named stage because --from does not expand build arguments inline.
+FROM ghcr.io/amacneil/dbmate:${DBMATE_VERSION} AS dbmatebin
+
+# Base image: tooling and environment only. Application sources are deliberately not copied
+# here, so that a source-only change cannot invalidate the dependency layer in `builder`.
+# Note: uv and the UV_* settings come from the base image.
 FROM quay.io/cdis/amazonlinux-base:${AZLINUX_BASE_VERSION} AS base
 ARG SERVICE_NAME
 
-ENV UV_NO_MANAGED_PYTHON=true \
-    UV_PYTHON_DOWNLOADS=never \
-    UV_PROJECT_ENVIRONMENT=/venv
 
-# Copy uv binary from upstream image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uvx /bin/uvx
-
-# Copy dbmate binary from upstream image
-COPY --from=ghcr.io/amacneil/dbmate:latest /usr/local/bin/dbmate /usr/local/bin/dbmate
+COPY --from=dbmatebin /usr/local/bin/dbmate /usr/local/bin/dbmate
 
 # OpenTelemetry environment variables
 ENV OTEL_SERVICE_NAME=${SERVICE_NAME} \
@@ -25,13 +31,12 @@ ENV OTEL_SERVICE_NAME=${SERVICE_NAME} \
 # Copy shared libraries
 COPY --chown=gen3:gen3 /libraries /libraries
 
-# Copy service code and configs
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/src /services/${SERVICE_NAME}/src
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/pyproject.toml /services/${SERVICE_NAME}/pyproject.toml
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}/uv.lock
+# Copy the selected service.  Some services include database migrations while
+# others do not, so copying the service directory keeps this shared Dockerfile
+# compatible with every service.
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME} /services/${SERVICE_NAME}
 
 COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
-COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/gunicorn.conf.py /services/gunicorn.conf.py
 
 # Conditionally copy db folder if it exists in build context
 # The wildcard prevents Docker from failing if db folder is missing
@@ -43,32 +48,47 @@ WORKDIR /services/${SERVICE_NAME}
 FROM base AS builder
 ARG SERVICE_NAME
 
-USER root
-RUN chown -R gen3:gen3 /venv
-
-USER gen3
-
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}/uv.lock
+# `common` is a path dependency of every service, so it must be present to resolve the lock.
+COPY --chown=gen3:gen3 /libraries /libraries
 COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/pyproject.toml /services/${SERVICE_NAME}/pyproject.toml
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/uv.lock /services/${SERVICE_NAME}/uv.lock
 
+# Dependencies before the project itself, so editing service code reuses this layer.
 # locked and frozen ensure lock file is not modified (e.g.
 # exact deps are installed as listed)
-RUN uv sync -vv --no-dev --all-extras --frozen
+RUN uv sync -vv --no-dev --all-extras --frozen --no-install-project
+
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/src /services/${SERVICE_NAME}/src
+
+# Installs the service itself on top of the cached dependency layer.
+RUN uv sync --no-dev --all-extras --frozen
 
 # Final stage: minimal runtime setup
 FROM base
 ARG SERVICE_NAME
+ARG TARGETARCH
 
-# Copy application and virtual environment from builder
-COPY --from=builder /services/${SERVICE_NAME} /services/${SERVICE_NAME}
+# uv installs the service as an editable package, so /venv holds a .pth pointing back at this
+# src tree and both are needed at runtime. /libraries is not: `common` is a built wheel in /venv.
 COPY --from=builder /venv /venv
+COPY --from=builder /services/${SERVICE_NAME} /services/${SERVICE_NAME}
 
-ENV PATH="/usr/sbin:$PATH"
+COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
 
 USER root
-RUN mkdir -p /var/log/nginx && chown -R gen3:gen3 /var/log/nginx
+RUN mkdir -p /var/log/nginx && chown -R gen3:gen3 /var/log/nginx \
+    && case "${TARGETARCH}" in \
+         amd64|arm64) dbmate_arch="${TARGETARCH}" ;; \
+         *) echo "Unsupported architecture for dbmate: ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl --fail --location --silent --show-error \
+         "https://github.com/amacneil/dbmate/releases/download/v2.29.0/dbmate-linux-${dbmate_arch}" \
+         --output /usr/local/bin/dbmate \
+    && chmod +x /usr/local/bin/dbmate
 
 # Switch to non-root user 'gen3' for the serving process
 USER gen3
 
+# The base image already selects the non-root gen3 user for the serving process.
+# So don't mess with USER at all
 CMD ["/bin/bash", "-c", "/services/dockerrun.bash"]

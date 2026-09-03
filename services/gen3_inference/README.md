@@ -19,7 +19,7 @@ Ensure skip auth is enabled.
 Run:
 
 ```bash
-bun run test:compliance --base-url http://localhost:4143 --api-key "foobar" -v --model llama3.2:latest
+bun run test:compliance --base-url http://localhost:8000 --api-key "foobar" -v --model llama3.2:latest
 ```
 
 ## TODO

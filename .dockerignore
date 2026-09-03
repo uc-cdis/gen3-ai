@@ -1,5 +1,17 @@
+# Exclude everything, then re-allow only the paths Dockerfile.k8s copies from. An allowlist
+# keeps the build context from silently growing as scratch directories appear in the repo root.
+*
+
+!libraries
+!services
+!deployments/k8s/services
+
 # Ignore unnecessary files inside allowed directories
 # This should go after the allowed directories
+**/.venv
 **/*.pyc
 **/*.egg-info
 **/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.benchmarks
