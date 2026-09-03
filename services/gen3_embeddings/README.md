@@ -603,19 +603,35 @@ uv run --directory "./services/gen3_embeddings" \
 ### Run tests
 
 ```bash
+# from the repo root; this is what CI runs
+just test gen3_embeddings
+
+# or directly, from this directory
 uv run pytest -n auto . -vv
+```
 
-uv pip install pytest-cov
+Coverage of `src/gen3_embeddings` is measured on every run and printed as a table of
+uncovered line numbers per file. It is configured in `pyproject.toml`
+(`[tool.pytest.ini_options]` and `[tool.coverage.*]`), so there is nothing to install or to
+pass on the command line, and CI reports the same number as a local run.
 
-uv run pytest -n auto . -vv \
-  --cov=gen3_embeddings \
-  --cov-report=term-missing \
-  --cov-report=html
+The suite fails if total coverage drops below **90%** (`fail_under`), separately from whether
+the tests themselves passed -- read the last two lines of the output to tell the two apart.
 
-uv run pytest -n auto . --maxfail=1 --disable-warnings \
-  --cov=gen3_embeddings.database.db \
-  --cov=gen3_embeddings.database.helpers \
-  --cov-report=term-missing
+```bash
+# a browsable line-by-line report in htmlcov/ (gitignored)
+uv run pytest -n auto . --cov-report=html
+
+# one module, e.g. while writing tests for it
+uv run pytest -n auto . --cov=gen3_embeddings.database.db --cov-report=term-missing
+```
+
+When running a subset of the tests, turn coverage off with `--no-cov`. Part of the suite
+covers only part of the package, so the 90% gate would otherwise fail a run whose tests all
+passed:
+
+```bash
+uv run pytest tests/test_db_dal.py -q --no-cov
 ```
 
 ### Sample manual tests

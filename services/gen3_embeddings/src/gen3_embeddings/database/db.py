@@ -1159,7 +1159,7 @@ class DataAccessLayer:
         query_dims = len(query_vector)
 
         for col in collections:
-            if col.vector_type == vector_type.value and col.dimensions == query_dims:
+            if col.vector_type == vector_type and col.dimensions == query_dims:
                 filtered_collections.append(col)
 
         if not filtered_collections:
