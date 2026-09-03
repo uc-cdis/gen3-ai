@@ -131,6 +131,12 @@ S3_SECRET_ACCESS_KEY = starlette_config(
     cast=str,
 )
 
+S3_SESSION_TOKEN = starlette_config(
+    "S3_SESSION_TOKEN",
+    default="",
+    cast=str,
+)
+
 STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
     "STORAGE_CREATE_BUCKET_IF_MISSING",
     cast=bool,

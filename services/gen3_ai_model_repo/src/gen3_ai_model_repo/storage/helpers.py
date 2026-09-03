@@ -12,6 +12,7 @@ from gen3_ai_model_repo.config import (
     S3_ENDPOINT_URL,
     S3_REGION,
     S3_SECRET_ACCESS_KEY,
+    S3_SESSION_TOKEN,
     STORAGE_CREATE_BUCKET_IF_MISSING,
     STORAGE_PROVIDER,
 )
@@ -56,6 +57,7 @@ def get_storage_provider():
             endpoint_url=S3_ENDPOINT_URL,
             access_key_id=S3_ACCESS_KEY_ID,
             secret_access_key=S3_SECRET_ACCESS_KEY,
+            session_token=S3_SESSION_TOKEN,
             create_bucket_if_missing=STORAGE_CREATE_BUCKET_IF_MISSING,
         )
         return _provider_cache

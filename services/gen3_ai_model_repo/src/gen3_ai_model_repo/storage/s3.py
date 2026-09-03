@@ -13,6 +13,7 @@ class S3StorageProvider(StorageProvider):
         endpoint_url: str | None = None,
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
+        session_token: str | None = None,
         create_bucket_if_missing: bool = True,
     ):
         """Initialize the provider with S3 connection settings."""
@@ -28,6 +29,7 @@ class S3StorageProvider(StorageProvider):
             endpoint_url=endpoint_url or None,
             aws_access_key_id=access_key_id or None,
             aws_secret_access_key=secret_access_key or None,
+            aws_session_token=session_token or None,
         )
 
     async def ensure_container(self):
