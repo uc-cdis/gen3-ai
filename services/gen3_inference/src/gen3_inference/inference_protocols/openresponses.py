@@ -19,6 +19,8 @@ from gen3_inference.inference_protocols.utils.openai_responses_to_openresponses 
 )
 from gen3_inference.types import OpenResponsesError
 
+"""Inference protocol client for OpenResponses API."""
+
 
 class OpenResponsesClient(InferenceProtocolClient):
     """
