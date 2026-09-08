@@ -2,11 +2,6 @@
 
 from gen3_ai_model_repo.config import (
     LOCAL_STORAGE_PATH,
-    MINIO_ACCESS_KEY,
-    MINIO_BUCKET,
-    MINIO_ENDPOINT,
-    MINIO_SECRET_KEY,
-    MINIO_SECURE,
     S3_ACCESS_KEY_ID,
     S3_BUCKET,
     S3_ENDPOINT_URL,
@@ -17,9 +12,14 @@ from gen3_ai_model_repo.config import (
     STORAGE_PROVIDER,
 )
 from gen3_ai_model_repo.storage.local import LocalStorageProvider
-from gen3_ai_model_repo.storage.minio import MinioStorageProvider
 
 _provider_cache = None
+
+
+def reset_storage_provider() -> None:
+    """Clear the cached storage provider, primarily for test isolation."""
+    global _provider_cache
+    _provider_cache = None
 
 
 def get_storage_provider():
@@ -27,7 +27,7 @@ def get_storage_provider():
     Return the configured storage provider implementation.
 
     Returns:
-        StorageProvider: The configured storage provider instance (Local, MinIO, or S3).
+        StorageProvider: The configured local or S3-compatible storage provider.
 
     Raises:
         ValueError: If an unsupported STORAGE_PROVIDER is configured.
@@ -35,17 +35,6 @@ def get_storage_provider():
     global _provider_cache
 
     if _provider_cache is not None:
-        return _provider_cache
-
-    if STORAGE_PROVIDER == "minio":
-        _provider_cache = MinioStorageProvider(
-            endpoint=MINIO_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            bucket_name=MINIO_BUCKET,
-            secure=MINIO_SECURE,
-            create_bucket_if_missing=STORAGE_CREATE_BUCKET_IF_MISSING,
-        )
         return _provider_cache
 
     if STORAGE_PROVIDER == "s3":
@@ -69,4 +58,4 @@ def get_storage_provider():
     return _provider_cache
 
 
-__all__ = ["get_storage_provider"]
+__all__ = ["get_storage_provider", "reset_storage_provider"]

@@ -1,10 +1,10 @@
 """File routes for the Gen3 AI model repo service."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from starlette import status
 
-from gen3_ai_model_repo.auth import verify_authorization
+from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
 from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.file_tracking import (
     delete_file,
@@ -25,9 +25,31 @@ from gen3_ai_model_repo.models.schemas import (
 from gen3_ai_model_repo.response import build_head_response
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
-ai_models_files_router = APIRouter()
+ai_models_files_router = AuthorizedRouter(dependencies=[Depends(verify_authorization)])
 REVISION_NOT_FOUND_DETAIL = "Revision not found"
 FILE_NOT_FOUND_DETAIL = "File not found"
+INVALID_FILE_ID_DETAIL = "file_id must be namespace:repo:revision:path for the requested repository"
+
+
+def _parse_file_id(namespace: str, repo: str, file_id: str) -> tuple[str, str]:
+    """
+    Validate and split a composite file ID.
+
+    Returns:
+        A tuple containing the revision and file path.
+
+    Raises:
+        HTTPException: If the ID is malformed or targets another repository.
+    """
+    parts = file_id.split(":", 3)
+    if len(parts) != 4 or not all(parts):
+        raise HTTPException(status_code=422, detail=INVALID_FILE_ID_DETAIL)
+
+    file_namespace, file_repo, revision, path = parts
+    if file_namespace != namespace or file_repo != repo:
+        raise HTTPException(status_code=422, detail=INVALID_FILE_ID_DETAIL)
+
+    return revision, path
 
 
 @ai_models_files_router.get(
@@ -57,7 +79,6 @@ async def list_repo_tree(
     repo: str,
     rev: str,
     path: str = "",
-    expand: bool = Query(False, description="If true, return commit data and minimal security info"),
 ) -> list[TreeEntryModel]:
     """
     List repository directory contents at a specific revision.
@@ -79,36 +100,10 @@ async def list_repo_tree(
     )
 
     if path:
-        files = [f for f in files if f["path"].startswith(path)]
+        prefix = path.rstrip("/") + "/"
+        files = [f for f in files if f["path"] == path or f["path"].startswith(prefix)]
 
-    return [TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files]
-
-
-@ai_models_files_router.get(
-    "/api/models/{namespace}/{repo}/revision/{rev}",
-    response_model=RevisionModel,
-    summary="Get revision metadata",
-    description="Retrieve detailed metadata for a specific revision of a model repository.",
-    responses={
-        status.HTTP_200_OK: {"description": "Successfully retrieved revision metadata"},
-        status.HTTP_404_NOT_FOUND: {"description": "Revision not found"},
-    },
-    tags=["Models"],
-)
-async def get_revision(namespace: str, repo: str, rev: str) -> RevisionModel:
-    """
-    Get detailed metadata for a specific model revision.
-
-    Returns:
-        RevisionModel: The revision metadata model.
-
-    Raises:
-        HTTPException: If the revision is not found.
-    """
-    data = await db_get_revision(namespace, repo, rev)
-    if not data:
-        raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
-    return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
+    return [TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files]
 
 
 @ai_models_files_router.get(
@@ -211,7 +206,7 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
 
     provider = get_storage_provider()
     signed_url = await provider.generate_signed_url(file_record["object_key"])
-    logging.info(f"Redirecting to signed URL: {signed_url}")
+    logging.info(f"Redirecting to signed URL for {file_record['object_key']}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
 
 
@@ -265,11 +260,7 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
         HTTPException: If the file or repository is not found.
     """
 
-    parts = file_id.split(":", 3)
-    if len(parts) == 4:
-        _, _, revision, path = parts
-    else:
-        revision, path = "main", file_id
+    revision, path = _parse_file_id(namespace, repo, file_id)
     record = await get_file_record(namespace, repo, revision, path)
     if not record:
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
@@ -290,9 +281,7 @@ async def get_model_file(namespace: str, repo: str, file_id: str) -> FileMetadat
     description="Delete a tracked file from a repository revision. This removes the file tracking record but may not immediately delete storage.",
     tags=["Models"],
 )
-async def delete_model_file(
-    namespace: str, repo: str, file_id: str, _: None = Depends(verify_authorization)
-) -> RevisionDeleteResponse:
+async def delete_model_file(namespace: str, repo: str, file_id: str) -> RevisionDeleteResponse:
     """
     Delete a tracked file from a repository revision.
 
@@ -303,8 +292,7 @@ async def delete_model_file(
         HTTPException: If the file or repository is not found.
     """
 
-    parts = file_id.split(":", 3)
-    revision, path = ("main", file_id) if len(parts) != 4 else (parts[2], parts[3])
+    revision, path = _parse_file_id(namespace, repo, file_id)
     deleted = await delete_file(namespace, repo, revision, path)
     if not deleted:
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
@@ -318,9 +306,7 @@ async def delete_model_file(
     description="Delete a specific revision and all files tracked under it from the repository.",
     tags=["Models"],
 )
-async def delete_model_revision(
-    namespace: str, repo: str, revision: str, _: None = Depends(verify_authorization)
-) -> RevisionDeleteResponse:
+async def delete_model_revision(namespace: str, repo: str, revision: str) -> RevisionDeleteResponse:
     """
     Delete a revision and all files tracked under it.
 
@@ -336,23 +322,3 @@ async def delete_model_revision(
     if not deleted_revision and not deleted_files:
         raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
     return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
-
-
-@ai_models_files_router.get(
-    "/signed-url/{path:path}",
-    summary="Stream file content",
-    description="Stream file content for download. This endpoint serves files in chunks with proper Content-Length header for large file support.",
-    responses={
-        status.HTTP_200_OK: {"description": "File content streamed successfully"},
-        status.HTTP_404_NOT_FOUND: {"description": "File not found"},
-    },
-    tags=["Files"],
-)
-async def signed_url(path: str):
-    """
-    Deprecated local signed-url endpoint.
-
-    Raises:
-        HTTPException: Always raises with 410 Gone status as this endpoint is deprecated.
-    """
-    raise HTTPException(status_code=410, detail="Local streaming endpoint is deprecated; use storage signed URLs")

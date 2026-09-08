@@ -10,6 +10,7 @@ class TestOpenApiDocs(OpenApiDocsContract):
     """Applies the shared OpenAPI docs contract to this service."""
 
     expects_public_operations = True
+    authenticated_path_prefixes = ("/api",)
 
     @staticmethod
     def get_app() -> FastAPI:

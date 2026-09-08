@@ -43,7 +43,7 @@ CREATE TABLE public.model_files (
     file_path text NOT NULL,
     s3_key text CONSTRAINT model_files_storage_key_not_null NOT NULL,
     file_size bigint NOT NULL,
-    content_sha text NOT NULL,
+    content_sha text,
     content_etag text,
     file_type text,
     created_at timestamp with time zone DEFAULT now(),

@@ -211,7 +211,7 @@ COMMENT ON TABLE model_files IS
 'Model files mapped to object storage';
 
 COMMENT ON COLUMN model_files.s3_key IS
-'Object storage key (MinIO / AWS S3 compatible)';
+'Object storage key (AWS S3 compatible)';
 
 COMMENT ON COLUMN model_revisions.revision_identifier IS
 'Commit SHA or revision identifier';

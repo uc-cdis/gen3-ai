@@ -5,6 +5,7 @@ Handles CRUD operations for repository metadata including
 namespace, repository name, description, and tags.
 """
 
+from gen3_ai_model_repo.config import MAX_SEARCH_LENGTH
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.models.schemas import RepositoryMetadataModel
 
@@ -170,60 +171,39 @@ async def model_exists(
     return row is not None
 
 
-async def list_all_models() -> list[RepositoryMetadataModel]:
-    """
-    Return all repositories from the database.
-
-    Returns:
-        A list of RepositoryMetadataModel objects for all repositories.
-    """
+async def get_repository_metrics() -> tuple[int, int, int]:
+    """Return repository count, tracked file count, and total stored bytes."""
     pool = await get_db_pool()
-
     async with pool.acquire() as conn:
-        stmt = await conn.prepare(
+        row = await conn.fetchrow(
             """
             SELECT
-                namespace,
-                model_name AS repo_name,
-                description,
-                tags,
-                created_at
-            FROM models;
+                (SELECT COUNT(*) FROM models) AS model_count,
+                (SELECT COUNT(*) FROM model_files) AS file_count,
+                COALESCE((SELECT SUM(file_size) FROM model_files), 0) AS total_size_bytes;
             """
         )
-        rows = await stmt.fetch()
-
-    return [
-        RepositoryMetadataModel(
-            namespace=row["namespace"],
-            repo=row["repo_name"],
-            description=row["description"],
-            tags=row["tags"],
-            created_at=row["created_at"],
-        )
-        for row in rows
-    ]
-
-
-async def get_model(
-    namespace: str,
-    model_name: str,
-) -> RepositoryMetadataModel | None:
-    """Return repository metadata by namespace and repository name."""
-    return await get_model_metadata(namespace, model_name)
+    return int(row["model_count"]), int(row["file_count"]), int(row["total_size_bytes"])
 
 
 async def list_models(
     namespace: str | None = None,
     tags: list[str] | None = None,
     search: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[RepositoryMetadataModel]:
     """
     List repositories, optionally filtered by namespace, tags, or free-text search.
 
     Returns:
         list[RepositoryMetadataModel]: A list of matching repository metadata models.
+
+    Raises:
+        ValueError: If the search term exceeds the configured maximum length.
     """
+    if search and len(search) > MAX_SEARCH_LENGTH:
+        raise ValueError(f"search must be {MAX_SEARCH_LENGTH} characters or fewer")
     pool = await get_db_pool()
     clauses = []
     values: list[object] = []
@@ -242,7 +222,8 @@ async def list_models(
     """
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY created_at DESC;"
+    sql += f" ORDER BY created_at DESC LIMIT ${len(values) + 1} OFFSET ${len(values) + 2};"
+    values.extend([limit, offset])
     async with pool.acquire() as conn:
         stmt = await conn.prepare(sql)
         rows = await stmt.fetch(*values)

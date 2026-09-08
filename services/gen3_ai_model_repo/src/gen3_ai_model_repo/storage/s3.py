@@ -175,5 +175,6 @@ class S3StorageProvider(StorageProvider):
         return {
             "size": int(response.get("ContentLength", 0)),
             "etag": str(response.get("ETag", "")).strip('"') or None,
+            "checksum_sha256": response.get("ChecksumSHA256"),
             "last_modified": response.get("LastModified"),
         }

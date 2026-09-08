@@ -1,4 +1,4 @@
-"""Service routes: docs redirect, version, and health status."""
+""" "Service routes: docs redirect, version, and health status."""
 
 import time
 from importlib.metadata import version
@@ -39,7 +39,7 @@ async def get_version() -> dict:
     Returns:
         dict: A mapping with a single `version` key.
     """
-    return {"version": version("gen3_embeddings")}
+    return {"version": version("gen3_ai_model_repo")}
 
 
 @basic_router.get(

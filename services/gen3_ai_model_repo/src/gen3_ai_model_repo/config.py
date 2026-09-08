@@ -1,7 +1,5 @@
 """Configuration for the Gen3 AI Model Repo service."""
 
-import os
-
 from starlette.datastructures import Secret
 
 from common import config as common_config
@@ -14,94 +12,32 @@ logging = common_config.logging
 logging.name = "gen3_ai_model_repo"
 
 
-def _first_env_value(*keys: str, default: str = "") -> str:
-    """Return the first non-empty environment variable value from keys."""
-    for key in keys:
-        value = os.getenv(key)
-        if value:
-            return value
-    return default
-
-
-MODEL_STORAGE_PATH = starlette_config(
-    "MODEL_STORAGE_PATH",
-    default="./testfiles",
-)
-
-
-DB_DRIVER = starlette_config(
-    "DB_DRIVER",
-    default=_first_env_value("PGDRIVER", default="postgresql"),
-)
-
-DB_USER = starlette_config(
-    "DB_USER",
-    default=_first_env_value("PGUSER", default="postgres"),
-)
-
-DB_PASSWORD = starlette_config(
-    "DB_PASSWORD",
-    default=_first_env_value("PGPASSWORD", default="postgres"),
-)
-
-DB_HOST = starlette_config(
-    "DB_HOST",
-    default=_first_env_value("PGHOST", default="localhost"),
-)
-
-DB_PORT = starlette_config(
-    "DB_PORT",
-    cast=int,
-    default=_first_env_value("PGPORT", default="5432"),
-)
-
-DB_DATABASE = starlette_config(
-    "DB_DATABASE",
-    default=_first_env_value("PGDATABASE", default="gen3_ai_model_repo"),
-)
+PGDRIVER = starlette_config("PGDRIVER", default="postgresql")
+PGUSER = starlette_config("PGUSER", default="postgres")
+PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default="postgres")
+PGHOST = starlette_config("PGHOST", default="localhost")
+PGPORT = int(starlette_config("PGPORT", cast=int, default="5432"))
+PGDATABASE = starlette_config("PGDATABASE", default="gen3_ai_model_repo")
+PGPOOL_MIN_SIZE = int(starlette_config("PGPOOL_MIN_SIZE", cast=int, default="1"))
+PGPOOL_MAX_SIZE = int(starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5"))
+DEFAULT_PAGE_SIZE = int(starlette_config("DEFAULT_PAGE_SIZE", cast=int, default="100"))
+MAX_PAGE_SIZE = int(starlette_config("MAX_PAGE_SIZE", cast=int, default="1000"))
+MAX_SEARCH_LENGTH = int(starlette_config("MAX_SEARCH_LENGTH", cast=int, default="256"))
+MAX_UPLOAD_FILES = int(starlette_config("MAX_UPLOAD_FILES", cast=int, default="100"))
+MAX_UPLOAD_BYTES = int(starlette_config("MAX_UPLOAD_BYTES", cast=int, default="5368709120"))
 
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
     cast=Secret,
-    default=(f"{DB_DRIVER}://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DATABASE}"),
+    default=f"{PGDRIVER}://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}",
 )
 
-STORAGE_PROVIDER = starlette_config(
-    "STORAGE_PROVIDER",
-    default="minio",
-)
+STORAGE_PROVIDER = starlette_config("STORAGE_PROVIDER", default="local")
 
 LOCAL_STORAGE_PATH = starlette_config(
     "LOCAL_STORAGE_PATH",
     default="./data",
 )
-
-MINIO_ENDPOINT = starlette_config(
-    "MINIO_ENDPOINT",
-    default="localhost:9000",
-)
-
-MINIO_ACCESS_KEY = starlette_config(
-    "MINIO_ACCESS_KEY",
-    default="minioadmin",
-)
-
-MINIO_SECRET_KEY = starlette_config(
-    "MINIO_SECRET_KEY",
-    default="minioadmin",
-)
-
-MINIO_SECURE = starlette_config(
-    "MINIO_SECURE",
-    cast=bool,
-    default=False,
-)
-
-MINIO_BUCKET = starlette_config(
-    "MINIO_BUCKET",
-    default="model-repo",
-)
-
 
 S3_REGION = starlette_config(
     "S3_REGION",
@@ -145,7 +81,7 @@ STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
 
 URL_PREFIX = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX",
-    default=_first_env_value("GEN3_AI_MODEL_REPO_URL_PREFIX", default=""),
+    default="",
     cast=str,
 )
 
@@ -157,12 +93,12 @@ URL_PREFIX = starlette_config(
 #          rest of the docs/service for more info on AI_MODEL_REPO authz.
 AUTHZ_SERVICE_NAME = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_NAME",
-    default=_first_env_value("GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_NAME", default="gen3-ai-model-repo"),
+    default="gen3-ai-model-repo",
     cast=str,
 )
 AUTHZ_SERVICE_RESOURCE = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_AUTHZ_SERVICE_RESOURCE",
-    default=_first_env_value("GEN3_AI_MODEL_REPO_AUTHZ_SERVICE_RESOURCE", default="/services/gen3-ai-model-repo"),
+    default="/services/gen3-ai-model-repo",
     cast=str,
 )
 

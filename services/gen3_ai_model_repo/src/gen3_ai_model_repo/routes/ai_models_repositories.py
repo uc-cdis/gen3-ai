@@ -1,9 +1,10 @@
 """Repository routes for the Gen3 AI model repo service."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 from starlette import status
 
-from gen3_ai_model_repo.auth import verify_authorization
+from gen3_ai_model_repo import config
+from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
 from gen3_ai_model_repo.database.file_tracking import list_files_in_revision
 from gen3_ai_model_repo.database.repo_metadata import (
@@ -18,23 +19,24 @@ from gen3_ai_model_repo.database.revisions import get_revision as db_get_revisio
 from gen3_ai_model_repo.database.revisions import list_revisions
 from gen3_ai_model_repo.models.schemas import (
     DeleteModelResponse,
-    RepositoryFileModel,
+    PaginatedRepositoryResponse,
     RepositoryInfoModel,
     RepositoryMetadataModel,
     RepositoryModel,
     RevisionListResponseModel,
     RevisionModel,
+    TreeEntryModel,
 )
 from gen3_ai_model_repo.routes.ai_models_shared import RepositoryCreateRequest, RepositoryUpdateRequest
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
-ai_models_repositories_router = APIRouter()
+ai_models_repositories_router = AuthorizedRouter(dependencies=[Depends(verify_authorization)])
 REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
 
 
 @ai_models_repositories_router.get(
     "/api/models",
-    response_model=list[RepositoryModel],
+    response_model=PaginatedRepositoryResponse,
     summary="List all model repositories",
     description="Retrieve a list of all available model repositories with basic metadata.",
     responses={
@@ -45,16 +47,24 @@ REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
 async def list_models_route(
     namespace: str | None = Query(None),
     tags: list[str] | None = Query(None),
-    search: str | None = Query(None),
-) -> list[RepositoryModel]:
+    search: str | None = Query(None, max_length=config.MAX_SEARCH_LENGTH),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(config.DEFAULT_PAGE_SIZE, ge=1, le=config.MAX_PAGE_SIZE),
+) -> PaginatedRepositoryResponse:
     """
     Retrieve all available model repositories.
 
     Returns:
-        list[RepositoryModel]: A list of all available model repositories.
+        PaginatedRepositoryResponse: A page of available model repositories.
     """
-    repos = await list_models(namespace=namespace, tags=tags, search=search)
-    return [
+    repos = await list_models(
+        namespace=namespace,
+        tags=tags,
+        search=search,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    models = [
         RepositoryModel(
             id=f"{repo.namespace}/{repo.repo}",
             description=repo.description or "",
@@ -63,6 +73,13 @@ async def list_models_route(
         )
         for repo in repos
     ]
+    return PaginatedRepositoryResponse(
+        models=models,
+        page=page,
+        page_size=page_size,
+        next_page=page + 1 if len(models) == page_size else None,
+        prev_page=page - 1 if page > 1 else None,
+    )
 
 
 @ai_models_repositories_router.get(
@@ -97,7 +114,7 @@ async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
         sha=(revision_info["sha"] or "") if revision_info else "",
         etag=(revision_info["etag"] or revision_info["sha"] or "") if revision_info else "",
         size=sum(f["size"] for f in files_from_db),
-        files=[RepositoryFileModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files_from_db],
+        files=[TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files_from_db],
         metadata=metadata,
         security_status=DEFAULT_SECURITY_FILE_STATUS,
     )
@@ -114,7 +131,6 @@ async def create_repository(
     namespace: str,
     repo: str,
     request: RepositoryCreateRequest,
-    _: None = Depends(verify_authorization),
 ) -> RepositoryMetadataModel:
     """
     Create repository metadata for a new repository.
@@ -148,7 +164,6 @@ async def update_repository(
     namespace: str,
     repo: str,
     request: RepositoryUpdateRequest,
-    # _: None = Depends(verify_authorization),
 ) -> RepositoryMetadataModel:
     """
     Update mutable metadata fields for a repository.
@@ -187,7 +202,7 @@ async def update_repository(
     },
     tags=["Models"],
 )
-async def delete_model(namespace: str, repo: str, _: None = Depends(verify_authorization)) -> DeleteModelResponse:
+async def delete_model(namespace: str, repo: str) -> DeleteModelResponse:
     """
     Delete a model repository.
 
@@ -228,9 +243,7 @@ async def delete_model(namespace: str, repo: str, _: None = Depends(verify_autho
     },
     tags=["Models"],
 )
-async def list_model_revisions(
-    namespace: str, repo: str, _: None = Depends(verify_authorization)
-) -> RevisionListResponseModel:
+async def list_model_revisions(namespace: str, repo: str) -> RevisionListResponseModel:
     """
     List all revisions of a model repository.
 
@@ -249,7 +262,7 @@ async def list_model_revisions(
 
     revisions = [
         RevisionModel(
-            id=rev["sha"],
+            id=str(rev["id"]),
             revision=rev["revision"],
             sha=rev["sha"],
         )
@@ -306,7 +319,7 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
         sha=(revision_info["sha"] if revision_info else ""),
         etag=((revision_info["etag"] or revision_info["sha"]) if revision_info else ""),
         size=total_size,
-        files=[RepositoryFileModel(type=f["type"], oid=f["oid"], size=f["size"]) for f in files_from_db],
+        files=[TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files_from_db],
         metadata=metadata,
         security_status=DEFAULT_SECURITY_FILE_STATUS,
     )

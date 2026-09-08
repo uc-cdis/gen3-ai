@@ -13,39 +13,6 @@ GET_MODEL_ID_SQL = """
 """
 
 
-async def get_revision_identifier_column(conn) -> str:
-    """
-    Return the revision identifier column used by the live database.
-
-    Older local databases used commit_sha while the current migration uses
-    revision_identifier. Keeping this lookup here lets route and helper code work
-    across already-created developer databases without hiding real SQL errors.
-
-    Returns:
-        str: The name of the revision identifier column ('revision_identifier' or 'commit_sha').
-
-    Raises:
-        RuntimeError: If the model_revisions table is missing the revision identifier column.
-    """
-    stmt = await conn.prepare(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'model_revisions'
-          AND column_name IN ('revision_identifier', 'commit_sha')
-        ORDER BY CASE column_name
-            WHEN 'revision_identifier' THEN 1
-            WHEN 'commit_sha' THEN 2
-        END
-        LIMIT 1;
-        """
-    )
-    row = await stmt.fetchrow()
-    if row is None:
-        raise RuntimeError("model_revisions is missing revision identifier column")
-    return row["column_name"]
-
-
 async def create_revision(
     namespace: str,
     model_name: str,
@@ -61,18 +28,17 @@ async def create_revision(
     """
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        identifier_column = await get_revision_identifier_column(conn)
         model_stmt = await conn.prepare(GET_MODEL_ID_SQL)
         model_row = await model_stmt.fetchrow(namespace, model_name)
         if not model_row:
             return None
         model_id = model_row["id"]
         insert_stmt = await conn.prepare(
-            f"""
-            INSERT INTO model_revisions (model_id, revision_name, {identifier_column}, etag)
+            """
+            INSERT INTO model_revisions (model_id, revision_name, revision_identifier, etag)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (model_id, revision_name)
-            DO UPDATE SET {identifier_column} = EXCLUDED.{identifier_column},
+            DO UPDATE SET revision_identifier = EXCLUDED.revision_identifier,
                           etag = EXCLUDED.etag;
             """
         )
@@ -88,10 +54,9 @@ async def get_revision(
     """Return the metadata for a specific revision, if present."""
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        identifier_column = await get_revision_identifier_column(conn)
         stmt = await conn.prepare(
-            f"""
-            SELECT mr.id, mr.revision_name, mr.{identifier_column} AS revision_identifier, mr.etag, mr.created_at
+            """
+            SELECT mr.id, mr.revision_name, mr.revision_identifier, mr.etag, mr.created_at
             FROM model_revisions mr
             JOIN models repo ON repo.id = mr.model_id
             WHERE repo.namespace = $1 AND repo.model_name = $2 AND mr.revision_name = $3;
@@ -146,11 +111,10 @@ async def get_or_create_revision(
     model_id = model_row["id"]
 
     async with pool.acquire() as conn:
-        identifier_column = await get_revision_identifier_column(conn)
         # Try to get existing revision
         revision_stmt = await conn.prepare(
-            f"""
-            SELECT id, {identifier_column} AS revision_identifier, etag, created_at
+            """
+            SELECT id, revision_identifier, etag, created_at
             FROM model_revisions
             WHERE model_id = $1 AND revision_name = $2;
             """
@@ -169,16 +133,16 @@ async def get_or_create_revision(
         # Create new revision if commit_sha is provided
         if commit_sha:
             insert_stmt = await conn.prepare(
-                f"""
-                INSERT INTO model_revisions (model_id, revision_name, {identifier_column}, etag)
+                """
+                INSERT INTO model_revisions (model_id, revision_name, revision_identifier, etag)
                 VALUES ($1, $2, $3, $4);
                 """
             )
             await insert_stmt.fetch(model_id, revision_name, commit_sha, etag)
 
             revision_stmt = await conn.prepare(
-                f"""
-                SELECT id, {identifier_column} AS revision_identifier, etag, created_at
+                """
+                SELECT id, revision_identifier, etag, created_at
                 FROM model_revisions
                 WHERE model_id = $1 AND revision_name = $2;
                 """
@@ -216,7 +180,6 @@ async def list_revisions(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        identifier_column = await get_revision_identifier_column(conn)
         model_stmt = await conn.prepare(GET_MODEL_ID_SQL)
         model_row = await model_stmt.fetchrow(namespace, model_name)
 
@@ -226,8 +189,8 @@ async def list_revisions(
         model_id = model_row["id"]
 
         revision_stmt = await conn.prepare(
-            f"""
-            SELECT id, revision_name, {identifier_column} AS revision_identifier, etag, created_at
+            """
+            SELECT id, revision_name, revision_identifier, etag, created_at
             FROM model_revisions
             WHERE model_id = $1
             ORDER BY created_at DESC;

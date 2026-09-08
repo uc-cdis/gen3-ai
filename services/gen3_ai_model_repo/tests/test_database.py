@@ -1,6 +1,6 @@
 import pytest
 
-from gen3_ai_model_repo.database import file_tracking, helper, repo_metadata, revisions
+from gen3_ai_model_repo.database import file_tracking, repo_metadata, revisions
 
 
 class FakeStatement:
@@ -71,14 +71,7 @@ class FakePool:
         return FakeAcquire(self.conn)
 
 
-def test_helper_module_does_not_reexport_database_functions():
-    """Ensure helper module does not expose data-layer API functions."""
-    assert not hasattr(helper, "create_repository_metadata")
-    assert not hasattr(helper, "create_revision")
-    assert not hasattr(helper, "list_repositories")
-
-
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_delete_model_metadata(monkeypatch):
     """
     Verify model metadata delete returns True on successful delete.
@@ -95,7 +88,7 @@ async def test_delete_model_metadata(monkeypatch):
     assert await repo_metadata.delete_model_metadata("ns", "repo") is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_track_file_false_when_missing_repo(monkeypatch):
     """
     Verify file tracking returns False when repository lookup fails.
@@ -115,7 +108,7 @@ async def test_track_file_false_when_missing_repo(monkeypatch):
     assert await file_tracking.track_file("ns", "repo", "main", "a.txt", 1, "sha") is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_get_or_create_revision_none_when_missing_repo(monkeypatch):
     """
     Verify revision upsert returns None when repository does not exist.

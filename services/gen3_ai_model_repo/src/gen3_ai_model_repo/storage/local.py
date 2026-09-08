@@ -16,6 +16,22 @@ class LocalStorageProvider(StorageProvider):
         """Initialize the provider with a root directory for file storage."""
         self.root_directory = Path(root_directory)
 
+    def _resolve_object_path(self, object_key: str) -> Path:
+        """
+        Resolve an object key while keeping it inside the storage root.
+
+        Returns:
+            The resolved local filesystem path.
+
+        Raises:
+            ValueError: If the object key escapes the storage root.
+        """
+        root = self.root_directory.resolve()
+        path = (root / object_key).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("Storage object key escapes the local storage root")
+        return path
+
     async def ensure_container(self):
         """Ensure the local root directory exists."""
         self.root_directory.mkdir(parents=True, exist_ok=True)
@@ -26,7 +42,7 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
     ):
         """Upload a file to the local storage root."""
-        destination = self.root_directory / object_key
+        destination = self._resolve_object_path(object_key)
 
         destination.parent.mkdir(
             parents=True,
@@ -38,7 +54,7 @@ class LocalStorageProvider(StorageProvider):
 
     async def upload_stream(self, stream, object_key: str):
         """Upload a data stream to the local storage root."""
-        destination = self.root_directory / object_key
+        destination = self._resolve_object_path(object_key)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open("wb") as dst:
             shutil.copyfileobj(stream, dst, length=1024 * 1024)
@@ -49,7 +65,7 @@ class LocalStorageProvider(StorageProvider):
         local_path: str,
     ):
         """Download a stored object to a local path."""
-        source = self.root_directory / object_key
+        source = self._resolve_object_path(object_key)
         with source.open("rb") as src, Path(local_path).open("wb") as dst:
             shutil.copyfileobj(src, dst, length=1024 * 1024)
 
@@ -63,7 +79,7 @@ class LocalStorageProvider(StorageProvider):
         Returns:
             list[str]: List of object keys under the prefix.
         """
-        base = self.root_directory / prefix
+        base = self._resolve_object_path(prefix)
 
         if not base.exists():
             return []
@@ -75,14 +91,14 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
     ) -> bool:
         """Return whether an object exists in local storage."""
-        return (self.root_directory / object_key).exists()
+        return self._resolve_object_path(object_key).exists()
 
     async def delete_file(
         self,
         object_key: str,
     ):
         """Delete a stored object from local storage."""
-        target = self.root_directory / object_key
+        target = self._resolve_object_path(object_key)
         if target.exists():
             target.unlink()
 
@@ -91,7 +107,7 @@ class LocalStorageProvider(StorageProvider):
         prefix: str,
     ):
         """Delete all stored objects beneath a prefix."""
-        base = self.root_directory / prefix
+        base = self._resolve_object_path(prefix)
         if not base.exists():
             return
         for path in sorted(base.rglob("*"), reverse=True):
@@ -107,13 +123,10 @@ class LocalStorageProvider(StorageProvider):
         expiry_seconds: int = 3600,
     ) -> str:
         """
-        Generate a signed URL for an object in local storage.
-
-        Returns:
-            str: A local path-based URL for accessing the object.
+        Local storage does not support signed URLs.
         """
-        del expiry_seconds
-        return f"/signed-url/{quote(object_key)}"
+        del object_key, expiry_seconds
+        raise NotImplementedError("Local storage does not support signed URLs")
 
     async def generate_upload_url(
         self,
@@ -134,7 +147,7 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
     ) -> dict:
         """Return file metadata for an object in local storage."""
-        path = self.root_directory / object_key
+        path = self._resolve_object_path(object_key)
         stat = path.stat()
         return {
             "size": stat.st_size,

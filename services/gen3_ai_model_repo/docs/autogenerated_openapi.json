@@ -5,6 +5,61 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/": {
+      "get": {
+        "summary": "Get swagger docs",
+        "description": "Directs client to the docs",
+        "operationId": "redirect_to_docs__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/_version/": {
+      "get": {
+        "summary": "Get current version",
+        "description": "Gets the current version of the service",
+        "operationId": "get_version__version__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Version  Version  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/_status/": {
+      "get": {
+        "summary": "Get service status",
+        "description": "Gets the current status of the service",
+        "operationId": "get_status__status__get",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/{namespace}/{repo}/tree/{rev}/{path}": {
       "get": {
         "tags": [
@@ -49,18 +104,6 @@
               "type": "string",
               "title": "Path"
             }
-          },
-          {
-            "name": "expand",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "If true, return commit data and minimal security info",
-              "default": false,
-              "title": "Expand"
-            },
-            "description": "If true, return commit data and minimal security info"
           }
         ],
         "responses": {
@@ -77,6 +120,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "404": {
             "description": "Repository or path not found"
@@ -139,18 +188,6 @@
               "default": "",
               "title": "Path"
             }
-          },
-          {
-            "name": "expand",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "If true, return commit data and minimal security info",
-              "default": false,
-              "title": "Expand"
-            },
-            "description": "If true, return commit data and minimal security info"
           }
         ],
         "responses": {
@@ -168,72 +205,14 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "404": {
             "description": "Repository or path not found"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/models/{namespace}/{repo}/revision/{rev}": {
-      "get": {
-        "tags": [
-          "Models"
-        ],
-        "summary": "Get revision metadata",
-        "description": "Retrieve detailed metadata for a specific revision of a model repository.",
-        "operationId": "get_revision_api_models__namespace___repo__revision__rev__get",
-        "parameters": [
-          {
-            "name": "namespace",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Namespace"
-            }
-          },
-          {
-            "name": "repo",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Repo"
-            }
-          },
-          {
-            "name": "rev",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Rev"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successfully retrieved revision metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RevisionModel"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Revision not found"
           },
           "422": {
             "description": "Validation Error",
@@ -254,7 +233,7 @@
           "Models"
         ],
         "summary": "Get revision metadata",
-        "description": "Retrieve revision metadata by revision name.",
+        "description": "Retrieve detailed metadata for a specific revision of a model repository including commit hash and ETag.",
         "operationId": "get_model_revision_api_models__namespace___repo__revisions__revision__get",
         "parameters": [
           {
@@ -296,6 +275,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -312,8 +297,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Delete Model Revision",
-        "description": "Delete a revision and all files tracked under it.",
+        "summary": "Delete a revision",
+        "description": "Delete a specific revision and all files tracked under it from the repository.",
         "operationId": "delete_model_revision_api_models__namespace___repo__revisions__revision__delete",
         "parameters": [
           {
@@ -354,6 +339,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -422,6 +413,12 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "302": {
             "description": "Redirect to signed URL with metadata headers"
@@ -495,6 +492,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "302": {
             "description": "Redirect to signed URL for file download"
           },
@@ -519,8 +522,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "List Model Files",
-        "description": "List tracked files for a repository revision.",
+        "summary": "List model files",
+        "description": "List all tracked files in a repository revision with their metadata including size and content hashes.",
         "operationId": "list_model_files_api_models__namespace___repo__files_get",
         "parameters": [
           {
@@ -563,6 +566,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -581,8 +590,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Get Model File",
-        "description": "Retrieve file metadata from a repository using a file identifier.",
+        "summary": "Get file metadata",
+        "description": "Retrieve metadata for a specific file in a repository including size, content hash, and storage location.",
         "operationId": "get_model_file_api_models__namespace___repo__files__file_id__get",
         "parameters": [
           {
@@ -624,6 +633,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -640,8 +655,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Delete Model File",
-        "description": "Delete a tracked file from a repository revision.",
+        "summary": "Delete a file",
+        "description": "Delete a tracked file from a repository revision. This removes the file tracking record but may not immediately delete storage.",
         "operationId": "delete_model_file_api_models__namespace___repo__files__file_id__delete",
         "parameters": [
           {
@@ -683,49 +698,11 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/signed-url/{path}": {
-      "get": {
-        "tags": [
-          "Files"
-        ],
-        "summary": "Stream file content",
-        "description": "Stream file content for download. This endpoint serves files in chunks with proper Content-Length header for large file support.",
-        "operationId": "signed_url_signed_url__path__get",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "File content streamed successfully",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
+          "401": {
+            "description": "User unauthenticated"
           },
-          "404": {
-            "description": "File not found"
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -791,13 +768,37 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 256
                 },
                 {
                   "type": "null"
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Page Size"
             }
           }
         ],
@@ -807,14 +808,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RepositoryModel"
-                  },
-                  "title": "Response List Models Route Api Models Get"
+                  "$ref": "#/components/schemas/PaginatedRepositoryResponse"
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -834,8 +837,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Get Repository",
-        "description": "Retrieve repository information, main revision metadata, and tracked files.",
+        "summary": "Get repository information",
+        "description": "Retrieve detailed information about a model repository including its metadata and main revision files.",
         "operationId": "get_repository_api_models__namespace___repo__get",
         "parameters": [
           {
@@ -868,6 +871,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -884,8 +893,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Create Repository",
-        "description": "Create repository metadata for a new repository.",
+        "summary": "Create a new model repository",
+        "description": "Create metadata for a new model repository with optional description and tags.",
         "operationId": "create_repository_api_models__namespace___repo__post",
         "parameters": [
           {
@@ -928,6 +937,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -945,7 +960,7 @@
           "Models"
         ],
         "summary": "Update repository metadata",
-        "description": "Update mutable metadata fields for a repository.",
+        "description": "Update mutable metadata fields such as description and tags for a model repository.",
         "operationId": "update_repository_api_models__namespace___repo__patch",
         "parameters": [
           {
@@ -987,6 +1002,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -1046,9 +1067,6 @@
           },
           "404": {
             "description": "Repository not found"
-          },
-          "500": {
-            "description": "Failed to delete repository"
           },
           "422": {
             "description": "Validation Error",
@@ -1128,7 +1146,7 @@
           "Models"
         ],
         "summary": "Create revision",
-        "description": "Create a revision for an existing repository.",
+        "description": "Create a new revision for an existing repository with an optional revision identifier and ETag.",
         "operationId": "create_model_revision_api_models__namespace___repo__revisions_post",
         "parameters": [
           {
@@ -1170,6 +1188,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -1223,6 +1247,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "404": {
             "description": "Repository or metadata not found"
           },
@@ -1244,8 +1274,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Upload Model",
-        "description": "Upload one or more files and create a repository revision.",
+        "summary": "Upload model files",
+        "description": "Upload one or more files to create or update a model repository revision. Files are stored and tracked with their content hashes.",
         "operationId": "upload_model_api_models__namespace___repo__upload_post",
         "parameters": [
           {
@@ -1288,6 +1318,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1306,8 +1342,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Generate Upload Url",
-        "description": "Generate a storage upload URL for a file in a revision.",
+        "summary": "Generate upload URL",
+        "description": "Generate a presigned URL for uploading a file directly to object storage for a specific repository revision.",
         "operationId": "generate_upload_url_api_models__namespace___repo__upload_url_post",
         "parameters": [
           {
@@ -1350,6 +1386,12 @@
               }
             }
           },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1368,8 +1410,8 @@
         "tags": [
           "Models"
         ],
-        "summary": "Complete Upload",
-        "description": "Finalize an upload by creating/updating revision and file tracking records.",
+        "summary": "Complete file upload",
+        "description": "Finalize an upload by creating or updating a revision and tracking records for all uploaded files in object storage.",
         "operationId": "complete_upload_api_models__namespace___repo__complete_upload_post",
         "parameters": [
           {
@@ -1412,89 +1454,11 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/storage/verify": {
-      "post": {
-        "tags": [
-          "Storage"
-        ],
-        "summary": "Verify Storage",
-        "description": "Verify the existence and size of files at a storage prefix.\n\nQueries the configured storage backend for all files under the given prefix,\ncounts them, and sums their sizes.\n\nArgs:\n    request: Contains the storage_prefix to inspect.\n    _: Authorization dependency validated by FastAPI.\n\nReturns:\n    StorageVerifyResponse with existence flag, file count, and total size.",
-        "operationId": "verify_storage_api_storage_verify_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StorageVerifyRequest"
-              }
-            }
+          "401": {
+            "description": "User unauthenticated"
           },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StorageVerifyResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/storage/download-url": {
-      "post": {
-        "tags": [
-          "Storage"
-        ],
-        "summary": "Storage Download Url",
-        "description": "Generate a pre-signed download URL for a storage object.\n\nArgs:\n    request: Contains the object_key identifying the target file.\n    _: Authorization dependency validated by FastAPI.\n\nReturns:\n    StorageDownloadUrlResponse containing the pre-signed URL.",
-        "operationId": "storage_download_url_api_storage_download_url_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StorageDownloadUrlRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StorageDownloadUrlResponse"
-                }
-              }
-            }
+          "403": {
+            "description": "User does not have access"
           },
           "422": {
             "description": "Validation Error",
@@ -1673,6 +1637,55 @@
         "title": "MultipartUploadResponse",
         "description": "Response payload for multipart model uploads.\n\nAttributes:\n    status: Upload status string.\n    repo: Repository identifier in namespace/repo form.\n    revision: Revision name associated with the upload.\n    files: Number of uploaded files.\n    total_size: Total uploaded size in bytes."
       },
+      "PaginatedRepositoryResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryModel"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models",
+          "page",
+          "page_size"
+        ],
+        "title": "PaginatedRepositoryResponse",
+        "description": "A page of model repositories."
+      },
       "RepositoryCreateRequest": {
         "properties": {
           "description": {
@@ -1698,30 +1711,6 @@
         "title": "RepositoryCreateRequest",
         "description": "Request payload for creating a repository.\n\nAttributes:\n    description: Optional human-readable repository description.\n    tags: Optional list of tags used for filtering and discovery."
       },
-      "RepositoryFileModel": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "title": "Type"
-          },
-          "oid": {
-            "type": "string",
-            "title": "Oid"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "oid",
-          "size"
-        ],
-        "title": "RepositoryFileModel",
-        "description": "A file entry included in repository metadata."
-      },
       "RepositoryInfoModel": {
         "properties": {
           "id": {
@@ -1742,7 +1731,7 @@
           },
           "files": {
             "items": {
-              "$ref": "#/components/schemas/RepositoryFileModel"
+              "$ref": "#/components/schemas/TreeEntryModel"
             },
             "type": "array",
             "title": "Files"
@@ -1992,72 +1981,6 @@
         "title": "RevisionModel",
         "description": "Revision metadata for a repository revision."
       },
-      "StorageDownloadUrlRequest": {
-        "properties": {
-          "object_key": {
-            "type": "string",
-            "title": "Object Key"
-          }
-        },
-        "type": "object",
-        "required": [
-          "object_key"
-        ],
-        "title": "StorageDownloadUrlRequest",
-        "description": "Request payload for generating a pre-signed download URL.\n\nAttributes:\n    object_key: Full object key identifying the file in the storage backend."
-      },
-      "StorageDownloadUrlResponse": {
-        "properties": {
-          "presigned_url": {
-            "type": "string",
-            "title": "Presigned Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "presigned_url"
-        ],
-        "title": "StorageDownloadUrlResponse",
-        "description": "Response payload containing a pre-signed download URL.\n\nAttributes:\n    presigned_url: Time-limited URL granting direct access to the object."
-      },
-      "StorageVerifyRequest": {
-        "properties": {
-          "storage_prefix": {
-            "type": "string",
-            "title": "Storage Prefix"
-          }
-        },
-        "type": "object",
-        "required": [
-          "storage_prefix"
-        ],
-        "title": "StorageVerifyRequest",
-        "description": "Request payload for verifying storage contents at a prefix.\n\nAttributes:\n    storage_prefix: Path prefix to inspect inside the storage backend."
-      },
-      "StorageVerifyResponse": {
-        "properties": {
-          "exists": {
-            "type": "boolean",
-            "title": "Exists"
-          },
-          "file_count": {
-            "type": "integer",
-            "title": "File Count"
-          },
-          "total_size": {
-            "type": "integer",
-            "title": "Total Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "exists",
-          "file_count",
-          "total_size"
-        ],
-        "title": "StorageVerifyResponse",
-        "description": "Response payload describing the state of a storage prefix.\n\nAttributes:\n    exists: True if at least one file exists at the prefix.\n    file_count: Number of files found under the prefix.\n    total_size: Aggregate size in bytes of all files under the prefix."
-      },
       "TreeEntryModel": {
         "properties": {
           "type": {
@@ -2065,19 +1988,30 @@
             "title": "Type"
           },
           "oid": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Oid"
           },
           "size": {
             "type": "integer",
             "title": "Size"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
           }
         },
         "type": "object",
         "required": [
           "type",
-          "oid",
-          "size"
+          "size",
+          "path"
         ],
         "title": "TreeEntryModel",
         "description": "Tree entry describing a file in a repository tree."

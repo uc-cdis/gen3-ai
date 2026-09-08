@@ -8,31 +8,13 @@ adding, retrieving, and listing files associated with revisions.
 from gen3_ai_model_repo.database.db import get_db_pool
 
 
-async def model_files_has_s3_key(conn) -> bool:
-    """
-    Check whether the model_files table contains an s3_key column.
-
-    Returns:
-        bool: True if the s3_key column exists, False otherwise.
-    """
-    stmt = await conn.prepare(
-        """
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'model_files'
-          AND column_name = 's3_key';
-        """
-    )
-    return bool(await stmt.fetchval())
-
-
 async def track_file(
     namespace: str,
     model_name: str,
     revision_name: str,
     file_path: str,
     file_size: int,
-    content_sha: str,
+    content_sha: str | None,
     content_etag: str | None = None,
     s3_key: str | None = None,
 ) -> bool:
@@ -48,7 +30,7 @@ async def track_file(
         revision_name (str): The name of the revision containing the file.
         file_path (str): The path to the file within the revision.
         file_size (int): The size of the file in bytes.
-        content_sha (str): The SHA hash of the file content.
+        content_sha (str | None): The content hash, if supplied by storage.
         content_etag (str | None): Optional ETag for the file.
         s3_key (str | None): Optional S3 key for the file.
 
@@ -58,7 +40,6 @@ async def track_file(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        has_s3_key = await model_files_has_s3_key(conn)
         # Get model ID
         model_stmt = await conn.prepare(
             """
@@ -88,33 +69,19 @@ async def track_file(
         revision_id = revision_row["id"]
 
         # Insert or update file record
-        if has_s3_key:
-            stmt = await conn.prepare(
-                """
-                INSERT INTO model_files (revision_id, file_path, file_size, content_sha, content_etag, s3_key)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (revision_id, file_path)
-                DO UPDATE SET
-                    file_size = EXCLUDED.file_size,
-                    content_sha = EXCLUDED.content_sha,
-                    content_etag = EXCLUDED.content_etag,
-                    s3_key = EXCLUDED.s3_key;
-                """
-            )
-            await stmt.fetch(revision_id, file_path, file_size, content_sha, content_etag, s3_key)
-        else:
-            stmt = await conn.prepare(
-                """
-                INSERT INTO model_files (revision_id, file_path, file_size, content_sha, content_etag)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (revision_id, file_path)
-                DO UPDATE SET
-                    file_size = EXCLUDED.file_size,
-                    content_sha = EXCLUDED.content_sha,
-                    content_etag = EXCLUDED.content_etag;
-                """
-            )
-            await stmt.fetch(revision_id, file_path, file_size, content_sha, content_etag)
+        stmt = await conn.prepare(
+            """
+            INSERT INTO model_files (revision_id, file_path, file_size, content_sha, content_etag, s3_key)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (revision_id, file_path)
+            DO UPDATE SET
+                file_size = EXCLUDED.file_size,
+                content_sha = EXCLUDED.content_sha,
+                content_etag = EXCLUDED.content_etag,
+                s3_key = EXCLUDED.s3_key;
+            """
+        )
+        await stmt.fetch(revision_id, file_path, file_size, content_sha, content_etag, s3_key)
 
     return True
 
@@ -200,44 +167,19 @@ async def get_file_record(
     pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-        has_s3_key = await model_files_has_s3_key(conn)
-        if has_s3_key:
-            stmt = await conn.prepare(
-                """
-                SELECT
-                    mf.file_path,
-                    mf.file_size,
-                    mf.content_sha,
-                    mf.content_etag,
-                    mf.s3_key
-                FROM model_files mf
-                JOIN model_revisions mr ON mr.id = mf.revision_id
-                                JOIN models repo ON repo.id = mr.model_id
-                WHERE repo.namespace = $1
-                                    AND repo.model_name = $2
-                  AND mr.revision_name = $3
-                  AND mf.file_path = $4;
-                """
-            )
-            row = await stmt.fetchrow(namespace, model_name, revision_name, file_path)
-        else:
-            stmt = await conn.prepare(
-                """
-                SELECT
-                    mf.file_path,
-                    mf.file_size,
-                    mf.content_sha,
-                    mf.content_etag
-                FROM model_files mf
-                JOIN model_revisions mr ON mr.id = mf.revision_id
-                                JOIN models repo ON repo.id = mr.model_id
-                WHERE repo.namespace = $1
-                                    AND repo.model_name = $2
-                  AND mr.revision_name = $3
-                  AND mf.file_path = $4;
-                """
-            )
-            row = await stmt.fetchrow(namespace, model_name, revision_name, file_path)
+        stmt = await conn.prepare(
+            """
+            SELECT mf.file_path, mf.file_size, mf.content_sha, mf.content_etag, mf.s3_key
+            FROM model_files mf
+            JOIN model_revisions mr ON mr.id = mf.revision_id
+            JOIN models repo ON repo.id = mr.model_id
+            WHERE repo.namespace = $1
+              AND repo.model_name = $2
+              AND mr.revision_name = $3
+              AND mf.file_path = $4;
+            """
+        )
+        row = await stmt.fetchrow(namespace, model_name, revision_name, file_path)
 
     if row is None:
         return None
@@ -247,8 +189,8 @@ async def get_file_record(
         "size": row["file_size"],
         "sha": row["content_sha"],
         "etag": row["content_etag"],
-        "object_key": row["s3_key"] if has_s3_key else f"{namespace}/{model_name}/{revision_name}/{file_path}",
-        "s3_key": row["s3_key"] if has_s3_key else f"{namespace}/{model_name}/{revision_name}/{file_path}",
+        "object_key": row["s3_key"],
+        "s3_key": row["s3_key"],
     }
 
 

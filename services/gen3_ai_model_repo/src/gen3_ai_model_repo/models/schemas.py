@@ -14,12 +14,14 @@ class RepositoryModel(BaseModel):
     created_at: datetime | None = None
 
 
-class RepositoryFileModel(BaseModel):
-    """A file entry included in repository metadata."""
+class PaginatedRepositoryResponse(BaseModel):
+    """A page of model repositories."""
 
-    type: str
-    oid: str
-    size: int
+    models: list[RepositoryModel]
+    page: int
+    page_size: int
+    next_page: int | None = None
+    prev_page: int | None = None
 
 
 class RepositoryMetadataModel(BaseModel):
@@ -32,13 +34,13 @@ class RepositoryMetadataModel(BaseModel):
     created_at: datetime | None = None
 
 
-class UploadModelResponse(BaseModel):
-    """Response payload for upload operations."""
+class TreeEntryModel(BaseModel):
+    """Tree entry describing a file in a repository tree."""
 
-    status: str
-    repo: str
-    metadata_file: str
-    metadata: RepositoryMetadataModel
+    type: str
+    oid: str | None = None
+    size: int
+    path: str
 
 
 class RepositoryInfoModel(BaseModel):
@@ -48,7 +50,7 @@ class RepositoryInfoModel(BaseModel):
     sha: str
     etag: str
     size: int
-    files: list[RepositoryFileModel]
+    files: list[TreeEntryModel]
     metadata: RepositoryMetadataModel
     security_status: dict
 
@@ -66,14 +68,6 @@ class RevisionListResponseModel(BaseModel):
 
     repo: str
     revisions: list[RevisionModel]
-
-
-class TreeEntryModel(BaseModel):
-    """Tree entry describing a file in a repository tree."""
-
-    type: str
-    oid: str
-    size: int
 
 
 class DeleteModelResponse(BaseModel):

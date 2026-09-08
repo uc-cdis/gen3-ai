@@ -7,11 +7,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from common.auth import get_user_id
+from common.logging_setup import configure_logging
 from common.metrics import get_metrics_client
 from common.telemetry import configure_tracing
 from gen3_ai_model_repo import config
 from gen3_ai_model_repo.config import logging
-from gen3_ai_model_repo.database.db import get_db_pool
+from gen3_ai_model_repo.database.db import close_db, get_db_pool
+from gen3_ai_model_repo.database.repo_metadata import get_repository_metrics
 from gen3_ai_model_repo.metrics import AiModelRepoServiceMetrics
 from gen3_ai_model_repo.routes.router import route_aggregator
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
@@ -33,8 +35,12 @@ async def lifespan(app: FastAPI):
 
     await check_db_connection()
     await initialize_storage()
+    await update_metrics(app)
 
-    yield
+    try:
+        yield
+    finally:
+        await close_db()
 
 
 async def check_db_connection():
@@ -84,6 +90,7 @@ def get_app() -> FastAPI:
         root_path=config.URL_PREFIX,
         lifespan=lifespan,
     )
+    configure_logging()
     configure_tracing(app, "gen3_ai_model_repo")
     app.state.metrics = AiModelRepoServiceMetrics(metrics_client=get_metrics_client(app))
 
@@ -92,6 +99,13 @@ def get_app() -> FastAPI:
     @app.middleware("http")
     async def middleware_record_api_metric(request: Request, call_next):
         response = await call_next(request)
+
+        if request.method not in {"GET", "HEAD"}:
+            try:
+                await update_metrics(app)
+            except Exception:
+                # Metrics refresh must not change the result of a successful API mutation.
+                logging.exception("Failed to refresh model repository metrics")
 
         path = _get_path_label_for_metrics(request, unrouted_paths)
         if path in config.ENDPOINTS_WITHOUT_METRICS:
@@ -135,6 +149,18 @@ def get_app() -> FastAPI:
     return app
 
 
+async def update_metrics(app: FastAPI) -> None:
+    """Refresh repository gauges from the database after startup or mutations."""
+    metrics = getattr(app.state, "metrics", None)
+    if not metrics or not metrics.metrics_client or not metrics.metrics_client.enabled:
+        return
+
+    model_count, file_count, total_size_bytes = await get_repository_metrics()
+    metrics.add_models_count_metric(model_count)
+    metrics.add_stored_files_count_metric(file_count)
+    metrics.add_stored_models_size_metric(total_size_bytes)
+
+
 def _get_path_label_for_metrics(request: Request, unrouted_paths: frozenset[str]) -> str:
     """Return a bounded route label for the API request metric."""
     template = getattr(request.scope.get("route"), "path", None)
@@ -149,5 +175,5 @@ def _get_path_label_for_metrics(request: Request, unrouted_paths: frozenset[str]
 
 
 app = get_app()
-# Keep a stable gunicorn target used by deployment and `just run` recipes.
+# Keep a stable Uvicorn application target used by deployment and `just run` recipes.
 app_instance = app

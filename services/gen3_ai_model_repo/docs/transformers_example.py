@@ -2,7 +2,7 @@
 # run with: HF_HUB_CACHE=~/.cache/gen3 HF_TOKEN=foobar HF_ENDPOINT=http://0.0.0.0:4141 uv run python transformers_example.py
 
 
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download  # ty: ignore[unresolved-import]
 
 HF_ENDPOINT = "http://127.0.0.1:4141"
 # from transformers import AutoModel, AutoTokenizer
