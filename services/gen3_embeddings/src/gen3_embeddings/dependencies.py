@@ -224,6 +224,9 @@ class AuthzDependency:
             db_pool_from_request(request),
             allowed_authz=allowed_authz,
             allowed_collection_names=allowed_collection_names,
+            # Absent only if the lifespan did not run, in which case there is no pool either
+            # and db_pool_from_request has already raised.
+            vector_indexes=getattr(request.app.state, "vector_indexes", None),
         )
 
         return AuthzContext(

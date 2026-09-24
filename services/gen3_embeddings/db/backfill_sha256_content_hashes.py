@@ -57,8 +57,7 @@ from gen3_embeddings import config  # noqa: E402
 from gen3_embeddings.database import hashing  # noqa: E402
 from gen3_embeddings.models.schemas import VectorType  # noqa: E402
 
-# Rows per transaction. Each row carries a full vector, so this is a memory bound as much as
-# a lock-duration one: 1000 x 8192 float32 is ~32MB.
+# Rows per transaction
 BATCH_SIZE = 500
 
 TABLES: dict[str, VectorType] = {

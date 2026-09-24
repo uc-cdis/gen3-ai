@@ -50,6 +50,9 @@ def get_app() -> FastAPI:
         Args:
             request (Request): the incoming HTTP request
             call_next (Callable): function to call (this is handled by FastAPI's middleware support)
+
+        Returns:
+            Response: The endpoint's response, or an Open Responses 500 error if it raised.
         """
         start_time = time.perf_counter()
         try:

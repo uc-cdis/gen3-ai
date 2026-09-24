@@ -868,3 +868,5 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 - re-evaluate running the snyk test now that they support uv
 - It would be nice if when searching by metadata you could specify more than 1 value to match, a situation where one needed to match 2 different studies (which were metadata) and wanted to do it in one query
 - check ALLOW_ANONYMOUS_ACCESS and DEBUG_SKIP_AUTH flow
+- count embeddings per collection too slow
+- handle timeout (search, gateway) errors

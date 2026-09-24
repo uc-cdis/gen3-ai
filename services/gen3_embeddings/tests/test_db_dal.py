@@ -50,6 +50,7 @@ from gen3_embeddings.database.errors import (
     MetadataLengthMismatchError,
     RowLevelSecurityDeniedError,
 )
+from gen3_embeddings.database.index_discovery import IndexStrategy, VectorIndex
 from gen3_embeddings.database.models import Collection
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
@@ -199,6 +200,7 @@ def make_dal(
     execute_result="DELETE 0",
     allowed_authz=(DOCS_AUTHZ,),
     allowed_collection_names=("docs",),
+    vector_indexes=None,
 ):
     """Build a DAL over a fake pool, returning (dal, connection, pool)."""
     conn = FakeConnection(results=results, execute_result=execute_result)
@@ -207,6 +209,7 @@ def make_dal(
         pool,
         allowed_authz=list(allowed_authz),
         allowed_collection_names=set(allowed_collection_names),
+        vector_indexes=vector_indexes,
     )
     return dal, conn, pool
 
@@ -281,6 +284,10 @@ async def test_create_pool_registers_the_pgvector_codec(monkeypatch):
     Without it asyncpg treats a `vector` column as text, so every read and write round-trips
     the whole vector as a decimal string. That is a silent, purely-performance regression:
     nothing fails, so only this assertion would notice the init going missing.
+
+    Note the init is deliberately limited to the codec. Session settings cannot live here:
+    asyncpg runs `RESET ALL` when a connection is released, so anything else set in `init`
+    lasts exactly one request. They go in `_with_rls` instead.
     """
     captured = {}
 
@@ -593,7 +600,7 @@ async def test_every_operation_carries_both_rls_settings():
 
     await dal.get_collection_by_name("docs")
 
-    authz, collection_names = conn.rls_context
+    authz, collection_names, *_search_settings = conn.rls_context
     assert authz == [DOCS_AUTHZ, "/programs/foo"]
     # the set is bound as a list, because asyncpg has no encoder for a set
     assert collection_names == ["docs"]
@@ -603,6 +610,40 @@ async def test_every_operation_carries_both_rls_settings():
     rls_sql = normalized(conn.rls_sql)
     assert "set_config('app.allowed_authz', $1::text[]::text, true)" in rls_sql
     assert "set_config('app.allowed_collection_names', $2::text[]::text, true)" in rls_sql
+
+
+@pytest.mark.asyncio
+async def test_the_search_settings_are_applied_per_transaction(monkeypatch):
+    """
+    `ef_search`, `iterative_scan` and `statement_timeout` ride along with the RLS context.
+
+    They belong here rather than in the pool's `init` because asyncpg issues `RESET ALL` when
+    a connection is released, so a connection-level setting survives exactly one request and
+    then reverts with no error. The symptoms are quiet and easy to miss: `ef_search` falls
+    back to pgvector's default of 40, capping every search at 40 hits however large `top_k`
+    is, and `statement_timeout` reverts to no limit at all. Setting them per transaction
+    re-applies them on every acquire and costs no extra round trip, since the statement that
+    carries the RLS context is already being sent.
+    """
+    monkeypatch.setattr(config, "HNSW_EF_SEARCH", 250)
+    monkeypatch.setattr(config, "HNSW_ITERATIVE_SCAN", "strict_order")
+    monkeypatch.setattr(config, "DB_STATEMENT_TIMEOUT_MS", 12_345)
+
+    dal, conn, _ = make_dal(results=[[collection_row()]])
+
+    await dal.get_collection_by_name("docs")
+
+    _authz, _names, ef_search, iterative_scan, statement_timeout = conn.rls_context
+    assert (ef_search, iterative_scan, statement_timeout) == ("250", "strict_order", "12345ms")
+
+    rls_sql = normalized(conn.rls_sql)
+    # is_local=true on every one of them, so nothing leaks past this transaction
+    for setting, param in (
+        ("hnsw.ef_search", "$3"),
+        ("hnsw.iterative_scan", "$4"),
+        ("statement_timeout", "$5"),
+    ):
+        assert f"set_config('{setting}', {param}::text, true)" in rls_sql
 
 
 @pytest.mark.asyncio
@@ -1301,16 +1342,139 @@ async def test_single_collection_search_binds_its_first_three_parameters_in_orde
     assert conn.params == [7, [1.0, 0.0, 0.0], 5, "kind", "doc", 0.5]
     sql = normalized(conn.sql)
     assert "FROM embeddings_vector" in sql
-    assert "embedding <=> $2::vector" in sql
+    assert "embedding::vector(3) <=> $2::vector(3)" in sql
+
+
+def _binary_index(collection_id=1, dimensions=3):
+    """A discovered binary-quantized index for a collection."""
+    return {
+        collection_id: [
+            VectorIndex(
+                index_name="idx_bq",
+                table="embeddings_vector",
+                collection_id=collection_id,
+                strategy=IndexStrategy.binary,
+                dimensions=dimensions,
+                metric=None,
+                vector_type=None,
+            )
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_collection_with_no_known_index_uses_the_direct_shape():
+    """The default has to be the form that works without any index, not a guess."""
+    dal, conn, _ = make_dal(results=[[embedding_row()]])
+
+    await dal.search_embeddings_in_collection(
+        make_collection(id=1),
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    assert "binary_quantize" not in normalized(conn.sql)
+
+
+@pytest.mark.asyncio
+async def test_a_binary_index_switches_search_to_the_rescore_shape():
+    """Discovering a binary index is what makes search emit the two-stage query."""
+    dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index())
+
+    await dal.search_embeddings_in_collection(
+        make_collection(id=1),
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    sql = normalized(conn.sql)
+    assert "binary_quantize(embedding)::bit(3)" in sql
+    assert "WITH candidates AS MATERIALIZED" in sql
+
+
+@pytest.mark.asyncio
+async def test_ef_search_is_raised_to_cover_the_rescore_pool():
+    """
+    An HNSW scan returns at most `ef_search` candidates, so the pool must not exceed it.
+
+    Leaving `ef_search` at its configured default would cap a 200-candidate rescore at 40 with
+    nothing reported -- the caller still gets rows, just drawn from a fifth of the intended
+    pool, which shows up only as worse results.
+    """
+    dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index())
+
+    await dal.search_embeddings_in_collection(
+        make_collection(id=1),
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    _authz, _names, ef_search, _iterative, _timeout = conn.rls_context
+    expected = max(10 * config.BINARY_RESCORE_MULTIPLIER, config.BINARY_RESCORE_MIN)
+    assert int(ef_search) == expected
+    assert f"LIMIT {expected}" in normalized(conn.sql)
+
+
+@pytest.mark.asyncio
+async def test_the_rescore_pool_is_clamped_at_both_ends():
+    """
+    A tiny top_k still needs a usable pool, and a large one must not detoast the collection.
+
+    `top_k` is itself a floor, since a pool smaller than it could not return the rows asked
+    for. That only outranks the ceiling above `MAX_TOP_K`, which the route layer rejects, so
+    in practice the ceiling always holds.
+    """
+    dal, _conn, _ = make_dal(vector_indexes=_binary_index())
+    limit = dal._binary_rescore_limit
+
+    assert limit(1, DistanceMetric.cosine_distance, 3, top_k=1) == config.BINARY_RESCORE_MIN
+    assert limit(1, DistanceMetric.cosine_distance, 3, top_k=config.MAX_TOP_K) == config.BINARY_RESCORE_MAX
+    # between the two, the multiplier decides
+    assert limit(1, DistanceMetric.cosine_distance, 3, top_k=25) == 25 * config.BINARY_RESCORE_MULTIPLIER
+    # and the pool is never narrower than what the caller asked for
+    assert limit(1, DistanceMetric.cosine_distance, 3, top_k=5_000) >= 5_000
+
+
+@pytest.mark.asyncio
+async def test_a_binary_index_for_another_collection_is_not_applied():
+    """The map is keyed by collection, and one collection's index says nothing about another's."""
+    dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index(collection_id=99))
+
+    await dal.search_embeddings_in_collection(
+        make_collection(id=1),
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    assert "binary_quantize" not in normalized(conn.sql)
 
 
 @pytest.mark.asyncio
 async def test_single_collection_search_casts_the_query_vector_to_the_collections_type():
     """
-    A halfvec collection is searched with a halfvec query.
+    A halfvec collection is searched with a halfvec query, at the collection's dimension.
 
     pgvector will not use a halfvec index for a `vector` operand, so the wrong cast is a
-    sequential scan that still returns the right rows -- correct and arbitrarily slow.
+    sequential scan that still returns the right rows -- correct and arbitrarily slow. The
+    dimension matters for the same reason: the only indexable form of these dimensionless
+    columns is a partial expression index on `embedding::halfvec(n)`, and Postgres uses an
+    expression index only when the query's expression matches it exactly.
     """
     dal, conn, _ = make_dal(results=[[embedding_row()]])
 
@@ -1326,7 +1490,7 @@ async def test_single_collection_search_casts_the_query_vector_to_the_collection
 
     sql = normalized(conn.sql)
     assert "FROM embeddings_halfvec" in sql
-    assert "embedding <-> $2::halfvec" in sql
+    assert "embedding::halfvec(3) <-> $2::halfvec(3)" in sql
 
 
 @pytest.mark.asyncio

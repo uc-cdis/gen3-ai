@@ -11,6 +11,7 @@ from gen3authz.client.arborist.async_client import ArboristClient
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 from gen3_embeddings.database.db import create_pool
+from gen3_embeddings.database.index_discovery import discover_vector_indexes
 from gen3_embeddings.error_handlers import register_error_handlers
 from gen3_embeddings.limits import RequestSizeLimitMiddleware
 from gen3_embeddings.routes.basic import basic_router
@@ -107,6 +108,12 @@ async def lifespan(app: FastAPI):
     try:
         await check_db_connection(app.state.db_pool)
 
+        # Which vector indexes exist decides which SQL shape search emits, and the query has
+        # to match an index's expression exactly or Postgres silently scans instead. Read once
+        # here rather than per request; an index built after startup is picked up on restart.
+        async with app.state.db_pool.acquire() as conn:
+            app.state.vector_indexes = await discover_vector_indexes(conn)
+
         if not config.DEBUG_SKIP_AUTH:
             await check_arborist_is_healthy(app)
 
@@ -123,7 +130,10 @@ async def check_arborist_is_healthy(app):
     Checks that we can talk to arborist
 
     Args:
-        app_with_setup (FastAPI): the fastapi app with arborist client
+        app (FastAPI): the fastapi app with arborist client
+
+    Raises:
+        Exception: If arborist is not healthy.
     """
     logging.debug("Startup policy engine (Arborist) connection test initiating...")
     arborist_client = app.state.arborist_client
@@ -215,6 +225,11 @@ async def check_db_connection(pool):
 
     Args:
         pool: The pool created for this app, whose lifetime the caller owns.
+
+    Raises:
+        Exception: If the database cannot be reached, the DB user is SUPERUSER or has BYPASSRLS,
+            or row-level security is not in effect. The role and RLS checks are skipped when
+            DEBUG_SKIP_AUTH is True.
     """
     try:
         logging.debug("Startup database connection test initiating. Attempting a simple query...")

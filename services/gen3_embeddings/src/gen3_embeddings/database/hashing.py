@@ -21,7 +21,7 @@ PUT conflicts on to turn an insert into an update. Two properties matter.
 
 Hashing here (rather than as `md5(...)` inside the INSERT) also means the vector never has
 to be serialized to text for the database to hash it, which is what makes the binary
-float4[] write path in `db.py` possible.
+float32-array write path in `db.py` possible.
 """
 
 import hashlib
@@ -74,23 +74,6 @@ def storage_dtype_for_precision(precision: VectorPrecision) -> np.dtype:
         raise ValueError(f"Unsupported vector precision: {precision}") from None
 
 
-def storage_dtype(vector_type: VectorType) -> np.dtype:
-    """
-    Return the numpy dtype matching how pgvector stores this vector type on disk.
-
-    Args:
-        vector_type (VectorType): Storage type of the target collection.
-
-    Returns:
-        np.dtype: Little-endian float32 for `vector`, little-endian float16 for `halfvec`.
-
-    Raises:
-        ValueError: If the vector type has no known storage dtype.
-    """
-    # pgvector `vector` stores float32, `halfvec` stores float16.
-    return storage_dtype_for_precision(vector_type.precision)
-
-
 def to_storage_array(
     vectors: list[list[float]],
     vector_type: VectorType,
@@ -99,7 +82,7 @@ def to_storage_array(
     """
     Convert a batch of vectors into one (n, dimensions) array at storage precision.
 
-    The array is the input to both the row hashes and the flat float4[] the bulk INSERT
+    The array is the input to both the row hashes and the flat float32 array the bulk INSERT
     binds, so it is built once per request.
 
     Args:
@@ -120,7 +103,7 @@ def to_storage_array(
         EmbeddingNotRepresentableError: If a value overflows the storage type (only reachable
             for halfvec, whose float16 range stops at ~65504).
     """
-    dtype = storage_dtype(vector_type)
+    dtype = storage_dtype_for_precision(vector_type.precision)
 
     for index, vector in enumerate(vectors):
         if len(vector) != dimensions:
@@ -158,12 +141,12 @@ def hash_rows(array: np.ndarray) -> list[UUID]:
 
 def flatten_rows(array: np.ndarray, row_indices: list[int]) -> list[float]:
     """
-    Flatten the selected rows into the row-major float list bound as the INSERT's float4[].
+    Flatten the selected rows into the row-major float list bound as the INSERT's float32 array parameter.
 
     The bulk INSERT binds one flat array for the whole batch and slices out row `i` with
     `arr[((i - 1) * dimensions + 1):(i * dimensions)]`, which is what keeps vectors off the
-    text-serialization path: asyncpg encodes float4[] in binary, so no float ever gets
-    formatted as a string.
+    text-serialization path: asyncpg encodes the float32 array in binary, so no float ever
+    gets formatted as a string.
 
     Args:
         array (np.ndarray): Storage-precision array from `to_storage_array`.

@@ -119,6 +119,9 @@ async def create_collection(
 
     Returns:
         CollectionModel for the created collection.
+
+    Raises:
+        HTTPException: 400 if `collection_name` is not a valid collection name.
     """
     logging.debug(f"Creating collection: {body}...")
 

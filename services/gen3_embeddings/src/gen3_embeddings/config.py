@@ -108,6 +108,32 @@ PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
 PGPOOL_MIN_SIZE = starlette_config("PGPOOL_MIN_SIZE", cast=int, default="1")
 PGPOOL_MAX_SIZE = starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5")
 
+# Session settings applied to every pooled connection. See `_configure_connection` in
+# database/db.py for why each one is here.
+#
+# Candidate list size for an HNSW scan. This is the recall/latency dial: pgvector's default
+# of 40 is tuned for an unfiltered search, and every search here is filtered by RLS.
+HNSW_EF_SEARCH = starlette_config("HNSW_EF_SEARCH", cast=int, default=100)
+
+# Without this, an HNSW scan returns `ef_search` candidates once and the RLS and metadata
+# filters cut them down, so a search silently returns fewer hits than `top_k`. Requires
+# pgvector >= 0.8. Set to "off" to restore the pre-0.8 behaviour.
+HNSW_ITERATIVE_SCAN = starlette_config("HNSW_ITERATIVE_SCAN", default="relaxed_order")
+
+# A query that outlives the gunicorn worker timeout (90s) gets its worker killed while
+# Postgres keeps executing, so the work continues with nobody left to receive it. Bound the
+# database side below that. 0 disables, which is the Postgres default.
+DB_STATEMENT_TIMEOUT_MS = starlette_config("DB_STATEMENT_TIMEOUT_MS", cast=int, default=60_000)
+
+# A binary-quantized index answers a search in two stages: pull candidates cheaply by Hamming
+# distance, then re-rank them by the exact metric. These bound that candidate pool. Too few and
+# the true nearest neighbours were never in it for the re-rank to find; too many and every
+# query detoasts that many full vectors.
+BINARY_RESCORE_MULTIPLIER = starlette_config("BINARY_RESCORE_MULTIPLIER", cast=int, default=20)
+BINARY_RESCORE_MIN = starlette_config("BINARY_RESCORE_MIN", cast=int, default=100)
+BINARY_RESCORE_MAX = starlette_config("BINARY_RESCORE_MAX", cast=int, default=2_000)
+
+
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
     cast=Secret,

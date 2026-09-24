@@ -149,7 +149,7 @@ class AuthzConfig:
 
 
 def _cache_get(request: Request | None, key: str) -> Any:
-    """Read a per-request cached value, or None when there is no request to cache on."""
+    """Return the per-request cached value, or None when there is no request to cache on."""
     if not request:
         return None
     return getattr(request.state, f"{_CACHE_PREFIX}{key}", None)
@@ -313,7 +313,7 @@ async def get_username(
     """
     if config.DEBUG_SKIP_AUTH and not token:
         logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING username = 'librarian'")
-        return "0"
+        return "librarian"
 
     token_claims = await _get_token_claims(token, request, authz_config=authz_config)
     if "user" not in token_claims.get("context", {}):

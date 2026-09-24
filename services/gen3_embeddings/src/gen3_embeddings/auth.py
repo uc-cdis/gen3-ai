@@ -28,6 +28,10 @@ authz generally, because embeddings work differently and the difference matters:
   existing embedding's `authz` to a different value later. All the service requires is that
   the caller holds the relevant action on whatever path they name.
 
+A grant on the base resource `/vectorstore/collections` itself is not supported and is
+ignored with a warning. Policies must name individual collections explicitly:
+`/vectorstore/collections/{collection_name}`.
+
 So `get_allowed_collection_names_from_authz` below deliberately narrows a caller's grants to
 the collection-shaped ones, and its result feeds ONLY the `collections` policy. The
 embeddings policy is fed the caller's grants UNNARROWED (see
@@ -140,8 +144,12 @@ def get_allowed_collection_names_from_authz(allowed_authz: list[str]) -> set[str
         if not isinstance(item, str):
             continue
         if item == AUTHZ_RESOURCE_BASE:
-            # base resource: may mean "can access all collections", depending on policy
-            # for now, we'll pass
+            # Granting the base resource is not supported: this service requires collection
+            # names to be listed explicitly. Log and skip rather than silently ignore.
+            logging.warning(
+                f"Authz grant on base resource '{item}' is not supported; "
+                "policies must name individual collections explicitly. Skipping."
+            )
             continue
         if item.startswith(AUTHZ_RESOURCE_BASE + "/"):
             # e.g. "/vectorstore/collections/my_collection"

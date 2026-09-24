@@ -85,6 +85,7 @@ What do we do in this file?
       cannot disagree, because both read the same field
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -108,6 +109,7 @@ from gen3_embeddings.database.errors import (
     RowLevelSecurityDeniedError,
 )
 from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.database.index_discovery import IndexStrategy, VectorIndex, choose_index
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
@@ -355,6 +357,7 @@ class DataAccessLayer:
         pool: asyncpg.Pool,
         allowed_authz: list[str] | None = None,
         allowed_collection_names: set[str] | None = None,
+        vector_indexes: dict[int, list[VectorIndex]] | None = None,
     ):
         """
         Bind the DAL to a connection pool and the caller's authz context.
@@ -366,13 +369,57 @@ class DataAccessLayer:
                 fail-closed state rather than "allow everything".
             allowed_collection_names (set[str] | None): The same grants reduced to
                 collection names. Omitted or empty means no collections, also fail-closed.
+            vector_indexes (dict[int, list[VectorIndex]] | None): Vector indexes discovered at
+                startup, keyed by collection id. Omitted means none are known and every search
+                emits its unindexed form.
         """
         self.pool = pool
         # Empty means "nothing allowed", which is valid (and safe) for RLS
         self.allowed_authz = allowed_authz or []
         self.allowed_collection_names = allowed_collection_names or set()
+        # Which vector indexes exist, discovered at startup. Empty means none are known, and
+        # search emits its unindexed query -- slow but correct, which is the right default for
+        # a collection whose index was never built.
+        self.vector_indexes = vector_indexes or {}
 
-    async def _with_rls(self, fn, *args, **kwargs):
+    def _binary_rescore_limit(
+        self,
+        collection_id: int,
+        metric: DistanceMetric,
+        dimensions: int,
+        top_k: int,
+    ) -> int | None:
+        """
+        How many candidates to rescore, or None if this search should not use a binary index.
+
+        The pool has to be wider than `top_k`, because binary quantization keeps only the sign
+        of each dimension and Hamming distance over that is a rough proxy for the real metric:
+        a true nearest neighbour can sit well down the Hamming ordering, and only a candidate
+        that was retrieved can be recovered by the exact rescore.
+
+        Args:
+            collection_id (int): Collection being searched.
+            metric (DistanceMetric): Metric the caller asked for.
+            dimensions (int): Dimensionality the collection declares.
+            top_k (int): Rows the caller wants back.
+
+        Returns:
+            int | None: The candidate pool size, or None to emit the direct form.
+        """
+        chosen = choose_index(self.vector_indexes.get(collection_id), metric, dimensions)
+        if chosen is None or chosen.strategy is not IndexStrategy.binary:
+            return None
+
+        wanted = top_k * config.BINARY_RESCORE_MULTIPLIER
+        return max(min(wanted, config.BINARY_RESCORE_MAX), config.BINARY_RESCORE_MIN, top_k)
+
+    async def _with_rls(
+        self,
+        fn: Callable[..., Awaitable[Any]],
+        *args: Any,
+        ef_search: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """
         Run a DB operation inside a transaction carrying the caller's RLS context.
 
@@ -384,24 +431,52 @@ class DataAccessLayer:
         `is_local=true` scopes them to this transaction, so a pooled connection cannot carry
         one caller's context into another caller's query.
 
+        The search settings ride along in the same statement, which is also the only place
+        they can go: asyncpg's pool runs `RESET ALL` when a connection is released, so
+        anything set in the pool's `init` survives exactly one request and then silently
+        reverts. That failure is invisible -- searches quietly return at most `ef_search`
+        (default 40) rows, and `statement_timeout` goes back to "no limit" -- so it has to be
+        re-applied per transaction rather than per connection. Doing it here costs no extra
+        round trip.
+
         Args:
             fn: Coroutine function taking an open connection as its first argument.
             *args: Passed through to `fn`.
+            ef_search: Raise `hnsw.ef_search` to at least this for the transaction, and do not
+                pass it on to `fn`. Searches that rescore a pool of binary-quantized candidates
+                set it to the pool size, since an HNSW scan never returns more candidates than
+                `ef_search` and would otherwise truncate the pool without saying so.
             **kwargs: Passed through to `fn`.
 
         Returns:
             Whatever `fn` returns.
-        """
+
+        Raises:
+            RowLevelSecurityDeniedError: If an RLS policy rejected a row `fn` tried to write.
+            InsufficientPrivilegeError: If `fn` hit any other privilege error, such as a missing
+                GRANT, which is a deployment fault rather than the caller's.
+        """  # noqa: DOC501
+        # DOC501 reads `raise _rls_denial_or_reraise(...)` as raising a type named after the
+        # helper; the exceptions it actually produces are documented under Raises above.
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
                     """
                     SELECT
                         set_config('app.allowed_authz', $1::text[]::text, true),
-                        set_config('app.allowed_collection_names', $2::text[]::text, true)
+                        set_config('app.allowed_collection_names', $2::text[]::text, true),
+                        set_config('hnsw.ef_search', $3::text, true),
+                        set_config('hnsw.iterative_scan', $4::text, true),
+                        set_config('statement_timeout', $5::text, true)
                     """,
                     self.allowed_authz,
                     list(self.allowed_collection_names),
+                    # An HNSW scan will not return more than `ef_search` candidates, so a
+                    # binary rescore pool wider than it is silently truncated: ask for 200 and
+                    # get 40. Raise it to cover the pool whenever one is in play.
+                    str(max(config.HNSW_EF_SEARCH, ef_search or 0)),
+                    config.HNSW_ITERATIVE_SCAN,
+                    f"{config.DB_STATEMENT_TIMEOUT_MS}ms",
                 )
                 try:
                     return await fn(conn, *args, **kwargs)
@@ -634,16 +709,29 @@ class DataAccessLayer:
         metadata_list: list[dict] | None,
     ) -> list[Embedding]:
         """
-        Bulk create multiple embeddings in the given collection.
+        Bulk-insert embeddings into a collection; every input must be new.
 
         Args:
-            collection: collection to insert into.
-            embeddings: List of embedding vectors.
-            authz: Authorization tags.
-            metadata_list: Optional list of metadata dicts (one per embedding).
+            collection (Collection): Target collection; supplies dimensions and vector type.
+            embeddings (list[list[float]]): Vectors to insert.
+            authz (str): Authz resource path assigned to every embedding in this batch.
+            metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
 
         Returns:
-            List of created Embedding instances.
+            list[Embedding]: One Embedding per input vector, in input order. Inputs that
+            deduplicated onto the same row within the batch share an object.
+
+        Raises:
+            MetadataLengthMismatchError: If `metadata_list` is a different length than
+                `embeddings`.
+            EmbeddingDimensionMismatchError: If any vector's length does not match the
+                collection's dimensionality.
+            EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
+                vector type.
+            EmbeddingsAlreadyExistError: If any embedding in the batch conflicts with an
+                existing row. No embeddings are written.
+            EmbeddingWriteInconsistencyError: If the rows returned by the database do not
+                correspond exactly to the rows inserted.
         """
         batch = _prepare_bulk_write(collection, embeddings, metadata_list)
         if not batch.row_count:
@@ -738,6 +826,10 @@ class DataAccessLayer:
     ) -> list[Embedding]:
         """
         Bulk upsert multiple embeddings in the given collection.
+
+        Returns:
+            list[Embedding]: One Embedding per input vector, in input order. An input that
+            matched an existing row gets that row back with a refreshed `updated_at`.
         """
         batch = _prepare_bulk_write(collection, embeddings, metadata_list)
         if not batch.row_count:
@@ -807,6 +899,9 @@ class DataAccessLayer:
 
         The combination (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
         must remain unique (per the DB constraint).
+
+        Returns:
+            Embedding | None: The updated row, or None if no such embedding is visible to the caller.
 
         Raises:
             DuplicateEmbeddingError: If the update would collide with another row.
@@ -970,10 +1065,19 @@ class DataAccessLayer:
         collection_id: int | None = None,
     ) -> list[Embedding]:
         """
-        Fetch embeddings by IDs from the appropriate table(s).
+        Fetch embeddings by ID from one or both embeddings tables.
 
-        If vector_type is given, only that table is queried.
-        If None, both tables are queried and results combined.
+        Args:
+            embedding_ids (list[UUID]): Identifiers to fetch.
+            vector_type (VectorType | None): If given, only that table is queried. If None,
+                both `embeddings_vector` and `embeddings_halfvec` are queried and results
+                combined.
+            collection_id (int | None): If given, additionally filter by collection.
+
+        Returns:
+            list[Embedding]: Embeddings visible to this caller under RLS, in no guaranteed
+            order. May be shorter than `embedding_ids` if any are hidden by RLS or do not
+            exist.
         """
 
         async def _query(conn):
@@ -1105,9 +1209,26 @@ class DataAccessLayer:
         filters: dict[str, str] | None,
     ) -> list[asyncpg.Record]:
         """
-        Search embeddings within a single collection using the collection's vector_type.
+        Search embeddings in a collection for nearest neighbors of a query vector.
+
+        Args:
+            collection (Collection): Collection to search; its `vector_type` selects the table.
+            query_vector (list[float]): Query vector to search against.
+            top_k (int): Maximum number of results to return.
+            min_value (float | None): Minimum similarity/distance threshold; rows outside it
+                are excluded. Interpretation depends on `distance_metric`.
+            max_value (float | None): Maximum similarity/distance threshold.
+            distance_metric (DistanceMetric): Distance function to use, e.g. cosine or L2.
+            filters (dict[str, str] | None): Metadata key/value filters; only rows matching
+                all entries are considered.
+
+        Returns:
+            list[asyncpg.Record]: Matching rows including distance scores, ordered by
+            distance. Visible to this caller under RLS. May be fewer than `top_k`.
         """
-        table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+        vector_type = VectorType(collection.vector_type)
+        table, _ = get_embeddings_table_and_cast(vector_type)
+        rescore_limit = self._binary_rescore_limit(collection.id, distance_metric, collection.dimensions, top_k)
 
         # $1: collection_id, $2: vector, $3: top_k
         params: list[Any] = [collection.id, query_vector, top_k]
@@ -1117,11 +1238,14 @@ class DataAccessLayer:
             distance_metric=distance_metric,
             single_collection=True,
             collection_ids_param="$1::bigint",
-            vector_param=f"$2{cast}",
+            vector_placeholder="$2",
             top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
             max_value=max_value,
+            vector_type=vector_type,
+            dimensions=collection.dimensions,
+            binary_rescore_limit=rescore_limit,
         )
         params.extend(extra_params)
 
@@ -1130,7 +1254,7 @@ class DataAccessLayer:
             rows = await stmt.fetch(*params)
             return rows
 
-        return await self._with_rls(_query)
+        return await self._with_rls(_query, ef_search=rescore_limit)
 
     async def search_embeddings_across_collections(
         self,
@@ -1150,6 +1274,9 @@ class DataAccessLayer:
         the given `vector_type` AND whose dimensions match the query vector length.
         A collection that matches neither cannot hold a hit for this query, so no
         collection matching means no hits: the result is empty rather than an error.
+
+        Returns:
+            list[asyncpg.Record]: The matching rows, at most `top_k` of them.
         """
         if not collections:
             return []
@@ -1165,7 +1292,7 @@ class DataAccessLayer:
         if not filtered_collections:
             return []
 
-        table, cast = get_embeddings_table_and_cast(vector_type)
+        table, _ = get_embeddings_table_and_cast(vector_type)
         collection_ids = [col.id for col in filtered_collections]
 
         # $1: collection_ids, $2: vector, $3: top_k
@@ -1176,11 +1303,14 @@ class DataAccessLayer:
             distance_metric=distance_metric,
             single_collection=False,
             collection_ids_param="$1::bigint[]",
-            vector_param=f"$2{cast}",
+            vector_placeholder="$2",
             top_k_param="$3::int",
             filters=filters,
             min_value=min_value,
             max_value=max_value,
+            vector_type=vector_type,
+            # every surviving collection matched the query's length, so they share one cast
+            dimensions=query_dims,
         )
         params.extend(extra_params)
 
