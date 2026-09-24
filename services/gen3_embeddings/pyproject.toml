@@ -11,7 +11,11 @@ dependencies = [
 requires-python = "~=3.13.0"
 
 [dependency-groups]
-dev = []
+# `uv run` installs this group, the image build (`uv sync --no-dev`) does not, so test-only
+# tooling belongs here rather than in common's runtime dependencies.
+dev = [
+    "pytest-cov>=7.0.0",
+]
 
 [tool.uv]
 package = true
@@ -25,3 +29,25 @@ common = { path = "../../libraries/common" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gen3_embeddings"]
+
+[tool.pytest.ini_options]
+# Coverage is on by every run, including `just test` and CI, so a drop is visible in the same
+# output as a failure rather than only when someone remembers to ask for it.
+addopts = "--cov --cov-report=term-missing"
+asyncio_mode = "strict"
+
+[tool.coverage.run]
+# The import name, not the path: it resolves through the editable install, so coverage
+# measures the same module the tests imported no matter which directory pytest ran from.
+source_pkgs = ["gen3_embeddings"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_also = [
+    # `if TYPE_CHECKING:` bodies never execute at runtime
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]

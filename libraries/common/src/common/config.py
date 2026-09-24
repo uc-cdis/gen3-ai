@@ -12,8 +12,11 @@ from starlette.config import Config
 
 def get_venv_root() -> Path | None:
     """
-    Return the absolute Path to the root of the current virtual environment,
-    or None if the interpreter is running from the system Python.
+    Find the root of the current virtual environment.
+
+    Returns:
+        Path | None: The absolute path to the root of the current virtual environment,
+            or None if the interpreter is running from the system Python.
     """
     if hasattr(sys, "base_prefix"):
         if sys.prefix != sys.base_prefix:
