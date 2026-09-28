@@ -40,6 +40,7 @@ async def verify_authorization(request: Request):
         authz_access_method="access",
         request=request,
     )
+    request.state.repository_scope = None
 
     # Model routes add a second, repository-level gate.  Routes without these
     # path parameters (for example, GET /api/models) are covered by the

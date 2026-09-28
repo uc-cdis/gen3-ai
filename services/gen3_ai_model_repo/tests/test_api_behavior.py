@@ -1,3 +1,5 @@
+"""API behavior tests for model repository routes."""
+
 from datetime import datetime
 
 from fastapi import FastAPI
@@ -22,6 +24,7 @@ def _build_test_client() -> TestClient:
 
 
 def test_list_models_empty_returns_200(monkeypatch):
+    """Return an empty paginated model list when the database has no models."""
     import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
 
     async def fake_list_models(namespace=None, tags=None, search=None, limit=100, offset=0):
@@ -38,6 +41,7 @@ def test_list_models_empty_returns_200(monkeypatch):
 
 
 def test_list_model_revisions_empty_returns_200(monkeypatch):
+    """Return an empty revision list for an existing repository."""
     import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
 
     async def fake_exists(namespace, repo):
@@ -59,6 +63,7 @@ def test_list_model_revisions_empty_returns_200(monkeypatch):
 
 
 def test_tree_empty_repository_returns_200_empty_list(monkeypatch):
+    """Return an empty tree for an existing repository without files."""
     import gen3_ai_model_repo.routes.ai_models_files as file_routes
 
     async def fake_exists(namespace, repo):
@@ -80,6 +85,7 @@ def test_tree_empty_repository_returns_200_empty_list(monkeypatch):
 
 
 def test_tree_path_filter_matches_path_segments(monkeypatch):
+    """Filter tree results by directory path segments."""
     import gen3_ai_model_repo.routes.ai_models_files as file_routes
 
     async def fake_exists(namespace, repo):
@@ -105,6 +111,7 @@ def test_tree_path_filter_matches_path_segments(monkeypatch):
 
 
 def test_tree_missing_repository_returns_404(monkeypatch):
+    """Return not found when the requested repository does not exist."""
     import gen3_ai_model_repo.routes.ai_models_files as file_routes
 
     async def fake_exists(namespace, repo):
@@ -120,6 +127,7 @@ def test_tree_missing_repository_returns_404(monkeypatch):
 
 
 def test_file_id_rejects_malformed_and_mismatched_ids():
+    """Reject malformed and cross-repository file identifiers."""
     client = _build_test_client()
 
     malformed = client.get("/api/models/ns/repo/files/config.json")
@@ -130,6 +138,7 @@ def test_file_id_rejects_malformed_and_mismatched_ids():
 
 
 def test_update_repository_requires_authorization():
+    """Require authorization for repository metadata updates."""
     app = FastAPI()
     app.include_router(ai_models_repositories_router)
     client = TestClient(app)
@@ -140,6 +149,7 @@ def test_update_repository_requires_authorization():
 
 
 def test_upload_rejects_too_many_files(monkeypatch):
+    """Reject multipart uploads that exceed the configured file limit."""
     import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
 
     monkeypatch.setattr(upload_routes.config, "MAX_UPLOAD_FILES", 1)
@@ -157,6 +167,7 @@ def test_upload_rejects_too_many_files(monkeypatch):
 
 
 def test_upload_rejects_content_length_before_processing(monkeypatch):
+    """Reject uploads whose declared content exceeds the configured limit."""
     import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
 
     monkeypatch.setattr(upload_routes.config, "MAX_UPLOAD_BYTES", 1)
@@ -171,6 +182,7 @@ def test_upload_rejects_content_length_before_processing(monkeypatch):
 
 
 def test_update_repository_metadata(monkeypatch):
+    """Update repository description and tags through the API."""
     import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
 
     async def fake_exists(namespace, repo):

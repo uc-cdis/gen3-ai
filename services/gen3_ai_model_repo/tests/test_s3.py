@@ -10,6 +10,7 @@ from gen3_ai_model_repo.storage.s3 import S3StorageProvider
 
 @pytest.fixture
 def provider():
+    """Build an S3 provider with a mocked client."""
     storage = S3StorageProvider.__new__(S3StorageProvider)
     storage.bucket_name = "test-bucket"
     storage.client = MagicMock()
@@ -18,6 +19,7 @@ def provider():
 
 @pytest.mark.asyncio
 async def test_s3_upload_download_and_metadata(provider, tmp_path):
+    """Run upload, download, and metadata operations through the provider."""
     local_file = tmp_path / "downloaded.bin"
 
     await provider.upload_stream(BytesIO(b"abc123"), "models/demo/weights.bin")
@@ -37,6 +39,7 @@ async def test_s3_upload_download_and_metadata(provider, tmp_path):
 
 @pytest.mark.asyncio
 async def test_s3_lists_and_deletes_prefix_in_batches(provider):
+    """List objects and delete a prefix using the S3 batch API."""
     page = {"Contents": [{"Key": "models/demo/config.json"}, {"Key": "models/demo/weights.bin"}]}
     provider.client.get_paginator.return_value.paginate.return_value = [page]
 
@@ -59,6 +62,7 @@ async def test_s3_lists_and_deletes_prefix_in_batches(provider):
 
 @pytest.mark.asyncio
 async def test_s3_generates_signed_urls(provider):
+    """Generate download and upload presigned URLs."""
     provider.client.generate_presigned_url.side_effect = ["download-url", "upload-url"]
 
     assert await provider.generate_signed_url("models/demo/config.json", expiry_seconds=60) == "download-url"

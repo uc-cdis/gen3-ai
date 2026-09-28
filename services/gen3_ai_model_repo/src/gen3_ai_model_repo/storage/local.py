@@ -1,10 +1,9 @@
 """Local filesystem storage for the Gen3 AI model repo service."""
 
+import asyncio
 import shutil
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
-from uuid import uuid4
 
 from gen3_ai_model_repo.storage.provider import StorageProvider
 
@@ -32,6 +31,10 @@ class LocalStorageProvider(StorageProvider):
             raise ValueError("Storage object key escapes the local storage root")
         return path
 
+    def local_path(self, object_key: str) -> Path:
+        """Return a validated path for an authorized local-file response."""
+        return self._resolve_object_path(object_key)
+
     async def ensure_container(self):
         """Ensure the local root directory exists."""
         self.root_directory.mkdir(parents=True, exist_ok=True)
@@ -49,15 +52,13 @@ class LocalStorageProvider(StorageProvider):
             exist_ok=True,
         )
 
-        with Path(local_path).open("rb") as src, destination.open("wb") as dst:
-            shutil.copyfileobj(src, dst, length=1024 * 1024)
+        await asyncio.to_thread(shutil.copyfile, local_path, destination)
 
     async def upload_stream(self, stream, object_key: str):
         """Upload a data stream to the local storage root."""
         destination = self._resolve_object_path(object_key)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("wb") as dst:
-            shutil.copyfileobj(stream, dst, length=1024 * 1024)
+        await asyncio.to_thread(_copy_stream, stream, destination)
 
     async def download_file(
         self,
@@ -66,8 +67,7 @@ class LocalStorageProvider(StorageProvider):
     ):
         """Download a stored object to a local path."""
         source = self._resolve_object_path(object_key)
-        with source.open("rb") as src, Path(local_path).open("wb") as dst:
-            shutil.copyfileobj(src, dst, length=1024 * 1024)
+        await asyncio.to_thread(shutil.copyfile, source, local_path)
 
     async def list_files(
         self,
@@ -123,10 +123,13 @@ class LocalStorageProvider(StorageProvider):
         expiry_seconds: int = 3600,
     ) -> str:
         """
-        Local storage does not support signed URLs.
+        Return the validated object key for the local authorized-response path.
+
+        Returns:
+            str: The validated object key.
         """
-        del object_key, expiry_seconds
-        raise NotImplementedError("Local storage does not support signed URLs")
+        self._resolve_object_path(object_key)
+        return object_key
 
     async def generate_upload_url(
         self,
@@ -136,11 +139,11 @@ class LocalStorageProvider(StorageProvider):
         """
         Generate an upload URL for an object in local storage.
 
-        Returns:
-            str: A local path-based upload URL with a token.
+        Raises:
+            NotImplementedError: Direct uploads are unavailable for local storage.
         """
         del expiry_seconds
-        return f"/upload-url/{quote(object_key)}?token={uuid4()}"
+        raise NotImplementedError("Direct upload URLs are not supported by local storage; use multipart upload")
 
     async def get_file_metadata(
         self,
@@ -154,3 +157,9 @@ class LocalStorageProvider(StorageProvider):
             "etag": None,
             "last_modified": datetime.fromtimestamp(stat.st_mtime),
         }
+
+
+def _copy_stream(stream, destination: Path) -> None:
+    """Copy a file-like upload stream without blocking the event loop."""
+    with destination.open("wb") as dst:
+        shutil.copyfileobj(stream, dst, length=1024 * 1024)

@@ -1,7 +1,7 @@
 """File routes for the Gen3 AI model repo service."""
 
 from fastapi import Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from starlette import status
 
 from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
@@ -169,6 +169,15 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     etag = file_record["etag"]
 
     provider = get_storage_provider()
+    if hasattr(provider, "local_path"):
+        return Response(
+            status_code=200,
+            headers={
+                "X-Repo-Commit": commit_hash,
+                "X-Linked-Etag": etag or "",
+                "X-Linked-Size": str(size),
+            },
+        )
     signed_url = await provider.generate_signed_url(file_record["object_key"])
 
     return build_head_response(commit_hash, etag, size, signed_url)
@@ -205,6 +214,19 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
 
     provider = get_storage_provider()
+    if hasattr(provider, "local_path"):
+        local_path = provider.local_path(file_record["object_key"])
+        if not local_path.is_file():
+            raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
+        return FileResponse(
+            local_path,
+            media_type="application/octet-stream",
+            headers={
+                "X-Repo-Commit": file_record["sha"],
+                "X-Linked-Etag": file_record["etag"] or "",
+                "X-Linked-Size": str(file_record["size"]),
+            },
+        )
     signed_url = await provider.generate_signed_url(file_record["object_key"])
     logging.info(f"Redirecting to signed URL for {file_record['object_key']}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)

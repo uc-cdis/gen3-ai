@@ -1,26 +1,35 @@
+"""Database operation tests using lightweight async connection fakes."""
+
 import pytest
 
 from gen3_ai_model_repo.database import file_tracking, repo_metadata, revisions
 
 
 class FakeStatement:
+    """Record prepared-statement calls made by database helpers."""
+
     def __init__(self, conn, query):
+        """Initialize a statement bound to a fake connection."""
         self.conn = conn
         self.query = query
 
     async def execute(self, *args):
+        """Record an execute call."""
         self.conn.executed.append((self.query, args))
         return "DELETE 1"
 
     async def fetchrow(self, *args):
+        """Record a fetchrow call and return no row."""
         self.conn.executed.append((self.query, args))
         return None
 
     async def fetch(self, *args):
+        """Record a fetch call and return no rows."""
         self.conn.executed.append((self.query, args))
         return []
 
     async def fetchval(self, *args):
+        """Record a fetchval call with delete behavior."""
         self.conn.executed.append((self.query, args))
         if "DELETE" in self.query and "RETURNING" in self.query:
             return 1
@@ -28,46 +37,63 @@ class FakeStatement:
 
 
 class FakeConn:
+    """Minimal async connection fake for repository database helpers."""
+
     def __init__(self):
+        """Initialize empty call and row collections."""
         self.executed = []
         self.rows = []
 
     async def prepare(self, query):
+        """Return a prepared statement fake."""
         return FakeStatement(self, query)
 
     async def execute(self, query, *args):
+        """Record a direct execute call."""
         self.executed.append((query, args))
         return "DELETE 1"
 
     async def fetchrow(self, query, *args):
+        """Record a fetchrow call and return no row."""
         self.executed.append((query, args))
         return None
 
     async def fetch(self, query, *args):
+        """Record a fetch call and return no rows."""
         self.executed.append((query, args))
         return []
 
     async def fetchval(self, query, *args):
+        """Record a fetchval call and return no value."""
         self.executed.append((query, args))
         return None
 
 
 class FakeAcquire:
+    """Async context manager for acquiring a fake connection."""
+
     def __init__(self, conn):
+        """Initialize the acquired connection."""
         self.conn = conn
 
     async def __aenter__(self):
+        """Return the fake connection."""
         return self.conn
 
     async def __aexit__(self, exc_type, exc, tb):
+        """Leave the acquisition context without suppressing errors."""
         return False
 
 
 class FakePool:
+    """Minimal connection-pool fake."""
+
     def __init__(self, conn):
+        """Initialize the pool with a connection."""
         self.conn = conn
 
     def acquire(self):
+        """Return an async acquisition context manager."""
         return FakeAcquire(self.conn)
 
 

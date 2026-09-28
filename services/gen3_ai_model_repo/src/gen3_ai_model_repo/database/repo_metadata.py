@@ -192,6 +192,7 @@ async def list_models(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    permitted_repositories: list[tuple[str, str]] | None = None,
 ) -> list[RepositoryMetadataModel]:
     """
     List repositories, optionally filtered by namespace, tags, or free-text search.
@@ -216,6 +217,14 @@ async def list_models(
     if search:
         values.append(f"%{search}%")
         clauses.append(f"(model_name ILIKE ${len(values)} OR description ILIKE ${len(values)})")
+    if permitted_repositories is not None:
+        if not permitted_repositories:
+            return []
+        scope_clauses = []
+        for repository_namespace, repository_name in permitted_repositories:
+            values.extend([repository_namespace, repository_name])
+            scope_clauses.append(f"(namespace = ${len(values) - 1} AND model_name = ${len(values)})")
+        clauses.append("(" + " OR ".join(scope_clauses) + ")")
     sql = """
         SELECT namespace, model_name AS repo_name, description, tags, created_at
         FROM models

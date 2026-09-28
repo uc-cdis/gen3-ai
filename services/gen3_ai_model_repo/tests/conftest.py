@@ -1,3 +1,5 @@
+"""Shared fixtures and test-process configuration."""
+
 import os
 import tempfile
 

@@ -134,7 +134,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # would have each test describe the fixtures it takes, repeating each fixture's own docstring
 # at every call site, so they are off here - D1 still requires the docstring itself.
 "**/tests/**/*.py" = ["D417", "DOC"]
-"services/gen3_ai_model_repo/tests/**/*.py" = ["D"]
 
 [lint.pydocstyle]
 convention = "google"

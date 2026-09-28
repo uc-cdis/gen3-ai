@@ -1,3 +1,5 @@
+"""Storage provider initialization tests."""
+
 import importlib
 
 import pytest

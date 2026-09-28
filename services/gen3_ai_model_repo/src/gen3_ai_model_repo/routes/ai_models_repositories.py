@@ -1,8 +1,9 @@
 """Repository routes for the Gen3 AI model repo service."""
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 from starlette import status
 
+from common.auth import authorize_request
 from gen3_ai_model_repo import config
 from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
@@ -45,6 +46,7 @@ REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
     tags=["Models"],
 )
 async def list_models_route(
+    request: Request,
     namespace: str | None = Query(None),
     tags: list[str] | None = Query(None),
     search: str | None = Query(None, max_length=config.MAX_SEARCH_LENGTH),
@@ -56,11 +58,37 @@ async def list_models_route(
 
     Returns:
         PaginatedRepositoryResponse: A page of available model repositories.
+
+    Raises:
+        HTTPException: If authorization cannot be evaluated.
     """
+    candidates = await list_models(namespace=namespace, tags=tags, search=search)
+    permitted = []
+    for candidate in candidates:
+        try:
+            await authorize_request(
+                authz_resources=[f"/ai_model_repo/{candidate.namespace}/{candidate.repo}"],
+                authz_service_name=config.AUTHZ_SERVICE_NAME,
+                authz_access_method="read",
+                request=request,
+            )
+            permitted.append((candidate.namespace, candidate.repo))
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+    if not permitted:
+        return PaginatedRepositoryResponse(
+            models=[],
+            page=page,
+            page_size=page_size,
+            next_page=None,
+            prev_page=page - 1 if page > 1 else None,
+        )
     repos = await list_models(
         namespace=namespace,
         tags=tags,
         search=search,
+        permitted_repositories=permitted,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

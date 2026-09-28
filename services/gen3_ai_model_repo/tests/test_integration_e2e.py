@@ -1,3 +1,5 @@
+"""Opt-in integration tests for storage and PostgreSQL."""
+
 import os
 
 import asyncpg
@@ -14,6 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 async def test_storage_provider_end_to_end(tmp_path):
+    """Exercise storage upload, download, metadata, signing, and deletion."""
     provider = get_storage_provider()
     await provider.ensure_container()
 
@@ -43,6 +46,7 @@ async def test_storage_provider_end_to_end(tmp_path):
 
 @pytest.mark.asyncio
 async def test_postgresql_connectivity_and_migrations_applied():
+    """Verify PostgreSQL connectivity and the model table migration."""
     await connect_db()
     conn = await asyncpg.connect(
         user=os.getenv("PGUSER", "postgres"),

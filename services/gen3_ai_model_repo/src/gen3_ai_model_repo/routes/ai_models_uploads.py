@@ -315,10 +315,18 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
 
     Returns:
         UploadUrlResponse: Response containing the upload URL and object key.
+
+    Raises:
+        HTTPException: If local storage does not support direct upload URLs.
     """
 
     object_key = _build_object_key(namespace, repo, request.revision_name, request.file_name)
     provider = get_storage_provider()
+    if provider.__class__.__name__ == "LocalStorageProvider":
+        raise HTTPException(
+            status_code=409,
+            detail="Direct upload URLs are not supported for local storage; use the multipart upload endpoint",
+        )
     upload_url = await provider.generate_upload_url(object_key)
     return UploadUrlResponse(upload_url=upload_url, object_key=object_key, method="PUT")
 

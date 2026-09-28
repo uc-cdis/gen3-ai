@@ -13,7 +13,7 @@ class AiModelRepoServiceMetrics(ServiceMetrics):
         self.metrics_client.set_gauge(
             name="gen3_ai_model_repo_models_count",
             description="Observed number of model repositories.",
-            labels=labels,
+            labels={"service": "gen3_ai_model_repo", **labels},
             value=model_count,
         )
 
@@ -24,7 +24,7 @@ class AiModelRepoServiceMetrics(ServiceMetrics):
         self.metrics_client.set_gauge(
             name="gen3_ai_model_repo_files_count",
             description="Observed number of files tracked in model repositories.",
-            labels=labels,
+            labels={"service": "gen3_ai_model_repo", **labels},
             value=file_count,
         )
 
@@ -35,6 +35,6 @@ class AiModelRepoServiceMetrics(ServiceMetrics):
         self.metrics_client.set_gauge(
             name="gen3_ai_model_repo_total_size_bytes",
             description="Observed total size in bytes of model files stored by the service.",
-            labels=labels,
+            labels={"service": "gen3_ai_model_repo", **labels},
             value=total_size_bytes,
         )

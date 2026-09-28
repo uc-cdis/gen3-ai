@@ -1,6 +1,18 @@
 """S3 storage for the Gen3 AI model repo service."""
 
+import asyncio
+
+import boto3
+from botocore.exceptions import ClientError
+
 from gen3_ai_model_repo.storage.provider import StorageProvider
+
+_S3_CONCURRENCY = asyncio.Semaphore(8)
+
+
+async def _s3_call(function, *args, **kwargs):
+    async with _S3_CONCURRENCY:
+        return await asyncio.to_thread(function, *args, **kwargs)
 
 
 class S3StorageProvider(StorageProvider):
@@ -17,8 +29,6 @@ class S3StorageProvider(StorageProvider):
         create_bucket_if_missing: bool = True,
     ):
         """Initialize the provider with S3 connection settings."""
-        import boto3
-
         self.bucket_name = bucket_name
         self.region = region
         self.create_bucket_if_missing = create_bucket_if_missing
@@ -40,10 +50,8 @@ class S3StorageProvider(StorageProvider):
             FileNotFoundError: If the bucket doesn't exist and create_bucket_if_missing is False.
             ClientError: If an unexpected S3 error occurs.
         """
-        from botocore.exceptions import ClientError
-
         try:
-            self.client.head_bucket(Bucket=self.bucket_name)
+            await _s3_call(self.client.head_bucket, Bucket=self.bucket_name)
             return
         except ClientError as exc:
             error_code = str(exc.response.get("Error", {}).get("Code", ""))
@@ -56,19 +64,19 @@ class S3StorageProvider(StorageProvider):
         create_kwargs: dict[str, object] = {"Bucket": self.bucket_name}
         if self.region and self.region != "us-east-1":
             create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": self.region}
-        self.client.create_bucket(**create_kwargs)
+        await _s3_call(self.client.create_bucket, **create_kwargs)
 
     async def upload_file(
         self,
         local_path: str,
         object_key: str,
     ):
-        """Upload a local file path to S3."""
-        self.client.upload_file(local_path, self.bucket_name, object_key)
+        """Upload a local file path to S3 for provider-level file workflows."""
+        await _s3_call(self.client.upload_file, local_path, self.bucket_name, object_key)
 
     async def upload_stream(self, stream, object_key: str):
         """Upload a stream directly to S3."""
-        self.client.upload_fileobj(stream, self.bucket_name, object_key)
+        await _s3_call(self.client.upload_fileobj, stream, self.bucket_name, object_key)
 
     async def download_file(
         self,
@@ -76,7 +84,7 @@ class S3StorageProvider(StorageProvider):
         local_path: str,
     ):
         """Download an object from S3 to disk."""
-        self.client.download_file(self.bucket_name, object_key, local_path)
+        await _s3_call(self.client.download_file, self.bucket_name, object_key, local_path)
 
     async def list_files(
         self,
@@ -88,9 +96,10 @@ class S3StorageProvider(StorageProvider):
         Returns:
             list[str]: List of object keys under the prefix.
         """
-        paginator = self.client.get_paginator("list_objects_v2")
+        paginator = await _s3_call(self.client.get_paginator, "list_objects_v2")
         keys: list[str] = []
-        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+        pages = await _s3_call(lambda: list(paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)))
+        for page in pages:
             for item in page.get("Contents", []):
                 key = item.get("Key")
                 if key:
@@ -103,7 +112,7 @@ class S3StorageProvider(StorageProvider):
     ) -> bool:
         """Return whether an object key exists in S3."""
         try:
-            self.client.head_object(Bucket=self.bucket_name, Key=object_key)
+            await _s3_call(self.client.head_object, Bucket=self.bucket_name, Key=object_key)
             return True
         except Exception:
             return False
@@ -113,7 +122,7 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
     ):
         """Delete an object from S3."""
-        self.client.delete_object(Bucket=self.bucket_name, Key=object_key)
+        await _s3_call(self.client.delete_object, Bucket=self.bucket_name, Key=object_key)
 
     async def delete_prefix(
         self,
@@ -127,7 +136,8 @@ class S3StorageProvider(StorageProvider):
         # S3 delete_objects supports batches of up to 1000 keys.
         for idx in range(0, len(keys), 1000):
             chunk = keys[idx : idx + 1000]
-            self.client.delete_objects(
+            await _s3_call(
+                self.client.delete_objects,
                 Bucket=self.bucket_name,
                 Delete={"Objects": [{"Key": key} for key in chunk]},
             )
@@ -143,7 +153,8 @@ class S3StorageProvider(StorageProvider):
         Returns:
             str: A presigned URL for downloading the object.
         """
-        return self.client.generate_presigned_url(
+        return await _s3_call(
+            self.client.generate_presigned_url,
             ClientMethod="get_object",
             Params={"Bucket": self.bucket_name, "Key": object_key},
             ExpiresIn=expiry_seconds,
@@ -160,7 +171,8 @@ class S3StorageProvider(StorageProvider):
         Returns:
             str: A presigned URL for uploading the object.
         """
-        return self.client.generate_presigned_url(
+        return await _s3_call(
+            self.client.generate_presigned_url,
             ClientMethod="put_object",
             Params={"Bucket": self.bucket_name, "Key": object_key},
             ExpiresIn=expiry_seconds,
@@ -171,7 +183,7 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
     ) -> dict:
         """Return metadata for an S3 object key."""
-        response = self.client.head_object(Bucket=self.bucket_name, Key=object_key)
+        response = await _s3_call(self.client.head_object, Bucket=self.bucket_name, Key=object_key)
         return {
             "size": int(response.get("ContentLength", 0)),
             "etag": str(response.get("ETag", "")).strip('"') or None,

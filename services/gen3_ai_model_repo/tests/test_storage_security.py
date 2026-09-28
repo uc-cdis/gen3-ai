@@ -1,3 +1,5 @@
+"""Storage key validation and local-root security tests."""
+
 from pathlib import Path
 
 import pytest
@@ -10,11 +12,13 @@ from gen3_ai_model_repo.storage.local import LocalStorageProvider
 
 @pytest.mark.parametrize("filename", ["../outside.bin", "/etc/cron.d/job", "nested/../../outside.bin"])
 def test_object_key_rejects_path_traversal(filename):
+    """Reject filenames that escape the repository object-key namespace."""
     with pytest.raises(ValueError, match="Invalid filename"):
         build_object_key("namespace", "repo", "main", filename)
 
 
 def test_upload_route_translates_invalid_filename_to_422():
+    """Translate invalid upload filenames into an HTTP 422 response."""
     with pytest.raises(HTTPException) as exc_info:
         _build_object_key("namespace", "repo", "main", "/etc/cron.d/job")
 
@@ -23,6 +27,7 @@ def test_upload_route_translates_invalid_filename_to_422():
 
 @pytest.mark.asyncio
 async def test_local_storage_rejects_object_key_escape(tmp_path: Path):
+    """Reject local storage operations outside the configured root."""
     provider = LocalStorageProvider(str(tmp_path))
 
     with pytest.raises(ValueError, match="escapes"):

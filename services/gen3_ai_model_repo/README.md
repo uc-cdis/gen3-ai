@@ -2,9 +2,10 @@
 
 The Gen3 AI Model Repository Service is a Hugging Face Hub-compatible model
 registry. It stores repository, revision, and file metadata in PostgreSQL, and
-the actual model files in a configurable storage backend. Downloads redirect
-to short-lived signed storage URLs, so clients such as `huggingface_hub` and
-`transformers` can use the service without a Gen3-specific client library.
+the actual model files in a configurable storage backend. Downloads use an
+authorized local response or a short-lived signed S3 URL, so clients such as
+`huggingface_hub` and `transformers` can use the service without a Gen3-specific
+client library.
 
 ## How it works
 
@@ -32,7 +33,7 @@ The main endpoints are:
 - `GET /api/models/{namespace}/{repo}` — retrieve repository metadata.
 - `GET /api/models/{namespace}/{repo}/files` — list tracked files.
 - `GET /api/models/{namespace}/{repo}/resolve/{revision}/{path}` — download a
-  file through a signed storage URL.
+  file through an authorized local response or signed S3 URL.
 - `POST /api/models/{namespace}/{repo}/upload` — multipart upload that creates a
   revision.
 - `POST /api/models/{namespace}/{repo}/upload-url`, then
@@ -58,8 +59,10 @@ Create `services/gen3_ai_model_repo/.env`. This is a complete standalone
 example using filesystem storage:
 
 ```dotenv
-PGHOST=localhost
-PGPORT=5432
+PGHOST=127.0.0.1
+# The example Docker command below publishes PostgreSQL on host port 5433.
+# Use 5432 instead if no other PostgreSQL server is using that port.
+PGPORT=5433
 PGUSER=postgres
 PGPASSWORD=postgres
 PGDATABASE=gen3_ai_model_repo
@@ -73,19 +76,40 @@ LOCAL_STORAGE_PATH=./data
 
 # Development only; never use this in production.
 DEBUG_SKIP_AUTH=true
+ENABLE_METRICS=true
+PROMETHEUS_MULTIPROC_DIR=/tmp/gen3-model-repo-metrics
+ENABLE_OPENTELEMETRY_TRACES=false
 ```
 
 The relative local storage path is resolved from
 `services/gen3_ai_model_repo` when using the repository commands.
 
-Load the schema, install dependencies, and start the service in separate
-terminals:
+Start PostgreSQL for this example with:
+
+```bash
+docker run --name my-postgres-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=gen3_ai_model_repo \
+  -p 5433:5432 \
+  -d postgres
+```
+
+For a fresh database, create the database and load the complete current schema
+with `db_setup` and `db_load`. For an existing database, use versioned
+migrations with `db_migrate` instead of the fresh-database load workflow.
 
 ```bash
 just db_setup gen3_ai_model_repo
 just db_load gen3_ai_model_repo
 just install gen3_ai_model_repo
 just run gen3_ai_model_repo
+```
+
+For an existing database:
+
+```bash
+just db_migrate gen3_ai_model_repo
 ```
 
 The service listens on `http://localhost:8000`:
@@ -140,9 +164,10 @@ curl 'http://localhost:8000/api/models/test/repo/files?revision=main'
 ```
 
 With `STORAGE_PROVIDER=local`, the bytes are also visible under
-`services/gen3_ai_model_repo/data/test/repo/main/`. The multipart endpoint is
-the simplest local workflow. Local storage does not provide signed download
-URLs; use S3 or another compatible object store for API downloads.
+`services/gen3_ai_model_repo/data/test/repo/main/`, and the resolve endpoint
+serves them directly after authorization. The multipart endpoint is the
+supported local workflow. Local storage rejects direct upload URL requests;
+use S3 or another compatible object store for presigned upload/download URLs.
 
 ### Use Hugging Face libraries
 
