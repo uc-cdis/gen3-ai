@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+
 from gen3_embeddings.main import get_app
 
 

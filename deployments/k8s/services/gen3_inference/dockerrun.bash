@@ -1,4 +1,6 @@
 #!/bin/bash
 
-nginx
-uv run --directory /venv gunicorn gen3_inference.main:app_instance -k uvicorn.workers.UvicornWorker -c /services/gunicorn.conf.py --user gen3 --group gen3
+# `exec` so uvicorn replaces bash as PID 1 and receives SIGTERM directly. Without it,
+# Kubernetes' shutdown signal stops at bash, in-flight requests are cut, and lifespan
+# shutdown (closing the DB pool) never runs.
+exec /venv/bin/uvicorn gen3_inference.main:app_instance --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 90
