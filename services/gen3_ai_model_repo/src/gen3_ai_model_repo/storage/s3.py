@@ -3,6 +3,7 @@
 import asyncio
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from gen3_ai_model_repo.storage.provider import StorageProvider
@@ -40,6 +41,7 @@ class S3StorageProvider(StorageProvider):
             aws_access_key_id=access_key_id or None,
             aws_secret_access_key=secret_access_key or None,
             aws_session_token=session_token or None,
+            config=Config(s3={"addressing_style": "path"}),
         )
 
     async def ensure_container(self):

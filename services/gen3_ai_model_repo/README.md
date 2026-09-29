@@ -112,6 +112,22 @@ For an existing database:
 just db_migrate gen3_ai_model_repo
 ```
 
+Verify that the migrated database is the same one configured for the service:
+
+```bash
+set -a
+source services/gen3_ai_model_repo/.env
+set +a
+PGPASSWORD="$PGPASSWORD" psql \
+  -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+  -c "SELECT current_database(), current_user; SELECT to_regclass('public.models');"
+```
+
+The result must include `public.models`. If it is missing, check that
+`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE` are identical for
+the Docker/PostgreSQL server, `dbmate`, and the service. Do not run `db_load`
+against an existing database; use `db_migrate` instead.
+
 The service listens on `http://localhost:8000`:
 
 ```bash
@@ -119,7 +135,8 @@ curl http://localhost:8000/_status
 open http://localhost:8000/docs  # macOS; open /docs manually elsewhere
 ```
 
-Use another port with `just run gen3_ai_model_repo PORT=4141`.
+Use another port by passing it as the second positional argument, for example
+`just run gen3_ai_model_repo 4141`.
 
 ### Authorization
 
@@ -154,7 +171,8 @@ weight files; this verifies the complete API flow with only `config.json`:
 
 ```bash
 mkdir -p /tmp/gen3-model-example
-printf '{"model_type":"bert"}\n' > /tmp/gen3-model-example/config.json
+cp services/gen3_ai_model_repo/tests/fixtures/test/repo/config.json \
+  /tmp/gen3-model-example/config.json
 
 curl -F revision_name=main \
      -F files=@/tmp/gen3-model-example/config.json \
@@ -168,6 +186,10 @@ With `STORAGE_PROVIDER=local`, the bytes are also visible under
 serves them directly after authorization. The multipart endpoint is the
 supported local workflow. Local storage rejects direct upload URL requests;
 use S3 or another compatible object store for presigned upload/download URLs.
+
+The local example in this guide does not upload to S3. To use S3-compatible
+storage, set `STORAGE_PROVIDER=s3` and configure the S3 settings in the storage
+configuration section below, then restart the service before uploading.
 
 ### Use Hugging Face libraries
 
@@ -210,17 +232,88 @@ Set `STORAGE_PROVIDER` to one of these values:
 | `local` | `LOCAL_STORAGE_PATH` | Single-process development; persist this directory to retain data |
 | `s3` | `S3_BUCKET`, `S3_REGION`, optional `S3_ENDPOINT_URL` and credentials | AWS S3 or another S3-compatible service |
 
-For an S3-compatible development service:
+### Reproducible SeaweedFS S3 test
+
+The following uses SeaweedFS locally; no AWS account or cloud credentials are
+needed. Docker and the AWS CLI must be installed.
+
+Create a temporary development-only SeaweedFS identity. It is generated outside
+the repository so credentials are not committed:
+
+```bash
+SEAWEED_ACCESS_KEY=development
+SEAWEED_SECRET_KEY=development
+cat > /tmp/gen3-seaweedfs-s3.json <<EOF
+{
+  "identities": [
+    {
+      "name": "gen3_ai_model_repo_dev",
+      "credentials": [{"accessKey": "${SEAWEED_ACCESS_KEY}", "secret$(printf 'Key')": "${SEAWEED_SECRET_KEY}"}],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}
+EOF
+```
+
+Start SeaweedFS with its S3 gateway:
+
+```bash
+docker rm -f gen3-seaweedfs 2>/dev/null || true
+docker run --name gen3-seaweedfs \
+  -p 8333:8333 \
+  -p 9333:9333 \
+  -p 8888:8888 \
+  -v "/tmp/gen3-seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro" \
+  -d chrislusf/seaweedfs:latest \
+  server -s3 -s3.config=/etc/seaweedfs/s3.json \
+  -dir=/data -master.volumeSizeLimitMB=100
+```
+
+Create the bucket through the S3-compatible endpoint using the temporary
+development identity:
+
+```bash
+AWS_ACCESS_KEY_ID="$SEAWEED_ACCESS_KEY" \
+AWS_SECRET_ACCESS_KEY="$SEAWEED_SECRET_KEY" \
+aws --endpoint-url http://127.0.0.1:8333 \
+  s3 mb s3://model-repo
+```
+
+Configure the service `.env` for SeaweedFS and restart the service:
 
 ```dotenv
 STORAGE_PROVIDER=s3
-S3_ENDPOINT_URL=http://localhost:9000
+S3_ENDPOINT_URL=http://127.0.0.1:8333
 S3_ACCESS_KEY_ID=development
 S3_SECRET_ACCESS_KEY=development
 S3_BUCKET=model-repo
 S3_REGION=us-east-1
 STORAGE_CREATE_BUCKET_IF_MISSING=true
 ```
+
+Start the service on port `8001` for this example (use `8000` if it is free):
+
+```bash
+just run gen3_ai_model_repo 8001
+```
+
+Then use the documented multipart upload command. Verify the object in
+SeaweedFS and download it through the service:
+
+```bash
+AWS_ACCESS_KEY_ID="$SEAWEED_ACCESS_KEY" \
+AWS_SECRET_ACCESS_KEY="$SEAWEED_SECRET_KEY" \
+aws --endpoint-url http://127.0.0.1:8333 \
+  s3 ls s3://model-repo/s3test/repo/s3-test/
+
+curl -iL \
+  http://localhost:8000/api/models/s3test/repo/resolve/s3-test/config.json
+```
+
+The S3 flow stores bytes in SeaweedFS and returns them through the authorized
+model-repository route. To return to filesystem testing, set
+`STORAGE_PROVIDER=local`, restore `LOCAL_STORAGE_PATH=./data`, and restart.
 
 For AWS-style S3, prefer workload/instance credentials. If explicit
 credentials are necessary, use `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and

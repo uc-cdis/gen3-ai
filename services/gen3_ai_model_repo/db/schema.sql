@@ -6,7 +6,6 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -307,20 +306,6 @@ CREATE INDEX idx_models_current_revision ON public.models USING btree (current_r
 --
 
 CREATE INDEX idx_models_namespace ON public.models USING btree (namespace);
-
-
---
--- Name: model_files update_model_files_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER update_model_files_updated_at BEFORE UPDATE ON public.model_files FOR EACH ROW EXECUTE FUNCTION public.update_models_updated_at();
-
-
---
--- Name: model_revisions update_model_revisions_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER update_model_revisions_updated_at BEFORE UPDATE ON public.model_revisions FOR EACH ROW EXECUTE FUNCTION public.update_models_updated_at();
 
 
 --
