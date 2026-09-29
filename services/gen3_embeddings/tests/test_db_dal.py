@@ -1517,7 +1517,7 @@ async def test_a_cross_collection_search_only_queries_the_collections_that_could
     """
     Collections of another vector type or another dimensionality are dropped.
 
-    They are queried as one statement against one table, so a mismatched collection cannot be
+    They are queried against one table with one cast, so a mismatched collection cannot be
     included: a different dimensionality makes the distance operator error out, which would
     fail the whole search over a collection that could not have held a hit anyway.
     """
@@ -1540,8 +1540,14 @@ async def test_a_cross_collection_search_only_queries_the_collections_that_could
         vector_type=VectorType.vector,
     )
 
-    assert conn.params[0] == [1, 4]
-    assert "FROM embeddings_vector" in normalized(conn.sql)
+    sql = normalized(conn.sql)
+    assert "FROM embeddings_vector" in sql
+    # one arm each for the two that survived, and none for the two that did not
+    assert sql.count("UNION ALL") == 1
+    assert "collection_id = 1 " in sql
+    assert "collection_id = 4 " in sql
+    assert "collection_id = 2 " not in sql
+    assert "collection_id = 3 " not in sql
 
 
 @pytest.mark.asyncio
@@ -1599,5 +1605,78 @@ async def test_the_vector_type_filter_compares_by_value(stored_vector_type, requ
         vector_type=requested_vector_type,
     )
 
-    assert conn.params[0] == [3]
-    assert "FROM embeddings_halfvec" in normalized(conn.sql)
+    sql = normalized(conn.sql)
+    assert "collection_id = 3 " in sql
+    assert "FROM embeddings_halfvec" in sql
+
+
+@pytest.mark.asyncio
+async def test_a_cross_collection_search_gives_each_arm_its_own_index_shape():
+    """
+    Collections are indexed independently, so the strategy is resolved per arm.
+
+    A search spanning a binary-quantized collection and an unindexed one has to send each the
+    query its own index can answer; using one shape for both would either waste the index or
+    emit quantized SQL against a collection that has no bit index to serve it.
+    """
+    collections = [make_collection(id=1, dimensions=3), make_collection(id=2, dimensions=3)]
+    dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index(collection_id=2))
+
+    await dal.search_embeddings_across_collections(
+        collections,
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    direct, binary = normalized(conn.sql).split("UNION ALL")
+    assert "collection_id = 1 " in direct and "binary_quantize" not in direct
+    assert "collection_id = 2 " in binary and "binary_quantize(embedding)::bit(3)" in binary
+
+
+@pytest.mark.asyncio
+async def test_cross_collection_ef_search_covers_the_widest_pool_any_arm_asks_for():
+    """
+    `hnsw.ef_search` is one transaction-wide setting, but the arms can want different pools.
+
+    Sizing it to anything less than the widest would silently truncate that arm's candidates,
+    which is invisible: the search still returns rows, just drawn from a smaller pool.
+    """
+    collections = [make_collection(id=1, dimensions=3), make_collection(id=2, dimensions=3)]
+    dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index(collection_id=2))
+
+    await dal.search_embeddings_across_collections(
+        collections,
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    _authz, _names, ef_search, _iterative, _timeout = conn.rls_context
+    assert int(ef_search) == max(10 * config.BINARY_RESCORE_MULTIPLIER, config.BINARY_RESCORE_MIN)
+
+
+@pytest.mark.asyncio
+async def test_a_cross_collection_search_without_any_binary_index_leaves_ef_search_alone():
+    """With no rescore pool in play there is nothing to raise the default for."""
+    collections = [make_collection(id=1, dimensions=3), make_collection(id=2, dimensions=3)]
+    dal, conn, _ = make_dal(results=[[embedding_row()]])
+
+    await dal.search_embeddings_across_collections(
+        collections,
+        [1.0, 0.0, 0.0],
+        top_k=10,
+        min_value=None,
+        max_value=None,
+        distance_metric=DistanceMetric.cosine_similarity,
+        filters=None,
+    )
+
+    _authz, _names, ef_search, _iterative, _timeout = conn.rls_context
+    assert int(ef_search) == config.HNSW_EF_SEARCH

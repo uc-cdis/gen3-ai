@@ -31,6 +31,7 @@ vectorstore_search_router = APIRouter()
     "post",
     "/vectorstore/collections/{collection_name}/search",
     response_model=SearchResponse,
+    response_model_exclude_none=True,
     summary="Search embeddings in collection",
     description=(
         "Finds the embeddings in a collection nearest to the query vector you provide, ordered by "
@@ -125,6 +126,7 @@ async def search_in_collection(
     "post",
     "/vectorstore/search",
     response_model=SearchResponse,
+    response_model_exclude_none=True,
     summary="Search embeddings across unknown collections",
     description=(
         "Finds the embeddings nearest to the query vector across every collection you have access "

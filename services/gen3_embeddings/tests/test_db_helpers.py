@@ -4,7 +4,12 @@ import re
 
 import pytest
 
-from gen3_embeddings.database.helpers import affected_row_count, build_search_sql
+from gen3_embeddings.database.helpers import (
+    CollectionSearchTarget,
+    affected_row_count,
+    build_multi_collection_search_sql,
+    build_search_sql,
+)
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 
@@ -13,8 +18,7 @@ def search_sql(**overrides) -> str:
     kwargs = {
         "table": "embeddings_vector",
         "distance_metric": DistanceMetric.cosine_distance,
-        "single_collection": True,
-        "collection_ids_param": "$1::bigint",
+        "collection_id_param": "$1::bigint",
         "vector_placeholder": "$2",
         "top_k_param": "$3::int",
         "filters": None,
@@ -232,3 +236,187 @@ def test_an_unknown_metric_is_rejected():
     """A metric with no pgvector operator must fail loudly rather than build broken SQL."""
     with pytest.raises(ValueError, match="Unsupported distance metric"):
         search_sql(distance_metric="not_a_metric")
+
+
+# ---------------------------------------------------------------------------
+# build_multi_collection_search_sql
+# ---------------------------------------------------------------------------
+
+
+def multi_sql(**overrides) -> str:
+    """Build a cross-collection search statement with the boilerplate arguments filled in."""
+    kwargs = {
+        "table": "embeddings_vector",
+        "distance_metric": DistanceMetric.cosine_distance,
+        "targets": [CollectionSearchTarget(1), CollectionSearchTarget(2)],
+        "vector_placeholder": "$1",
+        "top_k_param": "$2::int",
+        "filters": None,
+        "min_value": None,
+        "max_value": None,
+        "vector_type": VectorType.vector,
+        "dimensions": 1536,
+    }
+    kwargs.update(overrides)
+    return " ".join(build_multi_collection_search_sql(**kwargs)[0].split())
+
+
+def test_each_collection_becomes_its_own_arm():
+    """
+    One arm per collection, because one arm is all a per-collection partial index can serve.
+
+    This is the whole point of the rewrite: `collection_id = ANY($1::bigint[])` implies
+    nothing about any single collection, so Postgres cannot prove the `WHERE collection_id =
+    n` predicate of any partial index and scans the table instead.
+    """
+    sql = multi_sql(targets=[CollectionSearchTarget(1), CollectionSearchTarget(2), CollectionSearchTarget(3)])
+
+    assert sql.count("UNION ALL") == 2
+    assert "ANY(" not in sql
+    for collection_id in (1, 2, 3):
+        assert f"WHERE collection_id = {collection_id} " in sql
+
+
+def test_the_collection_id_is_a_literal_not_a_placeholder():
+    """
+    A parameter would leave the partial-index predicate unprovable in a generic plan.
+
+    Postgres only sometimes re-plans a parameterized statement per value; a literal makes the
+    implication hold unconditionally, which is what keeps the arm index-eligible.
+    """
+    sql = multi_sql(targets=[CollectionSearchTarget(101)])
+
+    assert "WHERE collection_id = 101 " in sql
+    # $1 is the vector and $2 the limit, so no placeholder was spent on the collection
+    assert "collection_id = $" not in sql
+
+
+def test_a_non_integer_collection_id_is_rejected_rather_than_interpolated():
+    """
+    The ids are written into the SQL text, so anything that is not an integer must not reach it.
+
+    They come from `collections.id` and cannot normally be anything else, but `int()` is what
+    makes that a guarantee rather than an assumption.
+    """
+    with pytest.raises(ValueError):
+        multi_sql(targets=[CollectionSearchTarget("1; DROP TABLE embeddings_vector")])
+
+
+def test_arms_carry_the_index_shape_their_own_collection_has():
+    """
+    A mixed set has to be split: collections are indexed independently.
+
+    One collection may have a direct fp32 index while the next has only a binary-quantized
+    one. A single query body has exactly one ordering expression, so serving both from one
+    scan is impossible regardless of the predicate question.
+    """
+    sql = multi_sql(targets=[CollectionSearchTarget(1), CollectionSearchTarget(2, binary_rescore_limit=200)])
+
+    direct, binary = sql.split("UNION ALL")
+    # the direct arm orders by the indexed distance and never quantizes
+    assert "binary_quantize" not in direct
+    assert "ORDER BY embedding::vector(1536) <=> $1::vector(1536) ASC LIMIT $2::int" in direct
+    # the binary arm picks a pool by Hamming, then re-ranks it exactly
+    assert "ORDER BY binary_quantize(embedding)::bit(1536) <~> binary_quantize($1::vector(1536)) ASC" in binary
+    assert "LIMIT 200) AS rescored_2 ORDER BY value ASC LIMIT $2::int" in binary
+
+
+def test_every_arm_takes_its_own_top_k():
+    """
+    Per-arm limits are what keep one dense collection from crowding out the rest.
+
+    Limiting only the merged result would be correct but would force every arm to stream all
+    of its rows; limiting each arm to `top_k` discards nothing, because no collection can
+    contribute more than `top_k` rows to a global top-k anyway.
+    """
+    sql = multi_sql()
+
+    assert sql.count("LIMIT $2::int") == 3  # two arms plus the merged result
+    assert sql.rstrip().endswith("ORDER BY value ASC LIMIT $2::int")
+
+
+def test_a_single_arm_is_still_wrapped_in_the_cte():
+    """
+    A trailing ORDER BY is the union's only when there *is* a union.
+
+    With one arm there is no set operation, so it attaches to a SELECT that already has an
+    ORDER BY and Postgres rejects the statement: "multiple ORDER BY clauses not allowed".
+    Always wrapping keeps one shape and no special case. String assertions cannot catch this
+    -- only a real parser can -- so the integration suite is what guards it.
+    """
+    sql = multi_sql(targets=[CollectionSearchTarget(1)])
+
+    assert "UNION ALL" not in sql
+    assert sql.startswith("WITH candidates AS MATERIALIZED (")
+    assert sql.rstrip().endswith("ORDER BY value ASC LIMIT $2::int")
+
+
+def test_a_threshold_filters_the_merged_result_outside_a_materialized_cte():
+    """
+    Same reason as the single-collection path: a bound beside the ORDER BY defeats early exit.
+
+    Here it also has to be applied once to the merged rows rather than per arm, which the CTE
+    makes structural.
+    """
+    sql = multi_sql(max_value=0.2)
+
+    assert "FROM candidates WHERE value <= $3" in sql
+    # every arm's own LIMIT is applied before the bound ever sees a row
+    assert sql.index("UNION ALL") < sql.index("value <= $3")
+    assert sql.rindex("LIMIT $2::int)") < sql.index("value <= $3")
+
+
+def test_filters_are_applied_in_every_arm_and_share_their_placeholders():
+    """
+    A metadata filter has to reach every scan, but must not cost a parameter per arm.
+
+    Repeating the clause with the same placeholders keeps the parameter list independent of
+    how many collections were searched.
+    """
+    sql, params = build_multi_collection_search_sql(
+        table="embeddings_vector",
+        distance_metric=DistanceMetric.cosine_distance,
+        targets=[CollectionSearchTarget(1), CollectionSearchTarget(2)],
+        vector_placeholder="$1",
+        top_k_param="$2::int",
+        filters={"organ": "lung"},
+        min_value=None,
+        max_value=None,
+        vector_type=VectorType.vector,
+        dimensions=1536,
+    )
+    sql = " ".join(sql.split())
+
+    assert sql.count("metadata->>($3::text) = $4::text") == 2
+    assert params == ["organ", "lung"]
+
+
+def test_cosine_similarity_reranks_descending_in_the_arms_and_the_merge():
+    """
+    The reported value inverts the ordering, so every re-sort on it has to flip direction.
+
+    The arms still order by the bare distance ascending, which is what the index serves; only
+    the sorts that read `value` change direction.
+    """
+    sql = multi_sql(
+        distance_metric=DistanceMetric.cosine_similarity,
+        targets=[CollectionSearchTarget(1, binary_rescore_limit=50)],
+    )
+
+    assert "1 - (embedding::vector(1536) <=> $1::vector(1536)) AS value" in sql
+    # once to re-rank the arm's Hamming pool, once to merge the arms
+    assert sql.count("ORDER BY value DESC") == 2
+    # the arm still hands the index a bare ascending Hamming ordering to serve
+    assert "ORDER BY binary_quantize(embedding)::bit(1536) <~> binary_quantize($1::vector(1536)) ASC" in sql
+    assert "DESC LIMIT" in sql and "value DESC LIMIT $2::int" in sql
+
+
+def test_searching_no_collections_is_a_programming_error():
+    """
+    An empty union is not valid SQL, and the DAL already returns early for this case.
+
+    Failing here makes a future caller that forgets to do so fail loudly rather than send
+    Postgres a statement it cannot parse.
+    """
+    with pytest.raises(ValueError, match="at least one collection"):
+        multi_sql(targets=[])

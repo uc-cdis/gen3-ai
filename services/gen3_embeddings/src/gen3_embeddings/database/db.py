@@ -108,7 +108,13 @@ from gen3_embeddings.database.errors import (
     MetadataLengthMismatchError,
     RowLevelSecurityDeniedError,
 )
-from gen3_embeddings.database.helpers import affected_row_count, build_search_sql, get_embeddings_table_and_cast
+from gen3_embeddings.database.helpers import (
+    CollectionSearchTarget,
+    affected_row_count,
+    build_multi_collection_search_sql,
+    build_search_sql,
+    get_embeddings_table_and_cast,
+)
 from gen3_embeddings.database.index_discovery import IndexStrategy, VectorIndex, choose_index
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.helpers import normalize_collection_name
@@ -1236,8 +1242,7 @@ class DataAccessLayer:
         sql, extra_params = build_search_sql(
             table=table,
             distance_metric=distance_metric,
-            single_collection=True,
-            collection_ids_param="$1::bigint",
+            collection_id_param="$1::bigint",
             vector_placeholder="$2",
             top_k_param="$3::int",
             filters=filters,
@@ -1275,6 +1280,10 @@ class DataAccessLayer:
         A collection that matches neither cannot hold a hit for this query, so no
         collection matching means no hits: the result is empty rather than an error.
 
+        Each surviving collection becomes one arm of a `UNION ALL`, carrying whichever query
+        shape its own index can serve. See `build_multi_collection_search_sql` for why the
+        older single-scan form could not use any per-collection index.
+
         Returns:
             list[asyncpg.Record]: The matching rows, at most `top_k` of them.
         """
@@ -1293,18 +1302,26 @@ class DataAccessLayer:
             return []
 
         table, _ = get_embeddings_table_and_cast(vector_type)
-        collection_ids = [col.id for col in filtered_collections]
 
-        # $1: collection_ids, $2: vector, $3: top_k
-        params: list[Any] = [collection_ids, query_vector, top_k]
+        # Each collection is indexed on its own, so the strategy is resolved per collection
+        # rather than once for the search.
+        targets = [
+            CollectionSearchTarget(
+                collection_id=col.id,
+                binary_rescore_limit=self._binary_rescore_limit(col.id, distance_metric, query_dims, top_k),
+            )
+            for col in filtered_collections
+        ]
 
-        sql, extra_params = build_search_sql(
+        # $1: vector, $2: top_k. The collection ids are literals in the SQL, not parameters.
+        params: list[Any] = [query_vector, top_k]
+
+        sql, extra_params = build_multi_collection_search_sql(
             table=table,
             distance_metric=distance_metric,
-            single_collection=False,
-            collection_ids_param="$1::bigint[]",
-            vector_placeholder="$2",
-            top_k_param="$3::int",
+            targets=targets,
+            vector_placeholder="$1",
+            top_k_param="$2::int",
             filters=filters,
             min_value=min_value,
             max_value=max_value,
@@ -1319,7 +1336,10 @@ class DataAccessLayer:
             rows = await stmt.fetch(*params)
             return rows
 
-        return await self._with_rls(_query)
+        # One setting covers every arm, so it has to clear the widest pool any of them asks
+        # for; a smaller value would silently truncate that arm's candidates.
+        rescore_limits = [t.binary_rescore_limit for t in targets if t.binary_rescore_limit is not None]
+        return await self._with_rls(_query, ef_search=max(rescore_limits, default=None))
 
     async def count_available_embeddings_in_collection(self, collection: Collection) -> int:
         """

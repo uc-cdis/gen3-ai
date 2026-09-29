@@ -1,5 +1,7 @@
 """Tests for the vector search endpoints (routes/search.py)."""
 
+import pytest
+
 
 def test_search_embeddings_in_collection(client, allow_authz):
     """Search within one collection returns the nearest vector with the requested distance metric."""
@@ -71,6 +73,36 @@ def test_search_across_collections(client, allow_authz):
     assert len(data["embeddings"]) > 0
     collection_names = {c["collection_name"] for c in data["collections"]}
     assert "coll_a" in collection_names
+
+
+@pytest.mark.parametrize("path", ["/vectorstore/collections/docs/search", "/vectorstore/search"])
+def test_search_omits_unset_fields_from_the_collections_it_reports(client, allow_authz, path):
+    """
+    Search must drop nulls like every other endpoint, and like its own `embedding` block already does.
+
+    `counts` is not a search parameter, so `available_embeddings_count` is never populated here.
+    Without `response_model_exclude_none` it was serialized as an explicit `null`, which reads as
+    "this collection has no count" rather than "you did not ask for one" -- and it contradicted the
+    same response's `embedding`, which is dumped with `exclude_none=True` and so drops its own
+    unset fields.
+    """
+    allow_authz("docs")
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "docs", "dimensions": 3, "vector_type": "vector"},
+    )
+    client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [1.0, 0.0, 0.0]}]},
+    )
+
+    response = client.post(path, json={"input": [1.0, 0.0, 0.0], "top_k": 5})
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+    assert data["collections"], "the search matched nothing, so this asserts about an empty list"
+    for collection in data["collections"]:
+        assert "available_embeddings_count" not in collection
 
 
 def test_search_across_collections_none_of_which_match_the_query_is_empty(client, allow_authz):
