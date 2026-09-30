@@ -15,6 +15,14 @@ By default:
       in the embedding table
 * Modifications to queries are possible through the API (e.g. sacrificing time for more accuracy), see the API specification for more details
 
+## Vector indexes
+
+The service does not build vector indexes. Operators choose which collections to index and
+add each index as a dbmate migration in a separate, deployment-owned folder, run with
+`just db_index_migrate`. Search picks an index up on the next restart. See
+[db/index_migrations/README.md](db/index_migrations/README.md) for the workflow and the exact
+index shapes search can use.
+
 ## Startup
 
 * Log current index size and available memory:
