@@ -749,11 +749,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned.",
+              "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned. The count visits every embedding the caller can read, so it can be very slow on large collections (millions of embeddings) and may hit the request timeout.",
               "default": false,
               "title": "Counts"
             },
-            "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned."
+            "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned. The count visits every embedding the caller can read, so it can be very slow on large collections (millions of embeddings) and may hit the request timeout."
           }
         ],
         "responses": {
@@ -864,11 +864,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned.",
+              "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned. The count visits every embedding the caller can read, so it can be very slow on large collections (millions of embeddings) and may hit the request timeout.",
               "default": false,
               "title": "Counts"
             },
-            "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned."
+            "description": "Include `available_embeddings_count` on each collection. Off by default because it costs an extra count query per collection returned. The count visits every embedding the caller can read, so it can be very slow on large collections (millions of embeddings) and may hit the request timeout."
           }
         ],
         "responses": {

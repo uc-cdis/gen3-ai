@@ -181,11 +181,17 @@ Counts = Annotated[
     Query(
         description=(
             "Include `available_embeddings_count` on each collection. Off by default because it "
-            "costs an extra count query per collection returned."
+            "costs an extra count query per collection returned. The count visits every "
+            "embedding the caller can read, so it can be very slow on large collections "
+            "(millions of embeddings) and may hit the request timeout."
         ),
     ),
 ]
-"""Whether to count each collection's embeddings, which is an extra query per collection."""
+"""
+Whether to count each collection's embeddings, which is an extra query per collection.
+
+The count is an exact `COUNT(*)`, so its cost grows with the collection's size.
+"""
 
 EmbeddingUUID = Annotated[
     UUID,

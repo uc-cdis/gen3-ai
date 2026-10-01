@@ -58,6 +58,12 @@ The recipes connect with the `PG*` settings from `services/gen3_embeddings/.env`
 as `just db_migrate`. Building an index requires owning the table, so use the admin/owner
 role, not the app's limited role.
 
+> **Load first, index second.** Once a collection has a vector index, every insert into or
+> update of that collection also has to update the index, so writes get slower. If you are
+> loading a large set of embeddings, load the collection first and build the index after.
+> Building it once over the finished data is much faster than maintaining it row by row.
+> The index only covers its own collection, so writes to other collections are not affected.
+
 ## List existing indexes
 
 This lists every vector index on the embeddings tables, including ones built outside these
