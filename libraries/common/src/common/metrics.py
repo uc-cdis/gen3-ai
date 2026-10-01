@@ -3,6 +3,13 @@ Common handling for metrics
 """
 
 from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
+
+# Re-exported for services to import from here. Repeating the name after `as` is what marks an
+# import as a deliberate re-export: nothing in this module calls it, so ruff would otherwise
+# prune it as unused.
+from cdispyutils.observability.request_metrics import (
+    add_request_metrics_middleware as add_request_metrics_middleware,
+)
 from fastapi import FastAPI
 
 from common import config
@@ -43,7 +50,18 @@ def get_metrics_client(fastapi_app: FastAPI):
     Args:
         fastapi_app: The FastAPI application to which the metrics
             endpoint should be added (if any)
+
+    Returns:
+        The metrics client, or None when metrics are disabled.
+
+    Raises:
+        Exception: If metrics are enabled but METRICS_PROVIDER names an unsupported provider.
     """
+    # prometheus_client picks between its in-memory and its multiprocess storage class when it is
+    # first imported, from PROMETHEUS_MULTIPROC_DIR. BaseMetrics re-runs that choice after
+    # setting the variable, so nothing here depends on import order - but a metric constructed
+    # before this function runs keeps the in-memory class, and its values never reach /metrics.
+    # Build counters on first use, not at import.
     metrics_client = None
     metrics_client_kwargs = {}
     if config.METRICS_PROVIDER == "prometheus":

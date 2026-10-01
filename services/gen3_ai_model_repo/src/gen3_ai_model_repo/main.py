@@ -8,6 +8,9 @@ from fastapi import FastAPI
 def get_app():
     """
     WIP
+
+    Returns:
+        FastAPI: The application, with no routes mounted yet.
     """
     app = FastAPI(
         title="Gen3 AI Model Repository Service",

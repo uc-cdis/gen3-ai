@@ -5,6 +5,15 @@ Graphana, etc.
 
 You can [run Prometheus locally](https://github.com/prometheus/prometheus) if you want to test or visualize these.
 
+## What `/metrics` does not carry
+
+There are no `process_cpu_seconds_total` or `process_resident_memory_bytes` series here.
+`prometheus_client` omits its default `process_*` and `python_gc_*` collectors in multiprocess mode,
+because per-process values cannot be summed, and `/metrics` serves a registry holding only the
+multiprocess collector. For a pod's CPU and memory, use the cluster Prometheus, which scrapes
+cAdvisor. For which *function* is spending the CPU, see the profiles section of
+[observability.md](./observability.md).
+
 ## Set Up Locally
 
 Run the service locally using `just run {{service}}`.
@@ -29,14 +38,23 @@ scrape_configs:
 
     static_configs:
       # NOTE: The `host.docker.internal` below is so docker on MacOS can properly find the locally running service
-      - targets: [ 'host.docker.internal:4143' ]
+      - targets: [ 'host.docker.internal:8000' ]
 
   - job_name: 'gen3_ai_model_repo'
     static_configs:
-      - targets: [ 'host.docker.internal:4141' ]
+      - targets: [ 'host.docker.internal:8001' ]
   - job_name: 'gen3_embeddings'
     static_configs:
-      - targets: [ 'host.docker.internal:4142' ]
+      - targets: [ 'host.docker.internal:8002' ]
+```
+
+Every service binds `8000` by default, so scraping several at once means giving each one its own
+port when you start it:
+
+```bash
+just run gen3_inference 8000
+just run gen3_ai_model_repo 8001
+just run gen3_embeddings 8002
 ```
 
 > Note: Tested the above config on MacOS, with Linux you can maybe adjust these commands to actually expose the local

@@ -58,6 +58,9 @@ async def get_status() -> JSONResponse:
 
     Returns 200 if the process is running and routes are mounted.
     Startup already validates DB and Arborist.
+
+    Returns:
+        JSONResponse: 200 whenever the process is serving.
     """
     response = {"status": "OK", "timestamp": time.time()}
     return JSONResponse(status_code=status.HTTP_200_OK, content=response)

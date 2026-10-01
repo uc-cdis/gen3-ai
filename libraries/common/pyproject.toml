@@ -1,6 +1,6 @@
 [project]
 name = "common"
-version = "0.1.4"
+version = "0.1.8"
 description = "Gen3 AI Common/Shared Dependencies"
 requires-python = "~=3.13.0"
 # How to add in-progress branches to test:
@@ -10,15 +10,18 @@ requires-python = "~=3.13.0"
 dependencies = [
   "asyncpg>=0.31.0",
   "authutils>=8.0.0",
-  "cdislogging>=1.2.0",
-  "cdispyutils>=2.5.1",
+  # The `observability` extra carries the tracing, profiling and request-metrics helpers that
+  # common/telemetry.py, common/profiling.py and the services' metrics middleware are built on,
+  # along with the OpenTelemetry and Pyroscope packages they need.
+  "cdispyutils[observability] @ git+https://github.com/uc-cdis/cdis-python-utils.git@feat/observability",
   "click>=8.3.1",
   "fastapi>=0.128.0",
   "gen3authz>=3.0.1",
-  "gunicorn>=25.1.0",
+  "gen3logging @ git+https://github.com/uc-cdis/cdislogging.git@feat/json",
   "opentelemetry-api>=1.39.1",
-  "opentelemetry-exporter-otlp>=1.39.1",
-  "opentelemetry-instrumentation-fastapi>=0.60b1",
+  "opentelemetry-instrumentation-httpx>=0.65b0",
+  "opentelemetry-instrumentation-asyncpg>=0.65b0",
+  "opentelemetry-instrumentation-requests>=0.65b0",
   "opentelemetry-sdk>=1.39.1",
   "prometheus-client>=0.24.1",
   "pytest>=9.0.2",
@@ -41,6 +44,11 @@ dependencies = [
   "pytest-asyncio",
   "ruff",
   "pytest-xdist",
+  # `starlette.testclient` imports httpx2 and only falls back to httpx with a deprecation
+  # warning, so TestClient needs this. Test-only: the runtime httpx that authutils and
+  # gen3authz require is a separate distribution and stays where it is, which is also what
+  # HTTPXClientInstrumentor instruments.
+  "httpx2>=2.12.0",
   "pylint>=4.0.5",
   "dotenv>=0.9.9",
   "sqlfluff>=4.2.2",

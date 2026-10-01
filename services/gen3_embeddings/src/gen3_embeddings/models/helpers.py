@@ -20,6 +20,12 @@ def normalize_collection_name(name: str) -> str:
     - strip whitespace
     - lower-case
     - ensure only [a-z0-9_-]
+
+    Returns:
+        str: The normalized collection name.
+
+    Raises:
+        ValueError: If the name contains anything outside [a-z0-9_-].
     """
     name = name.strip().lower()
     pattern = re.compile(r"^[a-z0-9_-]+$")
@@ -34,6 +40,12 @@ def normalize_authz(authz: str | None) -> str | None:
 
     - strip whitespace
     - ensure it starts with a slash if not None or empty
+
+    Returns:
+        str | None: The normalized authz string, or None when none was given.
+
+    Raises:
+        ValueError: If the authz string does not start with a slash.
     """
     if not authz:
         return None
