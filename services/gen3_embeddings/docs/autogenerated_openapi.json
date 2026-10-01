@@ -695,7 +695,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read all collections",
-        "description": "Returns every vector collection you have access to, one page at a time. Set `counts=true` to also get the number of embeddings available in each collection.",
+        "description": "Returns every vector collection you have access to, one page at a time. Set `counts=true` to also get the number of embeddings available in each collection. Counting visits every embedding you can read, so it can be very slow for large collections (millions of embeddings) and may hit the request timeout.",
         "operationId": "list_collections_vectorstore_collections_get",
         "parameters": [
           {
@@ -824,7 +824,7 @@
           "Vectorstore Collections"
         ],
         "summary": "Read collection info",
-        "description": "Returns the metadata for a single collection, including its dimensions and vector type. Set `counts=true` to also get the number of embeddings available in it.",
+        "description": "Returns the metadata for a single collection, including its dimensions and vector type. Set `counts=true` to also get the number of embeddings available in it. Counting visits every embedding you can read, so it can be very slow for a large collection (millions of embeddings) and may hit the request timeout.",
         "operationId": "get_collection_vectorstore_collections__collection_name__get",
         "parameters": [
           {

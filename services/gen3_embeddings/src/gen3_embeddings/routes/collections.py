@@ -33,7 +33,9 @@ collections_router = APIRouter()
     summary="Read all collections",
     description=(
         "Returns every vector collection you have access to, one page at a time. "
-        "Set `counts=true` to also get the number of embeddings available in each collection."
+        "Set `counts=true` to also get the number of embeddings available in each collection. "
+        "Counting visits every embedding you can read, so it can be very slow for large "
+        "collections (millions of embeddings) and may hit the request timeout."
     ),
     response_description="A page of collections you can read.",
     responses={**AUTH_RESPONSES},
@@ -148,7 +150,9 @@ async def create_collection(
     summary="Read collection info",
     description=(
         "Returns the metadata for a single collection, including its dimensions and vector type. "
-        "Set `counts=true` to also get the number of embeddings available in it."
+        "Set `counts=true` to also get the number of embeddings available in it. "
+        "Counting visits every embedding you can read, so it can be very slow for a large "
+        "collection (millions of embeddings) and may hit the request timeout."
     ),
     response_description="The requested collection's metadata.",
     responses={
