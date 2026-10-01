@@ -192,10 +192,11 @@ class WriteMixin(DataAccessLayerBase):
         """
         Create a collection, if the caller is allowed to use that name.
 
-        The name check here is what turns "not authorized" into a specific 403 rather than
-        the bare `InsufficientPrivilegeError` the table's RLS WITH CHECK would raise. The
-        policy still applies underneath, so removing this check would change the error, not
-        the outcome.
+        The name check here is what turns "not authorized" into a specific error naming the
+        collection, rather than the generic `RowLevelSecurityDeniedError` the table's RLS
+        WITH CHECK would produce. The policy still applies underneath, so removing this check
+        would change the error, not the outcome. Because both read the same set, a name that
+        passes this check also passes the policy, which is why that error is not listed below.
 
         Args:
             collection_name (str): Name of the collection to create.
@@ -211,6 +212,12 @@ class WriteMixin(DataAccessLayerBase):
             CollectionNameNotAllowedError: If the caller may not use this collection name.
             CollectionAlreadyExistsError: If the name is already taken.
             CollectionCreateFailedError: If the insert returned no row.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
         if collection_name not in self.allowed_collection_names:
             raise CollectionNameNotAllowedError(f"Not authorized to create collection with name {collection_name}")
@@ -251,6 +258,14 @@ class WriteMixin(DataAccessLayerBase):
         Returns:
             Collection | None: The collection after the update, or None if it does not
             exist **or** RLS hid it from this caller.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
         set_parts = []
         params: list[Any] = [collection_name]
@@ -299,6 +314,11 @@ class WriteMixin(DataAccessLayerBase):
         Returns:
             bool: True only if a row was actually deleted. False if RLS hid the collection
             from this caller, or if no collection by that name existed.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
 
         async def _query(conn):
@@ -339,8 +359,15 @@ class WriteMixin(DataAccessLayerBase):
                 vector type.
             EmbeddingsAlreadyExistError: If any embedding in the batch conflicts with an
                 existing row. No embeddings are written.
+            RowLevelSecurityDeniedError: If `authz` is not a resource the caller holds this
+                action on. No embeddings are written.
             EmbeddingWriteInconsistencyError: If the rows returned by the database do not
                 correspond exactly to the rows inserted.
+            asyncpg.ForeignKeyViolationError: If the collection was deleted after the caller
+                looked it up.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         batch = _prepare_bulk_write(collection, embeddings, metadata_list)
         if not batch.row_count:
@@ -408,9 +435,32 @@ class WriteMixin(DataAccessLayerBase):
         """
         Bulk upsert multiple embeddings in the given collection.
 
+        Args:
+            collection (Collection): Target collection; supplies dimensions and vector type.
+            embeddings (list[list[float]]): Vectors to write.
+            authz (str): Authz resource path assigned to every embedding in this batch.
+            metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
+
         Returns:
             list[Embedding]: One Embedding per input vector, in input order. An input that
             matched an existing row gets that row back with a refreshed `updated_at`.
+
+        Raises:
+            MetadataLengthMismatchError: If `metadata_list` is a different length than
+                `embeddings`.
+            EmbeddingDimensionMismatchError: If any vector's length does not match the
+                collection's dimensionality.
+            EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
+                vector type.
+            RowLevelSecurityDeniedError: If `authz` is not a resource the caller holds this
+                action on. No embeddings are written.
+            EmbeddingWriteInconsistencyError: If the rows returned by the database do not
+                correspond exactly to the rows written.
+            asyncpg.ForeignKeyViolationError: If the collection was deleted after the caller
+                looked it up.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         batch = _prepare_bulk_write(collection, embeddings, metadata_list)
         if not batch.row_count:
@@ -481,6 +531,13 @@ class WriteMixin(DataAccessLayerBase):
         The combination (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
         must remain unique (per the DB constraint).
 
+        Args:
+            collection (Collection): Collection the embedding belongs to.
+            embedding_id (UUID): Identifier of the embedding to update.
+            embedding (list[float] | None): New vector, or None to leave it unchanged.
+            metadata (dict | None): New metadata, or None to leave it unchanged.
+            new_authz (str | None): New authz resource path, or None to leave it unchanged.
+
         Returns:
             Embedding | None: The updated row, or None if no such embedding is visible to the caller.
 
@@ -490,6 +547,11 @@ class WriteMixin(DataAccessLayerBase):
                 dimensionality.
             EmbeddingNotRepresentableError: If `embedding` holds a value the collection's
                 vector type cannot store.
+            RowLevelSecurityDeniedError: If `new_authz` is not a resource the caller holds
+                this action on.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         vector_type = VectorType(collection.vector_type)
         table, vector_cast = get_embeddings_table_and_cast(vector_type)
@@ -591,6 +653,11 @@ class WriteMixin(DataAccessLayerBase):
         Returns:
             bool: True only if a row was actually deleted. False if no such embedding
             existed in the collection, or if RLS hid it from this caller.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 

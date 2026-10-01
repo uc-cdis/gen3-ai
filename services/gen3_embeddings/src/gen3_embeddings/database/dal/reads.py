@@ -27,6 +27,12 @@ class ReadMixin(DataAccessLayerBase):
 
         Raises:
             InvalidCollectionNameError: If `collection_name` is not a valid collection name.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
         try:
             collection_name = normalize_collection_name(collection_name)
@@ -50,6 +56,14 @@ class ReadMixin(DataAccessLayerBase):
         Returns:
             Collection | None: The collection, or None if it does not exist **or** RLS hid
             it from this caller.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
 
         async def _query(conn):
@@ -82,6 +96,14 @@ class ReadMixin(DataAccessLayerBase):
             has entries, since that set is the whole candidate space - so a caller that
             wants every collection and needs to know whether it got them all can ask for
             one more than its own ceiling and check whether that extra row came back.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
         # nothing can be visible, so skip the round trip
         if not self.allowed_collection_names:
@@ -118,6 +140,11 @@ class ReadMixin(DataAccessLayerBase):
         Returns:
             Embedding | None: The embedding, or None if it does not exist **or** RLS hid it
             from this caller.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -147,6 +174,11 @@ class ReadMixin(DataAccessLayerBase):
         Returns:
             list[Embedding]: Embeddings visible to this caller under RLS. Ordering is by
             `created_at`, which is not unique, so rows can shift between pages.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -185,6 +217,11 @@ class ReadMixin(DataAccessLayerBase):
             list[Embedding]: Embeddings visible to this caller under RLS, in no guaranteed
             order. May be shorter than `embedding_ids` if any are hidden by RLS or do not
             exist.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
 
         async def _query(conn):
@@ -241,6 +278,11 @@ class ReadMixin(DataAccessLayerBase):
             list[tuple[int, Embedding]]: (input index, embedding) pairs in request order.
             Ids that do not exist or are hidden by RLS are omitted, so this may be shorter
             than `embedding_ids`.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         if not embedding_ids:
             return []
@@ -291,6 +333,14 @@ class ReadMixin(DataAccessLayerBase):
             list[Collection]: Authorized collections, in no guaranteed order. May be
             shorter than `collection_ids`, and empty if the caller has no allowed
             collections.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
+            TypeError: If a `collections` row has a column `Collection` does not mirror, as a
+                migration that adds one ahead of the code would cause.
+            ValueError: If a stored `vector_type` is not a known `VectorType`.
         """
         # nothing can be visible, so skip the round trip
         if not self.allowed_collection_names:
@@ -315,6 +365,11 @@ class ReadMixin(DataAccessLayerBase):
 
         Returns:
             int: Number of visible embeddings.
+
+        Raises:
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 

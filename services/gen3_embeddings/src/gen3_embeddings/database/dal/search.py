@@ -78,6 +78,12 @@ class SearchMixin(DataAccessLayerBase):
         Returns:
             list[asyncpg.Record]: Matching rows including distance scores, ordered by
             distance. Visible to this caller under RLS. May be fewer than `top_k`.
+
+        Raises:
+            ValueError: If `distance_metric` has no pgvector operator.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         vector_type = VectorType(collection.vector_type)
         table, _ = get_embeddings_table_and_cast(vector_type)
@@ -131,8 +137,26 @@ class SearchMixin(DataAccessLayerBase):
         shape its own index can serve. See `build_multi_collection_search_sql` for why the
         older single-scan form could not use any per-collection index.
 
+        Args:
+            collections (list[Collection]): Candidate collections; those that cannot hold a
+                hit for this query are dropped before searching.
+            query_vector (list[float]): Query vector to search against.
+            top_k (int): Maximum number of results to return.
+            min_value (float | None): Minimum similarity/distance threshold.
+            max_value (float | None): Maximum similarity/distance threshold.
+            distance_metric (DistanceMetric): Distance function to use, e.g. cosine or L2.
+            filters (dict[str, str] | None): Metadata key/value filters; only rows matching
+                all entries are considered.
+            vector_type (VectorType): Storage type every searched collection must have.
+
         Returns:
             list[asyncpg.Record]: The matching rows, at most `top_k` of them.
+
+        Raises:
+            ValueError: If `distance_metric` has no pgvector operator.
+            asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the
+                query needs. A deployment fault rather than the caller's, so it stays a 500.
+            asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
         if not collections:
             return []
