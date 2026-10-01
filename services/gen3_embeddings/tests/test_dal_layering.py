@@ -24,7 +24,8 @@ from gen3_embeddings.database import errors as dal_errors
 from gen3_embeddings.error_handlers import DATA_ACCESS_ERROR_STATUS, get_status_code_for_error
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src/gen3_embeddings"
-DB_MODULE_PATH = SRC / "database/db.py"
+# db.py composes DataAccessLayer from the mixins in database/dal/, so the DAL is all of them
+DAL_MODULE_PATHS = [SRC / "database/db.py", *sorted((SRC / "database/dal").glob("*.py"))]
 ROUTES_DIR = SRC / "routes"
 
 # Modules the data access layer must not depend on: web framework and authorization.
@@ -67,10 +68,22 @@ def _violations(imported: set[str], forbidden: tuple[str, ...]) -> list[str]:
     ]
 
 
+def _dal_sources() -> dict[pathlib.Path, str]:
+    """Read every DAL module, failing loudly if the glob found nothing to check."""
+    sources = {path: path.read_text() for path in DAL_MODULE_PATHS}
+    # db.py plus at least the base and one mixin, so these tests cannot pass by reading nothing
+    assert len(sources) >= 3
+    return sources
+
+
 def test_dal_does_not_import_web_or_authz_modules():
     """The DAL should be usable without FastAPI and must not reach the policy engine."""
-    violations = _violations(_imported_modules(DB_MODULE_PATH), FORBIDDEN_DAL_IMPORTS)
-    assert not violations, "db.py must not import web/authz modules: " + ", ".join(violations)
+    offenders = {
+        path.name: _violations(_imported_modules(path), FORBIDDEN_DAL_IMPORTS)
+        for path in DAL_MODULE_PATHS
+        if _violations(_imported_modules(path), FORBIDDEN_DAL_IMPORTS)
+    }
+    assert not offenders, f"the DAL must not import web/authz modules: {offenders}"
 
 
 def test_routes_do_not_call_the_policy_engine_directly():
@@ -101,10 +114,12 @@ def test_dal_sets_both_rls_settings_together():
     to touch second running under a setting that was never set, which denies everything and
     looks like data loss rather than a bug.
     """
-    source = DB_MODULE_PATH.read_text()
-    tree = ast.parse(source)
-    with_rls = next(
-        node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_with_rls"
+    sources = _dal_sources()
+    source, with_rls = next(
+        (source, node)
+        for source in sources.values()
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_with_rls"
     )
     body = ast.get_source_segment(source, with_rls) or ""
 
@@ -112,7 +127,7 @@ def test_dal_sets_both_rls_settings_together():
     assert "set_config('app.allowed_collection_names'" in body
 
     # _with_rls is the only place that takes a connection, so no query can run without them
-    assert source.count("self.pool.acquire()") == 1, (
+    assert sum(source.count("self.pool.acquire()") for source in sources.values()) == 1, (
         "a query outside _with_rls runs with no RLS context, so it sees nothing (or, worse, "
         "everything if a policy is ever removed)"
     )
@@ -120,9 +135,9 @@ def test_dal_sets_both_rls_settings_together():
 
 def test_dal_never_raises_http_errors():
     """Every failure leaves the DAL as a DataAccessError, so status codes are chosen elsewhere."""
-    source = DB_MODULE_PATH.read_text()
-    assert "HTTPException" not in source
-    assert "status_code" not in source
+    for path, source in _dal_sources().items():
+        assert "HTTPException" not in source, path.name
+        assert "status_code" not in source, path.name
 
 
 def test_dal_methods_do_not_take_authz_arguments():
@@ -134,27 +149,35 @@ def test_dal_methods_do_not_take_authz_arguments():
     notice. One field per instance means the RLS context and the Python short-circuits
     cannot disagree.
     """
-    tree = ast.parse(DB_MODULE_PATH.read_text())
-    dal = next(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == "DataAccessLayer")
+    # DataAccessLayer itself is empty; its methods come from the classes in database/dal/
+    classes = [
+        node
+        for source in _dal_sources().values()
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ClassDef) and (node.name.endswith("Mixin") or node.name == "DataAccessLayerBase")
+    ]
+    assert {cls.name for cls in classes} >= {"DataAccessLayerBase", "ReadMixin", "WriteMixin", "SearchMixin"}
 
     offenders = {}
-    for method in dal.body:
-        if not isinstance(method, ast.AsyncFunctionDef) or method.name == "__init__":
-            continue
-        args = {arg.arg for arg in method.args.args} | {arg.arg for arg in method.args.kwonlyargs}
-        leaked = args & {"allowed_collection_names", "allowed_authz"}
-        if leaked:
-            offenders[method.name] = sorted(leaked)
+    for cls in classes:
+        for method in cls.body:
+            if not isinstance(method, ast.AsyncFunctionDef | ast.FunctionDef) or method.name == "__init__":
+                continue
+            args = {arg.arg for arg in method.args.args} | {arg.arg for arg in method.args.kwonlyargs}
+            leaked = args & {"allowed_collection_names", "allowed_authz"}
+            if leaked:
+                offenders[f"{cls.name}.{method.name}"] = sorted(leaked)
 
     assert not offenders, f"authz belongs on the DAL instance, not these method signatures: {offenders}"
 
 
 def test_dal_does_not_interpret_authz_paths():
     """Turning authz paths into collection names is an authz concern, not a database one."""
-    source = DB_MODULE_PATH.read_text()
-    assert "/vectorstore/collections" not in source, (
-        "db.py appears to derive authz paths itself; that belongs in auth.get_allowed_collection_names_from_authz"
-    )
+    for path, source in _dal_sources().items():
+        assert "/vectorstore/collections" not in source, (
+            f"{path.name} appears to derive authz paths itself; that belongs in "
+            "auth.get_allowed_collection_names_from_authz"
+        )
 
 
 def test_authz_path_interpretation_lives_in_the_auth_layer():

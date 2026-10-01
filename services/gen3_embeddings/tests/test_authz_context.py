@@ -133,85 +133,6 @@ def test_alias_routes_declare_the_same_action():
     assert not inconsistent, f"path and its trailing-slash alias disagree: {inconsistent}"
 
 
-# ---------------------------------------------------------------------------
-# Behavioral: a read-only caller can use the POST-shaped read endpoints
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def seeded_docs(client, allow_authz):
-    """Create the `docs` collection with one embedding, then return its embedding UUID."""
-    allow_authz("docs")
-    assert client.post("/vectorstore/collections", json=COLLECTION).status_code == 200
-
-    created = client.post(
-        "/vectorstore/collections/docs/embeddings",
-        json={"embeddings": [{"embedding": [1.0, 0.0, 0.0], "metadata": {"n": "1"}}]},
-    )
-    assert created.status_code == 200, created.text
-    return created.json()["embeddings"][0]["embedding_id"]
-
-
-@pytest.mark.parametrize(
-    "method,path,body",
-    [
-        ("post", "/vectorstore/collections/docs/search", {"input": [1.0, 0.0, 0.0], "top_k": 5}),
-        ("post", "/vectorstore/search", {"input": [1.0, 0.0, 0.0], "top_k": 5}),
-    ],
-)
-def test_read_only_caller_can_use_post_search(client, allow_authz_per_action, seeded_docs, method, path, body):
-    """
-    A caller granted only `read` can search, even though search is a POST.
-
-    Under verb-derived authorization this ran as `create`, so a read-only caller got an empty
-    result from an endpoint they were entitled to use.
-    """
-    allow_authz_per_action(read=("docs",), create=(), update=(), delete=())
-
-    response = getattr(client, method)(path, json=body)
-    assert response.status_code == 200, response.text
-    assert len(response.json()["embeddings"]) == 1
-
-
-def test_read_only_caller_can_use_post_bulk_read(client, allow_authz_per_action, seeded_docs):
-    """Same for the bulk read endpoints, which are POST for the same reason."""
-    allow_authz_per_action(read=("docs",), create=(), update=(), delete=())
-
-    scoped = client.post("/vectorstore/collections/docs/embeddings/bulk", json=[seeded_docs])
-    assert scoped.status_code == 200, scoped.text
-    assert len(scoped.json()["embeddings"]) == 1
-
-    unknown = client.post("/embeddings/bulk", json=[seeded_docs])
-    assert unknown.status_code == 200, unknown.text
-    assert len(unknown.json()["embeddings"]) == 1
-
-
-def test_create_only_caller_cannot_read(client, allow_authz_per_action, seeded_docs):
-    """
-    The converse: holding `create` does not let a caller read.
-
-    Without this, "declare the action" would be satisfied by a dependency that ignored the
-    action and returned every grant.
-    """
-    allow_authz_per_action(read=(), create=("docs",), update=(), delete=())
-
-    assert client.get("/vectorstore/collections/docs").status_code == 404
-    assert client.get("/vectorstore/collections").json()["collections"] == []
-    assert client.post("/vectorstore/collections/docs/search", json={"input": [1.0, 0.0, 0.0]}).status_code == 404
-    assert client.post("/vectorstore/search", json={"input": [1.0, 0.0, 0.0]}).json()["embeddings"] == []
-
-
-def test_delete_grant_alone_does_not_authorize_writes(client, allow_authz_per_action, seeded_docs):
-    """A `delete`-only caller cannot create embeddings, and cannot read the collection."""
-    allow_authz_per_action(read=(), create=(), update=(), delete=("docs",))
-
-    created = client.post(
-        "/vectorstore/collections/docs/embeddings",
-        json={"embeddings": [{"embedding": [0.0, 1.0, 0.0]}]},
-    )
-    assert created.status_code == 404, created.text
-
-
 def test_authz_dependency_signature_takes_only_the_request(app):
     """
     The dependency depends on nothing but the request.
@@ -222,3 +143,78 @@ def test_authz_dependency_signature_takes_only_the_request(app):
     """
     dependency = authz("read")
     assert list(inspect.signature(dependency).parameters) == ["request"]
+
+
+class TestPerActionGrants:
+    """Each grant authorizes its own action and no other, including on the POST-shaped reads."""
+
+    @pytest.fixture
+    def seeded_docs(self, client, allow_authz):
+        """Create the `docs` collection with one embedding, then return its embedding UUID."""
+        allow_authz("docs")
+        assert client.post("/vectorstore/collections", json=COLLECTION).status_code == 200
+
+        created = client.post(
+            "/vectorstore/collections/docs/embeddings",
+            json={"embeddings": [{"embedding": [1.0, 0.0, 0.0], "metadata": {"n": "1"}}]},
+        )
+        assert created.status_code == 200, created.text
+        return created.json()["embeddings"][0]["embedding_id"]
+
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            ("post", "/vectorstore/collections/docs/search", {"input": [1.0, 0.0, 0.0], "top_k": 5}),
+            ("post", "/vectorstore/search", {"input": [1.0, 0.0, 0.0], "top_k": 5}),
+        ],
+    )
+    def test_read_only_caller_can_use_post_search(
+        self, client, allow_authz_per_action, seeded_docs, method, path, body
+    ):
+        """
+        A caller granted only `read` can search, even though search is a POST.
+
+        Under verb-derived authorization this ran as `create`, so a read-only caller got an empty
+        result from an endpoint they were entitled to use.
+        """
+        allow_authz_per_action(read=("docs",), create=(), update=(), delete=())
+
+        response = getattr(client, method)(path, json=body)
+        assert response.status_code == 200, response.text
+        assert len(response.json()["embeddings"]) == 1
+
+    def test_read_only_caller_can_use_post_bulk_read(self, client, allow_authz_per_action, seeded_docs):
+        """Same for the bulk read endpoints, which are POST for the same reason."""
+        allow_authz_per_action(read=("docs",), create=(), update=(), delete=())
+
+        scoped = client.post("/vectorstore/collections/docs/embeddings/bulk", json=[seeded_docs])
+        assert scoped.status_code == 200, scoped.text
+        assert len(scoped.json()["embeddings"]) == 1
+
+        unknown = client.post("/embeddings/bulk", json=[seeded_docs])
+        assert unknown.status_code == 200, unknown.text
+        assert len(unknown.json()["embeddings"]) == 1
+
+    def test_create_only_caller_cannot_read(self, client, allow_authz_per_action, seeded_docs):
+        """
+        The converse: holding `create` does not let a caller read.
+
+        Without this, "declare the action" would be satisfied by a dependency that ignored the
+        action and returned every grant.
+        """
+        allow_authz_per_action(read=(), create=("docs",), update=(), delete=())
+
+        assert client.get("/vectorstore/collections/docs").status_code == 404
+        assert client.get("/vectorstore/collections").json()["collections"] == []
+        assert client.post("/vectorstore/collections/docs/search", json={"input": [1.0, 0.0, 0.0]}).status_code == 404
+        assert client.post("/vectorstore/search", json={"input": [1.0, 0.0, 0.0]}).json()["embeddings"] == []
+
+    def test_delete_grant_alone_does_not_authorize_writes(self, client, allow_authz_per_action, seeded_docs):
+        """A `delete`-only caller cannot create embeddings, and cannot read the collection."""
+        allow_authz_per_action(read=(), create=(), update=(), delete=("docs",))
+
+        created = client.post(
+            "/vectorstore/collections/docs/embeddings",
+            json={"embeddings": [{"embedding": [0.0, 1.0, 0.0]}]},
+        )
+        assert created.status_code == 404, created.text
