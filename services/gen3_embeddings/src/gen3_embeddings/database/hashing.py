@@ -198,8 +198,13 @@ def canonical_metadata_json(metadata: dict | None) -> str:
 
     Returns:
         str: Canonical JSON text.
+
+    Raises:
+        ValueError: If the metadata holds a NaN or Infinity value. The request schema refuses
+            these already; this keeps anything that skipped it from reaching the jsonb cast,
+            which rejects them.
     """
-    return json.dumps(metadata or {}, sort_keys=True, separators=(",", ":"))
+    return json.dumps(metadata or {}, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def hash_metadata_json(metadata_json: str) -> UUID:
@@ -224,5 +229,8 @@ def hash_metadata(metadata: dict | None) -> UUID:
 
     Returns:
         UUID: The metadata's content hash.
+
+    Raises:
+        ValueError: If the metadata holds a NaN or Infinity value.
     """
     return hash_metadata_json(canonical_metadata_json(metadata))

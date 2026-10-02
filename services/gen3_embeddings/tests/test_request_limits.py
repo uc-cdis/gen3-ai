@@ -204,6 +204,23 @@ class TestValidateMetadata:
         with pytest.raises(ValueError, match="bytes when serialized"):
             validate_metadata(metadata)
 
+    def test_nan_is_refused(self):
+        """
+        NaN is refused wherever it sits, rather than reaching Postgres.
+
+        The stdlib JSON parser accepts a bare `NaN` token, so it arrives here as a float; the
+        jsonb cast rejects it, which was a 500.
+        """
+        for metadata in ({"score": float("nan")}, {"a": {"b": [1.0, float("nan")]}}):
+            with pytest.raises(ValueError, match="NaN or Infinity"):
+                validate_metadata(metadata)
+
+    def test_infinity_is_refused(self):
+        """Infinity, either sign, is refused for the same reason as NaN."""
+        for metadata in ({"score": float("inf")}, {"a": [float("-inf")]}):
+            with pytest.raises(ValueError, match="NaN or Infinity"):
+                validate_metadata(metadata)
+
     def test_depth_is_checked_before_size(self):
         """
         Depth has to be checked first, or the size check crashes on a deep document.
@@ -241,6 +258,11 @@ class TestSchemaFieldLimits:
         """Item count multiplies against the per-vector bound, so it is bounded too."""
         with pytest.raises(ValidationError, match="too_long"):
             CreateEmbeddingsBody(embeddings=[{"embedding": [0.0]}] * (MAX_EMBEDDINGS_PER_REQUEST + 1))
+
+    def test_non_finite_metadata_on_an_updated_embedding_is_refused(self):
+        """The non-finite metadata check applies on update too, not only on create."""
+        with pytest.raises(ValidationError, match="NaN or Infinity"):
+            UpdateEmbeddingBody(metadata={"score": float("nan")})
 
     def test_oversized_metadata_on_a_created_embedding_is_refused(self):
         """The metadata limits apply on create, not only on update."""
@@ -354,6 +376,61 @@ class TestRouteLimits:
             },
         )
         assert resp.status_code == 422, resp.text
+
+    @staticmethod
+    def post_raw_metadata(client, metadata_json: str):
+        """
+        POST one embedding whose metadata is given as raw JSON text.
+
+        The client's own encoder refuses NaN and Infinity, so the body is written by hand to
+        send the tokens the stdlib parser on the server side will accept.
+        """
+        body = '{"embeddings": [{"embedding": [0.0, 0.0, 0.0], "metadata": ' + metadata_json + "}]}"
+        return client.post(
+            "/vectorstore/collections/docs/embeddings",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+
+    def test_nan_metadata_on_create_is_a_client_error(self, client, allow_authz):
+        """A bare `NaN` in metadata is a 422, not the 500 the jsonb cast used to produce."""
+        allow_authz("docs")
+        make_collection(client)
+
+        resp = self.post_raw_metadata(client, '{"a": NaN}')
+        assert resp.status_code == 422, resp.text
+        assert "NaN or Infinity" in resp.text
+        assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
+
+    def test_infinity_metadata_on_create_is_a_client_error(self, client, allow_authz):
+        """`Infinity` and `-Infinity` are refused the same way."""
+        allow_authz("docs")
+        make_collection(client)
+
+        for token in ("Infinity", "-Infinity"):
+            resp = self.post_raw_metadata(client, f'{{"a": {{"b": [{token}]}}}}')
+            assert resp.status_code == 422, (token, resp.text)
+            assert "NaN or Infinity" in resp.text
+        assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
+
+    def test_non_finite_vector_on_create_is_a_client_error(self, client, allow_authz):
+        """
+        A `NaN` vector component is a 422 too.
+
+        The schema refused it already, but the 422 echoes the rejected input back and could not
+        encode the NaN, so this was a 500 as well.
+        """
+        allow_authz("docs")
+        make_collection(client)
+
+        resp = client.post(
+            "/vectorstore/collections/docs/embeddings",
+            content='{"embeddings": [{"embedding": [NaN, 0.0, 0.0]}]}',
+            headers={"content-type": "application/json"},
+        )
+        assert resp.status_code == 422, resp.text
+        # echoed back as the token the caller sent, so the body is still valid JSON
+        assert resp.json()["detail"][0]["input"] == "NaN"
 
     def test_top_k_over_the_maximum_is_refused(self, client, allow_authz):
         """Bounds how many full vectors a single search can be made to return."""

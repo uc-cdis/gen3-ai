@@ -249,8 +249,8 @@ def validate_metadata(metadata: dict | None) -> dict | None:
         dict | None: The metadata unchanged, so this can be used as a Pydantic validator.
 
     Raises:
-        ValueError: If the metadata has too many top-level keys, nests too deeply, or is
-            too large once serialized.
+        ValueError: If the metadata has too many top-level keys, nests too deeply, holds a
+            NaN or Infinity value, or is too large once serialized.
     """
     if metadata is None:
         return None
@@ -263,8 +263,12 @@ def validate_metadata(metadata: dict | None) -> dict | None:
         raise ValueError(f"metadata may nest at most {MAX_METADATA_DEPTH} levels deep")
 
     # Measured on the serialization rather than the object graph because that is what gets
-    # stored, hashed, and sent back.
-    size = len(json.dumps(metadata, default=str))
+    # stored, hashed, and sent back. allow_nan=False rejects NaN/Infinity, which json.loads
+    # accepts on the way in but Postgres refuses on the jsonb cast.
+    try:
+        size = len(json.dumps(metadata, default=str, allow_nan=False))
+    except ValueError as exc:
+        raise ValueError("metadata may not contain NaN or Infinity values") from exc
     if size > MAX_METADATA_BYTES:
         raise ValueError(f"metadata may be at most {MAX_METADATA_BYTES} bytes when serialized, got {size}")
 

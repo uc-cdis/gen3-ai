@@ -28,7 +28,7 @@ class _BulkWriteBatch:
     """
     A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
 
-    Vectors travel as one flat float4[] that the INSERT slices per row, and the per-row
+    Vectors travel as one flat float32 array that the INSERT slices per row, and the per-row
     columns travel as parallel arrays. That is what keeps the whole batch on asyncpg's binary
     encoding path: nothing here is a JSON document, so no float is ever formatted as text.
     """
@@ -89,6 +89,7 @@ def _prepare_bulk_write(
             dimensionality.
         EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
             vector type.
+        ValueError: If any metadata holds a NaN or Infinity value.
     """
     if metadata_list is None:
         metadata_list = [{} for _ in embeddings]
@@ -357,6 +358,9 @@ class WriteMixin(DataAccessLayerBase):
                 collection's dimensionality.
             EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
                 vector type.
+            ValueError: If any metadata holds a NaN or Infinity value, which the jsonb column
+                cannot store. The request schema refuses these first, so this is reached only
+                by a caller that skipped it.
             EmbeddingsAlreadyExistError: If any embedding in the batch conflicts with an
                 existing row. No embeddings are written.
             RowLevelSecurityDeniedError: If `authz` is not a resource the caller holds this
@@ -452,6 +456,9 @@ class WriteMixin(DataAccessLayerBase):
                 collection's dimensionality.
             EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
                 vector type.
+            ValueError: If any metadata holds a NaN or Infinity value, which the jsonb column
+                cannot store. The request schema refuses these first, so this is reached only
+                by a caller that skipped it.
             RowLevelSecurityDeniedError: If `authz` is not a resource the caller holds this
                 action on. No embeddings are written.
             EmbeddingWriteInconsistencyError: If the rows returned by the database do not
@@ -547,6 +554,9 @@ class WriteMixin(DataAccessLayerBase):
                 dimensionality.
             EmbeddingNotRepresentableError: If `embedding` holds a value the collection's
                 vector type cannot store.
+            ValueError: If `metadata` holds a NaN or Infinity value, which the jsonb column
+                cannot store. The request schema refuses these first, so this is reached only
+                by a caller that skipped it.
             RowLevelSecurityDeniedError: If `new_authz` is not a resource the caller holds
                 this action on.
             asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the

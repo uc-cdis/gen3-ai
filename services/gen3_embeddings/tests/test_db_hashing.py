@@ -62,6 +62,13 @@ def test_metadata_hash_ignores_key_order():
     assert hashing.hash_metadata({"a": 1, "b": 2}) == hashing.hash_metadata({"b": 2, "a": 1})
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_canonical_metadata_json_refuses_non_finite_values(value):
+    """Nothing downstream of the schema can render a value the jsonb cast would reject."""
+    with pytest.raises(ValueError):
+        hashing.canonical_metadata_json({"a": [value]})
+
+
 def test_metadata_hash_treats_none_as_empty():
     """Missing metadata and empty metadata are the same row, as the write paths assume."""
     assert hashing.hash_metadata(None) == hashing.hash_metadata({})
