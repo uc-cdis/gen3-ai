@@ -267,6 +267,29 @@ db_rollback SERVICE="all": _check_dependencies
         just _run_dbmate "{{SERVICE}}" down
     fi
 
+# Create a new operator-owned index migration (see services/gen3_embeddings/db/index_migrations/README.md)
+[group('database')]
+db_index_new MIGRATION_NAME SERVICE="gen3_embeddings": _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RAW_NAME="{{MIGRATION_NAME}}"
+    just _run_dbmate "{{SERVICE}}" new "${RAW_NAME// /_}" index
+
+# Apply pending operator-owned index migrations, then restart the service so it discovers them
+[group('database')]
+db_index_migrate SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" migrate "" index
+
+# Roll back the most recent operator-owned index migration
+[group('database')]
+db_index_rollback SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" down "" index
+
+# List applied and pending operator-owned index migrations
+[group('database')]
+db_index_status SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" status "" index
+
 # Create databases based on configuration - does NOT migrate
 [group('database')]
 db_setup SERVICE="all": _check_dependencies
@@ -581,7 +604,10 @@ _warn:
 _check_dependencies:
     @./scripts/check_dependencies.bash
 
-_run_dbmate SERVICE ACTION ARGS="":
+# KIND="schema" runs the official migrations in db/migrations and keeps db/schema.sql in sync.
+# KIND="index" runs operator-owned index migrations: db/index_migrations by default (override
+# with INDEX_MIGRATIONS_DIR), recorded in their own history table, never dumped to schema.sql.
+_run_dbmate SERVICE ACTION ARGS="" KIND="schema":
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
@@ -605,19 +631,36 @@ _run_dbmate SERVICE ACTION ARGS="":
     service_name="{{SERVICE}}"
     set_postgres_defaults
 
-    MIGRATIONS_DIR="${DIR}/db/migrations"
+    # Postgres session settings, appended to the connection URL. An index migration has to be a
+    # single statement (CREATE INDEX CONCURRENTLY refuses a transaction block), so it cannot
+    # SET these itself. statement_timeout=0 because a large HNSW build can run for days.
+    URL_PARAMS=""
+    if [ "{{KIND}}" = "index" ]; then
+        MIGRATIONS_DIR="${INDEX_MIGRATIONS_DIR:-${DIR}/db/index_migrations}"
+        DBMATE_FLAGS=(-d "${MIGRATIONS_DIR}" --migrations-table index_migrations --no-dump-schema)
+        URL_PARAMS="&${INDEX_PG_PARAMS:-statement_timeout=0}"
+    else
+        MIGRATIONS_DIR="${DIR}/db/migrations"
+        DBMATE_FLAGS=(-d "${MIGRATIONS_DIR}" -s "${DIR}/db/schema.sql")
+    fi
+
     if [ -d "$MIGRATIONS_DIR" ]; then
         export PGPASSWORD="${PGPASSWORD}"
-        CONN_STR="${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
+        CONN_STR="${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable${URL_PARAMS}"
 
         if [ "{{SERVICE}}" = "gen3_embeddings" ]; then
             export DB_APP_USER="${DB_APP_USER:=app_user}"
             export DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD:=app_user_password}"
         fi
 
-        dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait {{ACTION}} {{ARGS}}
-        dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait status
-        echo -e "${GREEN}Migrations applied successfully.${RESET}"
+        dbmate -u "$CONN_STR" "${DBMATE_FLAGS[@]}" --wait {{ACTION}} {{ARGS}}
+        if [ "{{ACTION}}" != "new" ]; then
+            dbmate -u "$CONN_STR" "${DBMATE_FLAGS[@]}" --wait status
+        fi
+        echo -e "${GREEN}dbmate {{ACTION}} finished.${RESET}"
+    elif [ "{{KIND}}" = "index" ]; then
+        echo -e "${RED}** ERROR: index migrations directory '$MIGRATIONS_DIR' does not exist **${RESET}"
+        exit 1
     fi
 
 _check_uv_modified_files:

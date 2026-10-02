@@ -1,6 +1,5 @@
 """Routes implementing the Open Responses inference API."""
 
-from typing import Union
 from urllib.parse import urlparse
 
 import httpx
@@ -55,35 +54,35 @@ from gen3_inference.types import OpenResponsesError
 
 responses_router = APIRouter()
 
-AllResponseTypes = Union[
+AllResponseTypes = (
     # non-streaming
-    ResponseResource,
+    ResponseResource
     # streaming events
-    ResponseCreatedStreamingEvent,
-    ResponseQueuedStreamingEvent,
-    ResponseInProgressStreamingEvent,
-    ResponseCompletedStreamingEvent,
-    ResponseFailedStreamingEvent,
-    ResponseIncompleteStreamingEvent,
-    ResponseOutputItemAddedStreamingEvent,
-    ResponseOutputItemDoneStreamingEvent,
-    ResponseReasoningSummaryPartAddedStreamingEvent,
-    ResponseReasoningSummaryPartDoneStreamingEvent,
-    ResponseContentPartAddedStreamingEvent,
-    ResponseContentPartDoneStreamingEvent,
-    ResponseOutputTextDeltaStreamingEvent,
-    ResponseOutputTextDoneStreamingEvent,
-    ResponseRefusalDeltaStreamingEvent,
-    ResponseRefusalDoneStreamingEvent,
-    ResponseReasoningDeltaStreamingEvent,
-    ResponseReasoningDoneStreamingEvent,
-    ResponseReasoningSummaryDeltaStreamingEvent,
-    ResponseReasoningSummaryDoneStreamingEvent,
-    ResponseOutputTextAnnotationAddedStreamingEvent,
-    ResponseFunctionCallArgumentsDeltaStreamingEvent,
-    ResponseFunctionCallArgumentsDoneStreamingEvent,
-    ErrorStreamingEvent,
-]
+    | ResponseCreatedStreamingEvent
+    | ResponseQueuedStreamingEvent
+    | ResponseInProgressStreamingEvent
+    | ResponseCompletedStreamingEvent
+    | ResponseFailedStreamingEvent
+    | ResponseIncompleteStreamingEvent
+    | ResponseOutputItemAddedStreamingEvent
+    | ResponseOutputItemDoneStreamingEvent
+    | ResponseReasoningSummaryPartAddedStreamingEvent
+    | ResponseReasoningSummaryPartDoneStreamingEvent
+    | ResponseContentPartAddedStreamingEvent
+    | ResponseContentPartDoneStreamingEvent
+    | ResponseOutputTextDeltaStreamingEvent
+    | ResponseOutputTextDoneStreamingEvent
+    | ResponseRefusalDeltaStreamingEvent
+    | ResponseRefusalDoneStreamingEvent
+    | ResponseReasoningDeltaStreamingEvent
+    | ResponseReasoningDoneStreamingEvent
+    | ResponseReasoningSummaryDeltaStreamingEvent
+    | ResponseReasoningSummaryDoneStreamingEvent
+    | ResponseOutputTextAnnotationAddedStreamingEvent
+    | ResponseFunctionCallArgumentsDeltaStreamingEvent
+    | ResponseFunctionCallArgumentsDoneStreamingEvent
+    | ErrorStreamingEvent
+)
 
 
 @responses_router.post(
@@ -113,6 +112,10 @@ async def create_response(
     """
     Implements the /v1/responses endpoint defined in the Open Responses OpenAPI spec,
     using the models from openresponses_types.types
+
+    Returns:
+        JSONResponse | StreamingResponse: A `ResponseResource` as JSON, or a stream of Open
+            Responses events when `body.stream` is set.
     """
     # this will search "locally" first, then try other configured hosts
     ai_model_info = await get_ai_model_info(body)
@@ -140,7 +143,15 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
     Get AI Model Info by talking with local and connected Gen3 AI Model Repos
 
     Args:
-        body CreateResponseBody: the request body containing model info
+        body (CreateResponseBody): the request body containing model info
+
+    Returns:
+        dict: The model's `url` and its AI Model Repo record under `metadata`.
+
+    Raises:
+        HTTPException: 400 if no model is requested or the repo returns no model information,
+            404 if the model is not found on any trusted domain.
+        Exception: If the model's url is on a domain not in ALLOWED_GEN3_INFERENCE_HOSTS.
     """
     ai_model = body.model
     if not ai_model:
@@ -254,8 +265,15 @@ async def get_inference_protocol_client(all_model_inference_protocol_client_name
              blindly adds that to the client.
 
     Args:
-        all_model_inference_protocol_client_names list[str]: A list of all available inference
+        all_model_inference_protocol_client_names (list[str]): A list of all available inference
             protocol client names for a given model
+        ai_model_url (str | None): Base URL of the model's inference server
+
+    Returns:
+        InferenceProtocolClient: A client for the preferred supported protocol, Open Responses first.
+
+    Raises:
+        HTTPException: 400 if none of the model's inference protocols are supported.
     """
     inference_protocol_client: InferenceProtocolClient | None = None
 

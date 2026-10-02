@@ -21,7 +21,20 @@ def merge_openapi(service_specs):
             "title": "Gen3 AI",
             "version": "1.0.0",
             "description": (
-                "Gen3 AI API."
+                "The Gen3 AI API, aggregated across the services that make it up. Each section "
+                "below is one group of endpoints; the services behind them are deployed and "
+                "versioned separately.\n\n"
+                "**Authentication.** Every endpoint takes a Gen3 access token as a bearer token: "
+                "`Authorization: Bearer <token>`. Authorization is checked per request against a "
+                "resource path, and endpoints return only what your grants cover -- so for reads, "
+                "an empty result and \"not authorized\" are deliberately indistinguishable.\n\n"
+                "**Vector storage and search.** Embeddings live in collections, which fix their "
+                "dimensions and storage precision at creation. See *Vectorstore Collections* to "
+                "manage them, *Embeddings* to read and write vectors, and *Vectorstore Search* to "
+                "find the nearest ones to a query vector.\n\n"
+                "**Inference.** Model-serving endpoints for generating completions.\n\n"
+                "Servers listed below are local development defaults; in a Gen3 deployment these "
+                "endpoints sit behind the commons hostname."
             ),
         },
         "servers": [
@@ -77,7 +90,12 @@ def merge_openapi(service_specs):
             # checking and expose service info. This aggregated
             # API is intended to provide the higher-level general
             # use API.
-            if "_version" in api_path or "_status" in api_path:
+            #
+            # "/" goes for the same reason, plus one of its own: it is each service's redirect to
+            # its own Swagger UI, so every service defines it and only the first one merged here
+            # would survive. A "Get swagger docs" operation pointing at whichever service won that
+            # race is not something to publish in a combined reference.
+            if "_version" in api_path or "_status" in api_path or api_path == "/":
                 continue
             base["paths"].setdefault(api_path, item)
 
@@ -102,6 +120,18 @@ def merge_openapi(service_specs):
                         **{k: v for k, v in tag.items() if k != "name"},
                     }
                 )
+
+    # Drop tags that nothing left in the document references. A service declares tags for all of
+    # its own endpoints, but the filtering above removes some of those endpoints, and a declared
+    # tag with no operations under it renders as an empty section.
+    used_tags = {
+        tag
+        for item in base["paths"].values()
+        for operation in item.values()
+        if isinstance(operation, dict)
+        for tag in operation.get("tags", [])
+    }
+    base["tags"] = [tag for tag in base["tags"] if tag["name"] in used_tags]
 
     return base
 

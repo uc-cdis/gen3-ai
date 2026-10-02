@@ -70,7 +70,7 @@ class OpenApiDocsContract:
     @pytest.fixture(scope="class")
     @classmethod
     def operations(cls) -> list[Operation]:
-        """Every operation the service publishes to the aggregated public docs."""
+        """Return every operation the service publishes to the aggregated public docs."""
         return public_operations(cls.get_app().openapi())
 
     def test_spec_documents_the_expected_operations(self, operations: list[Operation]) -> None:
