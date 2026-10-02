@@ -125,12 +125,71 @@ def test_create_embeddings_dimension_mismatch(client, allow_authz):
         "/vectorstore/collections/docs/embeddings",
         json={
             "embeddings": [
+                {"embedding": [0.1, 0.2, 0.3], "metadata": {"source": "good.txt"}},
                 {"embedding": [0.1, 0.2], "metadata": {"source": "bad.txt"}},
             ]
         },
     )
     assert response.status_code == 400
-    assert "Embedding dimension mismatch" in response.json()["detail"]
+    # the DAL's message, which names the offending item by its position in the request
+    assert response.json()["detail"] == "Embedding at index 1 has 2 dimensions, expected 3 for this collection"
+    assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
+
+
+def test_update_embedding_dimension_mismatch(client, allow_authz):
+    """Updating an embedding to a vector of the wrong length returns 400 and leaves it unchanged."""
+    allow_authz("docs")
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "documents", "dimensions": 3, "vector_type": "vector"},
+    )
+    embedding_id = client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [1.0, 0.0, 0.0]}]},
+    ).json()["embeddings"][0]["embedding_id"]
+
+    response = client.put(
+        f"/vectorstore/collections/docs/embeddings/{embedding_id}",
+        json={"embedding": [1.0, 2.0]},
+    )
+    assert response.status_code == 400, response.text
+    assert "has 2 dimensions, expected 3" in response.json()["detail"]
+    assert client.get(f"/vectorstore/collections/docs/embeddings/{embedding_id}").json()["vector"] == [1.0, 0.0, 0.0]
+
+
+def test_upsert_dimension_mismatch_reports_the_request_index_and_writes_nothing(client, allow_authz):
+    """
+    PUT rejects a wrong-length vector before writing anything.
+
+    Items with an id are updated one transaction at a time before the bulk upsert, so if this
+    were left to the DAL the earlier update would already have committed by the time the bad
+    vector was found, and the index reported would count only the items without an id.
+    """
+    allow_authz("docs")
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "documents", "dimensions": 3, "vector_type": "vector"},
+    )
+    embedding_id = client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [1.0, 0.0, 0.0], "metadata": {"v": "old"}}]},
+    ).json()["embeddings"][0]["embedding_id"]
+
+    response = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={
+            "embeddings": [
+                {"embedding_id": embedding_id, "embedding": [0.0, 1.0, 0.0], "metadata": {"v": "new"}},
+                {"embedding": [1.0, 2.0]},
+            ]
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Embedding at index 1 has 2 dimensions, expected 3 for this collection"
+
+    unchanged = client.get(f"/vectorstore/collections/docs/embeddings/{embedding_id}").json()
+    assert unchanged["vector"] == [1.0, 0.0, 0.0]
+    assert unchanged["info"]["metadata"] == {"v": "old"}
 
 
 @pytest.mark.parametrize("chunks", [["alpha", "beta", "gamma"], ["1", "2", "3"]])

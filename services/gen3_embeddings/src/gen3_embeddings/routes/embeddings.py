@@ -119,14 +119,13 @@ async def update_embedding_in_collection(
 
     Raises:
         HTTPException: 404 if the collection is not found; 400 if update fails.
+        EmbeddingDimensionMismatchError: If the new vector's length is not the collection's
+            dimensions. Raised by the DAL before any write; the app's error handler returns it
+            as a 400.
     """
     collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
-
-    # If embedding is provided, enforce dimensions
-    if body.embedding is not None and len(body.embedding) != collection.dimensions:
-        raise HTTPException(status_code=400, detail="Embedding dimension mismatch")
 
     # If authz is being updated, check update permission on the new authz path
     authz_path = normalize_authz(body.authz)
@@ -236,7 +235,7 @@ async def put_embeddings_in_collection(
     metadata_list_no_id: list[dict] = []
     items_with_id: list[tuple[UUID, list[float], dict]] = []
 
-    for item in body.embeddings:
+    for index, item in enumerate(body.embeddings):
         emb = item.embedding
         meta = item.metadata or {}
 
@@ -248,10 +247,17 @@ async def put_embeddings_in_collection(
             raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
         vector = cast(list[float], emb)
 
+        # The DAL checks this too, but too late for PUT: items with an id are written one
+        # transaction at a time before the bulk upsert runs, so a bad vector found there would
+        # fail the request after earlier rows had already committed. And the DAL only sees the
+        # id-less items, so the index it reports is not the request's.
         if len(vector) != collection.dimensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
+                detail=(
+                    f"Embedding at index {index} has {len(vector)} dimensions, "
+                    f"expected {collection.dimensions} for this collection"
+                ),
             )
 
         if item.embedding_id is not None:
@@ -495,7 +501,10 @@ async def create_embeddings_in_collection(
         EmbeddingResponse containing the created embeddings.
 
     Raises:
-        HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
+        HTTPException: 404 if collection is not found.
+        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
+            dimensions. Raised by the DAL before any write, naming the offending request
+            index; the app's error handler returns it as a 400.
     """
     collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
@@ -525,12 +534,6 @@ async def create_embeddings_in_collection(
         if emb and isinstance(emb[0], str):
             raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
         vector = cast(list[float], emb)
-
-        if len(vector) != collection.dimensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Embedding dimension mismatch. Given {len(vector)}, expected {collection.dimensions} for collection",
-            )
 
         vectors.append(vector)
         metadata_list.append(meta)
