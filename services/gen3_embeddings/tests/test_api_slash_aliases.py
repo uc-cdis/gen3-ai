@@ -100,7 +100,7 @@ def test_list_collections_response_is_identical_with_and_without_slash(client, a
 
 
 def test_delete_collection_returns_204_with_and_without_slash(client, allow_authz):
-    """End-to-end: the DELETE alias used to answer 200 because it lost status_code."""
+    """End-to-end: the DELETE alias keeps its 204 status_code rather than answering 200."""
     allow_authz("alpha")
     create_body = {"collection_name": "alpha", "description": "a", "dimensions": 3, "vector_type": "vector"}
 

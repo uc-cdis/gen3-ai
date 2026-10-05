@@ -1,10 +1,9 @@
 """
 Tests for the app's ownership of the database connection pool.
 
-The pool lives on `app.state.db_pool`, created and closed by the lifespan handler, rather
-than in a module-level global. These tests pin that contract down: without them, the pool
-could go back to being created per-request, or be leaked when startup fails, and every other
-test in this suite would still pass.
+The pool lives on `app.state.db_pool`, created and closed by the lifespan handler. These
+tests pin that contract down: without them, the pool could end up created per-request, or be
+leaked when startup fails, and every other test in this suite would still pass.
 """
 
 from types import SimpleNamespace
@@ -33,8 +32,8 @@ def test_every_request_shares_the_one_pool(app):
     """
     Requests read the pool off the app rather than building their own.
 
-    This is the property the module-level global used to provide by accident, and the reason
-    `create_pool` is not cached: a per-request pool would exhaust Postgres' connection slots.
+    This is why `create_pool` is not cached: a per-request pool would exhaust Postgres'
+    connection slots.
     """
     with TestClient(app) as client:
         pool = app.state.db_pool
@@ -92,9 +91,9 @@ def test_a_request_without_a_lifespan_is_an_error_not_a_new_pool():
     """
     Reading the pool fails loudly when the lifespan never ran.
 
-    Falling back to creating one here is what we removed: it would race to build duplicate
-    pools, and would serve traffic against a database whose row-level security was never
-    verified, because that verification only happens on the startup path.
+    Falling back to creating one here would race to build duplicate pools, and would serve
+    traffic against a database whose row-level security was never verified, because that
+    verification only happens on the startup path.
     """
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
 

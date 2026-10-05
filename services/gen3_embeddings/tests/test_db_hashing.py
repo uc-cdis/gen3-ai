@@ -33,7 +33,7 @@ def test_metadata_hash_is_truncated_sha256_of_canonical_json():
 
 
 def test_no_md5_length_digests():
-    """A full md5 digest is also 16 bytes, so assert the value is not the md5 of the old input."""
+    """A full md5 digest is also 16 bytes, so assert the value is not the md5 of the vector's JSON text."""
     vector = [0.1, 0.2, 0.3]
 
     legacy = hashlib.md5(json.dumps(vector).encode()).digest()
@@ -90,8 +90,8 @@ def test_vector_hash_collapses_differences_below_float16_precision_for_halfvec()
     """
     Same rule on halfvec, where float16 leaves only ~3 decimal digits.
 
-    This is the case the old md5-of-JSON-text hash missed most easily: 1.0 and 1.0001 are
-    different text, so they hashed differently, but they store as the same halfvec.
+    1.0 and 1.0001 are different text, so a hash of the input text would tell them apart,
+    but they store as the same halfvec.
     """
     coarse = hashing.hash_vector([1.0, 2.0], VectorType.halfvec, 2)
 

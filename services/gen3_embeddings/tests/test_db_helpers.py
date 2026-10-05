@@ -94,10 +94,10 @@ class TestBuildSearchSql:
 
     def test_cosine_similarity_reports_one_minus_distance_without_ordering_by_it(self):
         """
-        The reported value keeps its old meaning while the ordering becomes indexable.
+        The reported value is the similarity while the ordering stays indexable.
 
-        Ordering by `1 - (embedding <=> $2) DESC` -- which is what this used to emit -- ranks
-        identically but wraps the operator in arithmetic, and an index cannot serve that. The
+        Ordering by `1 - (embedding <=> $2) DESC` would rank identically but wraps the operator
+        in arithmetic, and an index cannot serve that. The
         projection still has to report the similarity, so value and order must differ here.
         """
         sql = search_sql(distance_metric=DistanceMetric.cosine_similarity)

@@ -167,8 +167,8 @@ def _threshold_clauses(
 
     A filter on the ordered expression sits below the LIMIT, and the executor cannot end an
     ordered index scan early while rows are still being filtered out: it walks the whole index
-    instead, reporting the remainder as "Rows Removed by Filter". That is the full-scan cost
-    this rewrite exists to avoid, so the threshold has to be applied after the limit. The
+    instead, reporting the remainder as "Rows Removed by Filter". That is a full-scan cost,
+    so the threshold has to be applied after the limit. The
     pgvector README prescribes exactly this shape ("use a materialized CTE and place the
     distance filter outside of it"); the underlying executor behaviour is
     https://www.postgresql.org/message-id/flat/CAOdR5yGUoMQ6j7M5hNUXrySzaqZVGf_Ne%2B8fwZMRKTFxU1nbJg%40mail.gmail.com
@@ -176,7 +176,7 @@ def _threshold_clauses(
     Every other filter stays inside, where `hnsw.iterative_scan` can keep feeding the scan
     until `top_k` rows survive them.
 
-    The tradeoff is that the limit now applies before the thresholds. For the bound that drops
+    The tradeoff is that the limit applies before the thresholds. For the bound that drops
     *distant* hits -- `max_value` on a distance metric, `min_value` on cosine_similarity --
     that changes nothing, because everything it removes sorts after everything it keeps. The
     opposite bound drops the *nearest* hits, so it eats into the rows already limited to

@@ -41,8 +41,8 @@ FORBIDDEN_DAL_IMPORTS = (
 )
 
 # Routes declare an action and let `dependencies` act on it. Importing the policy-engine
-# client or `common.auth` directly is how authorization logic gets scattered back across
-# handlers, which is what this refactor removed.
+# client or `common.auth` directly is how authorization logic gets scattered across
+# handlers.
 FORBIDDEN_ROUTE_IMPORTS = ("common.auth", "gen3authz", "authutils")
 
 

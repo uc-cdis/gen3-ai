@@ -1,10 +1,10 @@
 """
 Tests that each route authorizes the action it actually performs.
 
-The action used to be derived from the HTTP verb, which is wrong for the endpoints that read
-but are declared POST because their query does not fit in a query string. Those routes now
-declare `authz("read")`, and these tests pin that: a caller holding only `read` must be able
-to use them, and a caller holding only `create` must not.
+Deriving the action from the HTTP verb would be wrong for the endpoints that read but are
+declared POST because their query does not fit in a query string. Those routes declare
+`authz("read")`, and these tests pin that: a caller holding only `read` must be able to use
+them, and a caller holding only `create` must not.
 
 They also pin the structural property that makes the whole thing traceable -- every
 non-public route carries exactly one authz declaration, so a new route cannot be added

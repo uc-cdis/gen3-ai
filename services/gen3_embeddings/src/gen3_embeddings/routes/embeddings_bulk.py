@@ -138,8 +138,7 @@ async def get_embeddings_bulk_from_collection(
     collection_name: CollectionName,
     embedding_uuids: EmbeddingUUIDs,
     exclude_info: ExcludeInfo = False,
-    # POST, but this only reads. Declaring the action is what resolved the "how to handle
-    # authz here?" this handler used to carry: the verb no longer decides anything.
+    # POST, but this only reads, so it declares `read`; the verb does not decide the action.
     ctx: AuthzContext = Depends(authz("read")),
 ) -> EmbeddingResponseBinary:
     """

@@ -1,9 +1,9 @@
 """
 `cosine_similarity` and `cosine_distance` must rank identically and report inverse values.
 
-Search used to emit `ORDER BY 1 - (embedding <=> $q) DESC` for `cosine_similarity`. No index
-can serve an ordering wrapped in arithmetic, so it now orders by the bare distance ascending
-and reports `1 - distance` as the value instead. The ranking is mathematically identical --
+No index can serve an ordering wrapped in arithmetic like `ORDER BY 1 - (embedding <=> $q)
+DESC`, so `cosine_similarity` orders by the bare distance ascending and reports
+`1 - distance` as the value. The ranking is mathematically identical --
 `1 - d` is strictly decreasing in `d` -- but "mathematically identical" is exactly the kind of
 claim that should be checked rather than asserted, because getting the direction wrong would
 silently return the FARTHEST rows while still looking well-formed.

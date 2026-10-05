@@ -7,17 +7,17 @@ of duplicate the service has: it is what makes a repeated POST fail as a conflic
 PUT conflicts on to turn an insert into an update. Two properties matter.
 
 1. The digest is computed over caller-controlled bytes, so it needs collision resistance
-   against a caller who is trying. The original implementation used md5, for which
-   chosen-prefix collisions are cheap; two crafted payloads that hash alike collapse into
-   one row, so a POST of genuinely new content can be rejected as a duplicate and a PUT can
-   overwrite an unrelated row. sha256 (truncated to the 128 bits a uuid column holds)
-   removes that. It also keeps md5 out of the image for FIPS-mode and scanner purposes.
+   against a caller who is trying. Two crafted payloads that hash alike would collapse into
+   one row, so a POST of genuinely new content could be rejected as a duplicate and a PUT
+   could overwrite an unrelated row. That rules out md5, for which chosen-prefix collisions
+   are cheap; sha256 (truncated to the 128 bits a uuid column holds) does not have that
+   weakness, and it keeps md5 out of the image for FIPS-mode and scanner purposes.
 
 2. The digest is computed over what Postgres STORES, not over what the caller sent. pgvector
    stores `vector` as float32 and `halfvec` as float16, so inputs that differ only below the
    storage precision land on byte-identical stored vectors. Hashing the caller's
-   full-precision JSON text let those in as separate rows that the constraint could not
-   distinguish -- most visibly on halfvec collections, where float16 has ~3 decimal digits.
+   full-precision JSON text would let those in as separate rows holding the same vector --
+   most visibly on halfvec collections, where float16 has ~3 decimal digits.
 
 Hashing here (rather than as `md5(...)` inside the INSERT) also means the vector never has
 to be serialized to text for the database to hash it, which is what makes the binary
@@ -188,9 +188,9 @@ def canonical_metadata_json(metadata: dict | None) -> str:
 
     Sorted keys and no whitespace mean two dicts that differ only in key order or in how the
     caller formatted their JSON hash alike. This is also the text bound to the INSERT, so the
-    hash and the stored jsonb always come from the same bytes. It replaces the previous
-    `md5(metadata::text)`, which relied on Postgres's jsonb text rendering staying stable
-    across server versions.
+    hash and the stored jsonb always come from the same bytes. Rendering it here rather than
+    hashing Postgres's `metadata::text` keeps the hash independent of how a given server
+    version renders jsonb.
 
     Args:
         metadata (dict | None): Metadata to render; None is treated as an empty object, the

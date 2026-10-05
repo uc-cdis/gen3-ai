@@ -1,8 +1,8 @@
 """
 Tests for db/backfill_sha256_content_hashes.py.
 
-The backfill's whole job is to make pre-existing rows agree with what the app now writes, so
-these tests seed rows the way the old code did (md5-era hashes, NULL v2 columns) and check
+The backfill's whole job is to make pre-existing rows agree with what the app writes, so
+these tests seed md5-era rows (md5 hashes, NULL v2 columns) and check
 that the hashes it computes match the app's, that it is idempotent, and that it reports
 rather than swallows the rows it cannot hash.
 """
@@ -140,7 +140,7 @@ def test_dry_run_writes_nothing(test_database):
 
 def test_pre_existing_duplicates_are_reported_not_hidden(test_database):
     """
-    Rows the old hashes let in as distinct, but which are actually one embedding, are reported.
+    Rows the md5 hashes treat as distinct, but which are actually one embedding, are reported.
 
     On a halfvec collection 1.0 and 1.0001 store identically, so md5 over the JSON text wrote
     two rows for what is one embedding. Only one of them can hold the shared hash; the other

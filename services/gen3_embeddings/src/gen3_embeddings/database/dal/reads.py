@@ -81,9 +81,8 @@ class ReadMixin(DataAccessLayerBase):
         """
         List the collections the caller is authorized for.
 
-        RLS restricts the rows, so this is a plain paged SELECT. The name predicate is gone
-        from the SQL: it would duplicate the policy, and a `WHERE collection_name = ANY(...)`
-        that disagreed with the policy would be a second, invisible authorization rule.
+        This uses the table's RLS policy, so it lists only the collections the caller is
+        authorized for, and the SQL is a plain paged SELECT.
 
         Args:
             offset (int): Number of rows to skip.
@@ -323,8 +322,8 @@ class ReadMixin(DataAccessLayerBase):
         """
         Fetch several collections by primary key, keeping only those the caller may see.
 
-        The post-fetch filter this used to apply is now the table's RLS policy, so
-        unauthorized ids simply return no row.
+        This uses the table's RLS policy, so it filters out the ids the caller is not
+        authorized for: those simply return no row.
 
         Args:
             collection_ids (list[int]): Primary keys to look up.

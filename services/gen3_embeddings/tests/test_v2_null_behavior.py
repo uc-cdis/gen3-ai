@@ -41,7 +41,8 @@ def _make_pre_backfill(admin_dsn, embedding_id):
                 WHERE embedding_id = $1::uuid
                 """,
                 embedding_id,
-                uuid.uuid4(),  # stands in for the old md5-over-JSON-text hash
+                # stands in for a legacy md5 hash
+                uuid.uuid4(),
                 uuid.uuid4(),
             )
         finally:

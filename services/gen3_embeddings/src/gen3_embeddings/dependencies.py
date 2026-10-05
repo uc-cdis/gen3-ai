@@ -21,15 +21,13 @@ only thing that acts on it. The split is:
 WHY THE ACTION IS DECLARED, NOT INFERRED
 ----------------------------------------
 
-It used to be derived from the HTTP verb. That is right for most routes and silently wrong
-for the ones that read but are declared POST because their query does not fit in a query
-string (search, bulk reads): the verb says "create", so the caller was authorized for the
-wrong action. The previous fix was a second set of dependencies
-(`get_data_access_layer_for_read_operations` and friends) that a route had to remember to
-pick, in matching pairs, with nothing checking that it did.
+Deriving it from the HTTP verb would be right for most routes and silently wrong for the
+ones that read but are declared POST because their query does not fit in a query string
+(search, bulk reads): the verb says "create", so the caller would be authorized for the
+wrong action.
 
-Declaring the action removes both problems: there is one dependency per route, the verb is
-not consulted, and a route that reads says `authz("read")` whatever its verb is.
+So each route declares its action: there is one dependency per route, the verb is not
+consulted, and a route that reads says `authz("read")` whatever its verb is.
 
 WHAT THE DEPENDENCY DOES
 ------------------------

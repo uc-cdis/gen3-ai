@@ -48,7 +48,7 @@ def dual_path(router: APIRouter, method: str, path: str, **kwargs: Any) -> Calla
     alias_kwargs["include_in_schema"] = False
 
     def decorator(func: Callable) -> Callable:
-        # register the alias first, matching the original stacked-decorator ordering
+        # register the alias first, then the canonical path
         getattr(router, method)(f"{path}/", **alias_kwargs)(func)
         return getattr(router, method)(path, **kwargs)(func)
 

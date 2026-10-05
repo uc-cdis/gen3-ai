@@ -208,8 +208,8 @@ class TestValidateMetadata:
         """
         NaN is refused wherever it sits, rather than reaching Postgres.
 
-        The stdlib JSON parser accepts a bare `NaN` token, so it arrives here as a float; the
-        jsonb cast rejects it, which was a 500.
+        The stdlib JSON parser accepts a bare `NaN` token, so it arrives here as a float, and
+        the jsonb cast would reject it as a 500.
         """
         for metadata in ({"score": float("nan")}, {"a": {"b": [1.0, float("nan")]}}):
             with pytest.raises(ValueError, match="NaN or Infinity"):
@@ -393,7 +393,7 @@ class TestRouteLimits:
         )
 
     def test_nan_metadata_on_create_is_a_client_error(self, client, allow_authz):
-        """A bare `NaN` in metadata is a 422, not the 500 the jsonb cast used to produce."""
+        """A bare `NaN` in metadata is a 422, refused before the jsonb cast would reject it as a 500."""
         allow_authz("docs")
         make_collection(client)
 
@@ -417,8 +417,8 @@ class TestRouteLimits:
         """
         A `NaN` vector component is a 422 too.
 
-        The schema refused it already, but the 422 echoes the rejected input back and could not
-        encode the NaN, so this was a 500 as well.
+        The 422 echoes the rejected input back, so it has to be able to encode the NaN, or the
+        response itself would fail as a 500.
         """
         allow_authz("docs")
         make_collection(client)

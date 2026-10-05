@@ -87,7 +87,7 @@ class TestEmbeddingsRls:
         """
         An empty app.allowed_authz denies access instead of raising.
 
-        Regression test: the original policy cast the setting straight to text[], and ''::text[]
+        A policy that cast the setting straight to text[] would raise here, because ''::text[]
         is a `malformed array literal` error rather than an empty array.
         """
         await _seed_two_authz_paths(test_database["admin_dsn"])

@@ -143,9 +143,9 @@ def test_storing_an_ungranted_authz_is_forbidden_not_a_server_error(client, docs
 
     In production the policy-engine check rejects this first. Under DEBUG_SKIP_AUTH that
     check is skipped, so the request reaches Postgres and the policy's WITH CHECK rejects it
-    -- which is precisely the path that used to surface an asyncpg
-    `InsufficientPrivilegeError` as a 500. Reporting a caller's authorization failure as a
-    server fault is what `RowLevelSecurityDeniedError` exists to prevent.
+    with an asyncpg `InsufficientPrivilegeError`. Reporting that as a 500 would call a
+    caller's authorization failure a server fault, which is what `RowLevelSecurityDeniedError`
+    exists to prevent.
     """
     created = client.post(
         "/vectorstore/collections/docs/embeddings",

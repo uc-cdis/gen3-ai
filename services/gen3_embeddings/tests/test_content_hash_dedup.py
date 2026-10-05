@@ -1,10 +1,10 @@
 """
-Tests for embedding deduplication now that content hashes are sha256 over stored bytes.
+Tests for embedding deduplication, where content hashes are sha256 over the stored bytes.
 
 Two things are under test here. First, that the hashes actually reach the database and drive
-the unique constraint (the app writes them; nothing recomputes them in SQL any more). Second,
-that duplicates are recognized at STORAGE precision -- inputs that differ only in digits the
-column cannot hold are the same row, which the previous md5-over-JSON-text hash could not see.
+the unique constraint (the app writes them; nothing computes them in SQL). Second, that
+duplicates are recognized at STORAGE precision -- inputs that differ only in digits the column
+cannot hold are the same row.
 """
 
 import asyncio
@@ -110,8 +110,8 @@ def test_halfvec_inputs_below_float16_precision_are_one_row(client, allow_authz)
     """
     On a halfvec collection, 1.0 and 1.0001 store identically and so are one embedding.
 
-    Under the old md5-over-JSON-text hash these were different hashes, so both rows were
-    written and the collection held two rows holding the exact same vector.
+    Hashing the input text instead of the stored bytes would tell them apart, and the
+    collection would hold two rows with the exact same vector.
     """
     allow_authz("images")
     _create_collection(client, "images", vector_type="halfvec")
@@ -206,9 +206,8 @@ def test_updating_a_row_onto_another_rows_content_conflicts(client, allow_authz)
     """
     Updating one row to duplicate another is a 409.
 
-    The single-row update used to hash metadata as raw `json.dumps` text while bulk writes
-    hashed Postgres's jsonb rendering, so the two paths could disagree about what a duplicate
-    was. Both now go through the same canonical form.
+    The single-row update and the bulk writes hash metadata through the same canonical form,
+    so they agree about what a duplicate is.
     """
     allow_authz("docs")
     _create_collection(client, "docs")

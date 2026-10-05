@@ -363,9 +363,6 @@ def test_upsert_updates_every_item_with_an_id_alongside_new_ones(client, allow_a
 def test_upsert_with_an_unknown_id_updates_none_of_the_others(client, allow_authz):
     """
     One unknown id fails the request without having written the ids before it.
-
-    The items with an id used to be updated one transaction each, so the ones ahead of the
-    unknown id had committed by the time the request came back as a 400.
     """
     allow_authz("docs")
     first, second, _ = _create_three(client)

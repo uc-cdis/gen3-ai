@@ -134,8 +134,8 @@ class SearchMixin(DataAccessLayerBase):
         collection matching means no hits: the result is empty rather than an error.
 
         Each surviving collection becomes one arm of a `UNION ALL`, carrying whichever query
-        shape its own index can serve. See `build_multi_collection_search_sql` for why the
-        older single-scan form could not use any per-collection index.
+        shape its own index can serve. See `build_multi_collection_search_sql` for why one arm
+        per collection is what lets each use its own index.
 
         Args:
             collections (list[Collection]): Candidate collections; those that cannot hold a

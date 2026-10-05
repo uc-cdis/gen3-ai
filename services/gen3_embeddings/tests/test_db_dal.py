@@ -426,8 +426,7 @@ class TestPrepareBulkWrite:
         Hashes are taken at storage precision, so 1.0 and 1.0001 are the same halfvec row.
 
         float16 spacing near 1.0 is ~0.001. These two inputs land on byte-identical stored
-        vectors, so treating them as distinct would write two rows holding the same vector --
-        which is exactly what the old hash-the-caller's-JSON-text approach did.
+        vectors, so treating them as distinct would write two rows holding the same vector.
         """
         vectors = [[1.0, 2.0, 3.0], [1.0001, 2.0, 3.0]]
         batch = _prepare_bulk_write(make_collection(vector_type="halfvec"), vectors, None)
@@ -1062,9 +1061,8 @@ class TestEmbeddings:
         Canonical JSON is both stored and hashed, so this row matches a bulk write of the same
         metadata.
 
-        These two paths used to canonicalize differently -- one hashed `json.dumps` output, the
-        other Postgres's jsonb rendering -- which meant they could disagree about what a duplicate
-        was, and a PUT could create the row a POST would have rejected.
+        If the two paths canonicalized differently they could disagree about what a duplicate
+        is, and a PUT could create the row a POST would reject.
         """
         dal, conn, _ = make_dal(results=[[embedding_row()]])
 
@@ -1673,9 +1671,8 @@ class TestSearch:
         `Collection.from_record` coerces the stored side, but a Collection built in code (a
         script, a test, a future caller) can hold the plain string, and `vector_type` arrives as
         whatever the caller passed. `VectorType` is a StrEnum precisely so all four combinations
-        compare equal. Comparing against `vector_type.value` instead -- which is what this filter
-        used to do -- handles the stored side fine and then breaks as an AttributeError the moment
-        the argument itself is a string.
+        compare equal. Comparing against `vector_type.value` instead would handle the stored side
+        fine and then break as an AttributeError the moment the argument itself is a string.
         """
         collections = [Collection(**collection_row(id=3, vector_type=stored_vector_type))]
         dal, conn, _ = make_dal(results=[[embedding_row()]])

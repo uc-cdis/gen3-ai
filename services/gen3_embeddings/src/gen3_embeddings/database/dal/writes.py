@@ -74,8 +74,8 @@ def _prepare_bulk_write(
     Deduplication is on (embedding_hash, metadata_hash); `authz` is a single value for the
     whole call, so it is constant within a batch and cannot distinguish rows. Because the
     hashes are taken at storage precision, two inputs that differ only in digits the column
-    cannot store now collapse here, which is what the database's unique constraint would
-    consider them anyway.
+    cannot store collapse here, which is what the database's unique constraint would consider
+    them anyway.
 
     Args:
         collection (Collection): Target collection; supplies dimensions and vector type.
