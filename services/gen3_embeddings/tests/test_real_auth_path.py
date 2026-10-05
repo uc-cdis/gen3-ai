@@ -30,14 +30,21 @@ from gen3_embeddings.config import AUTHZ_SERVICE_NAME
 
 
 class FakeArboristClient:
-    """Records what it was asked to authorize and answers with a fixed verdict."""
+    """
+    Records what it was asked to authorize and answers with a fixed verdict.
 
-    def __init__(self, verdict: bool):
+    The verdict is either one answer for everything, or a per-method mapping for routes that
+    authorize more than one action; a method missing from the mapping is denied.
+    """
+
+    def __init__(self, verdict: bool | dict[str, bool]):
         self.verdict = verdict
         self.calls: list[dict] = []
 
     async def auth_request(self, token, service, methods, resources):
         self.calls.append({"token": token, "service": service, "methods": methods, "resources": resources})
+        if isinstance(self.verdict, dict):
+            return self.verdict.get(methods, False)
         return self.verdict
 
 
@@ -52,7 +59,7 @@ def real_auth(app, monkeypatch):
     fakes explicitly.
     """
 
-    def _install(verdict: bool) -> FakeArboristClient:
+    def _install(verdict: bool | dict[str, bool]) -> FakeArboristClient:
         async def fake_get_user_id(token=None, request=None, authz_config=None):
             return "test-user"
 
@@ -139,6 +146,29 @@ def test_the_route_authorizes_its_own_action_on_its_own_collection(client, allow
     assert call["methods"] == "read"
     assert call["service"] == AUTHZ_SERVICE_NAME
     assert call["token"] == "some-token", "the caller's bearer credentials were not forwarded"
+
+
+def test_upsert_is_denied_without_create_even_with_update(client, allow_authz, real_auth):
+    """
+    PUT on the embeddings collection needs `create` as well as `update`, and checks both.
+
+    `test_authz_context` pins that the route declares `also_require=("create",)`; this pins that
+    the declaration is enforced. A caller holding only `update` must be refused, and the policy
+    engine must have been asked about both actions -- so dropping `also_require`, or the loop
+    that honors it, turns this 403 into a 200.
+    """
+    allow_authz("docs")
+    arborist = real_auth(verdict={"update": True, "create": False})
+
+    response = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [0.1, 0.2, 0.3]}]},
+        headers={"Authorization": "Bearer some-token"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert [call["methods"] for call in arborist.calls] == ["update", "create"]
+    assert all(call["resources"] == ["/vectorstore/collections/docs"] for call in arborist.calls)
 
 
 def test_a_granted_token_reaches_the_handler(client, allow_authz, real_auth):

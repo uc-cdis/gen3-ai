@@ -37,6 +37,7 @@ FORBIDDEN_DAL_IMPORTS = (
     "gen3authz",
     "common.auth",
     "httpx",
+    "httpx2",
     "requests",
 )
 
@@ -68,12 +69,60 @@ def _violations(imported: set[str], forbidden: tuple[str, ...]) -> list[str]:
     ]
 
 
-def _dal_sources() -> dict[pathlib.Path, str]:
-    """Read every DAL module, failing loudly if the glob found nothing to check."""
-    sources = {path: path.read_text() for path in DAL_MODULE_PATHS}
+def _dal_trees() -> dict[pathlib.Path, ast.Module]:
+    """Parse every DAL module, failing loudly if the glob found nothing to check."""
+    trees = {path: ast.parse(path.read_text()) for path in DAL_MODULE_PATHS}
     # db.py plus at least the base and one mixin, so these tests cannot pass by reading nothing
-    assert len(sources) >= 3
-    return sources
+    assert len(trees) >= 3
+    return trees
+
+
+def _code_strings(tree: ast.AST) -> list[str]:
+    """
+    Every string literal in `tree` except docstrings.
+
+    These tests are about what the code does, so prose describing it must not be able to
+    fail them -- or, worse, satisfy them after the code itself is gone. Comments never
+    reach the AST; docstrings do, so they are dropped here.
+    """
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+    ]
+
+
+def _referenced_name(node: ast.expr) -> str | None:
+    """The name an expression refers to: `X`, `mod.X`, and `X(...)` all give "X"."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _is_pool_acquire(node: ast.AST) -> bool:
+    """Whether `node` is a `self.pool.acquire()` call, however it is formatted."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "acquire"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "pool"
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+    )
 
 
 def test_dal_does_not_import_web_or_authz_modules():
@@ -114,30 +163,45 @@ def test_dal_sets_both_rls_settings_together():
     to touch second running under a setting that was never set, which denies everything and
     looks like data loss rather than a bug.
     """
-    sources = _dal_sources()
-    source, with_rls = next(
-        (source, node)
-        for source in sources.values()
-        for node in ast.walk(ast.parse(source))
+    trees = _dal_trees()
+    with_rls = next(
+        node
+        for tree in trees.values()
+        for node in ast.walk(tree)
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "_with_rls"
     )
-    body = ast.get_source_segment(source, with_rls) or ""
+    sql = "\n".join(_code_strings(with_rls))
 
-    assert "set_config('app.allowed_authz'" in body
-    assert "set_config('app.allowed_collection_names'" in body
+    assert "set_config('app.allowed_authz'" in sql
+    assert "set_config('app.allowed_collection_names'" in sql
 
     # _with_rls is the only place that takes a connection, so no query can run without them
-    assert sum(source.count("self.pool.acquire()") for source in sources.values()) == 1, (
+    acquires = [node for tree in trees.values() for node in ast.walk(tree) if _is_pool_acquire(node)]
+    acquires_in_with_rls = [node for node in ast.walk(with_rls) if _is_pool_acquire(node)]
+    assert acquires_in_with_rls, "_with_rls no longer takes the connection"
+    assert len(acquires) == len(acquires_in_with_rls), (
         "a query outside _with_rls runs with no RLS context, so it sees nothing (or, worse, "
         "everything if a policy is ever removed)"
     )
 
 
 def test_dal_never_raises_http_errors():
-    """Every failure leaves the DAL as a DataAccessError, so status codes are chosen elsewhere."""
-    for path, source in _dal_sources().items():
-        assert "HTTPException" not in source, path.name
-        assert "status_code" not in source, path.name
+    """
+    Every failure leaves the DAL as a DataAccessError, so status codes are chosen elsewhere.
+
+    The import test already keeps fastapi and starlette out, so this catches the rest: an
+    HTTP-shaped exception defined locally, or a status code attached to a DAL error.
+    """
+    offenders = []
+    for path, tree in _dal_trees().items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Raise) and node.exc is not None and _referenced_name(node.exc) == "HTTPException":
+                offenders.append(f"{path.name}:{node.lineno} raises HTTPException")
+            elif isinstance(node, ast.keyword) and node.arg == "status_code":
+                offenders.append(f"{path.name}:{node.value.lineno} passes status_code=")
+            elif isinstance(node, ast.Attribute | ast.Name) and _referenced_name(node) == "status_code":
+                offenders.append(f"{path.name}:{node.lineno} uses status_code")
+    assert not offenders, f"status codes belong in error_handlers, not the DAL: {offenders}"
 
 
 def test_dal_methods_do_not_take_authz_arguments():
@@ -152,8 +216,8 @@ def test_dal_methods_do_not_take_authz_arguments():
     # DataAccessLayer itself is empty; its methods come from the classes in database/dal/
     classes = [
         node
-        for source in _dal_sources().values()
-        for node in ast.walk(ast.parse(source))
+        for tree in _dal_trees().values()
+        for node in ast.walk(tree)
         if isinstance(node, ast.ClassDef) and (node.name.endswith("Mixin") or node.name == "DataAccessLayerBase")
     ]
     assert {cls.name for cls in classes} >= {"DataAccessLayerBase", "ReadMixin", "WriteMixin", "SearchMixin"}
@@ -172,9 +236,11 @@ def test_dal_methods_do_not_take_authz_arguments():
 
 
 def test_dal_does_not_interpret_authz_paths():
-    """Turning authz paths into collection names is an authz concern, not a database one."""
-    for path, source in _dal_sources().items():
-        assert "/vectorstore/collections" not in source, (
+    """
+    Turning authz paths into collection names is an authz concern, not a database one.
+    """
+    for path, tree in _dal_trees().items():
+        assert not any("/vectorstore/collections" in s for s in _code_strings(tree)), (
             f"{path.name} appears to derive authz paths itself; that belongs in "
             "auth.get_allowed_collection_names_from_authz"
         )

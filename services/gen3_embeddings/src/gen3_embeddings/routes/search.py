@@ -82,10 +82,6 @@ async def search_in_collection(
     if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
 
-    # numeric vector check
-    if not isinstance(body.input, list) or not all(isinstance(x, (int, float)) for x in body.input):
-        raise HTTPException(status_code=400, detail="input must be a numeric vector")
-
     query_vector = body.input
     if len(query_vector) != collection.dimensions:
         raise HTTPException(status_code=400, detail="Input vector dimension mismatch")
@@ -227,9 +223,6 @@ async def search_across_collections(
 
     if isinstance(body.input, str):
         raise HTTPException(status_code=400, detail="Raw text search not implemented")
-
-    if not isinstance(body.input, list) or not all(isinstance(x, (int, float)) for x in body.input):
-        raise HTTPException(status_code=400, detail="input must be a numeric vector")
 
     rows = await ctx.dal.search_embeddings_across_collections(
         collections=collections_list,
