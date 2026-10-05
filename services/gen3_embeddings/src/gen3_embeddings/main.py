@@ -99,13 +99,12 @@ async def lifespan(app: FastAPI):
     # Startup logic. The pool is created here and only here, so every request path reads the
     # one on the app state instead of racing to build its own.
     app.state.db_pool = await create_pool()
-
-    logging.debug(f"Initializing Arborist ({config.ARBORIST_URL}) client for authorization...")
-    app.state.arborist_client = ArboristClient(
-        arborist_base_url=config.ARBORIST_URL,
-    )
-
     try:
+        logging.debug(f"Initializing Arborist ({config.ARBORIST_URL}) client for authorization...")
+        app.state.arborist_client = ArboristClient(
+            arborist_base_url=config.ARBORIST_URL,
+        )
+
         await check_db_connection(app.state.db_pool)
 
         # Which vector indexes exist decides which SQL shape search emits, and the query has

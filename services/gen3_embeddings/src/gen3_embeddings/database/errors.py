@@ -66,6 +66,14 @@ class EmbeddingsAlreadyExistError(DataAccessError):
     """One or more embeddings already exist in the collection."""
 
 
+class EmbeddingNotFoundError(DataAccessError):
+    """An embedding a write was told to update does not exist, or RLS hides it from the caller."""
+
+
+class RepeatedEmbeddingIdError(DataAccessError):
+    """The same embedding id was given more than once in one bulk update."""
+
+
 class DuplicateEmbeddingError(DataAccessError):
     """The write would leave two identical embeddings (same vector, metadata, and authz)."""
 

@@ -45,19 +45,31 @@ def test_every_request_shares_the_one_pool(app):
         assert app.state.db_pool is pool
 
 
-def test_a_failed_startup_does_not_leak_the_pool(app, monkeypatch):
+async def _reject_rls_check(conn):
+    raise Exception("simulated startup failure")
+
+
+def _reject_arborist_client(**kwargs):
+    raise Exception("simulated startup failure")
+
+
+@pytest.mark.parametrize(
+    "failing_step,replacement",
+    [
+        ("check_rls_is_enabled", _reject_rls_check),
+        # the first thing after the pool is created, so the one most easily left outside the try
+        ("ArboristClient", _reject_arborist_client),
+    ],
+)
+def test_a_failed_startup_does_not_leak_the_pool(app, monkeypatch, failing_step, replacement):
     """
-    When a startup check rejects the database, the pool it was checking is still closed.
+    When any startup step after the pool is created fails, the pool is still closed.
 
-    The checks run after the pool is created, so an abort between the two would otherwise
-    strand PGPOOL_MIN_SIZE connections for as long as the process lives -- and a crash-looping
-    pod would strand a set per restart.
+    An abort between creating the pool and serving would otherwise strand PGPOOL_MIN_SIZE
+    connections for as long as the process lives -- and a crash-looping pod would strand a
+    set per restart.
     """
-
-    async def _reject(conn):
-        raise Exception("simulated RLS check failure")
-
-    monkeypatch.setattr(main_module, "check_rls_is_enabled", _reject)
+    monkeypatch.setattr(main_module, failing_step, replacement)
 
     created = []
     real_create_pool = main_module.create_pool
@@ -69,7 +81,7 @@ def test_a_failed_startup_does_not_leak_the_pool(app, monkeypatch):
 
     monkeypatch.setattr(main_module, "create_pool", _capturing_create_pool)
 
-    with pytest.raises(Exception, match="simulated RLS check failure"), TestClient(app):
+    with pytest.raises(Exception, match="simulated startup failure"), TestClient(app):
         pass  # pragma: no cover - startup raises before the body runs
 
     assert len(created) == 1, "startup did not create exactly one pool"

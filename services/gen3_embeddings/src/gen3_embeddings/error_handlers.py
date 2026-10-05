@@ -27,11 +27,13 @@ from gen3_embeddings.database.errors import (
     DataAccessError,
     DuplicateEmbeddingError,
     EmbeddingDimensionMismatchError,
+    EmbeddingNotFoundError,
     EmbeddingNotRepresentableError,
     EmbeddingsAlreadyExistError,
     EmbeddingWriteInconsistencyError,
     InvalidCollectionNameError,
     MetadataLengthMismatchError,
+    RepeatedEmbeddingIdError,
     RowLevelSecurityDeniedError,
 )
 
@@ -43,6 +45,9 @@ DATA_ACCESS_ERROR_STATUS: dict[type[DataAccessError], int] = {
     MetadataLengthMismatchError: status.HTTP_400_BAD_REQUEST,
     EmbeddingDimensionMismatchError: status.HTTP_400_BAD_REQUEST,
     EmbeddingNotRepresentableError: status.HTTP_400_BAD_REQUEST,
+    # 400 rather than 404: the collection was found, the request named rows that are not in it
+    EmbeddingNotFoundError: status.HTTP_400_BAD_REQUEST,
+    RepeatedEmbeddingIdError: status.HTTP_400_BAD_REQUEST,
     CollectionNameNotAllowedError: status.HTTP_403_FORBIDDEN,
     RowLevelSecurityDeniedError: status.HTTP_403_FORBIDDEN,
     CollectionAlreadyExistsError: status.HTTP_409_CONFLICT,

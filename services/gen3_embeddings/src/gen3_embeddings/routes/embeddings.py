@@ -211,8 +211,14 @@ async def put_embeddings_in_collection(
         EmbeddingResponse containing the created embeddings.
 
     Raises:
-        HTTPException: 404 if collection is not found; 400 if dimensions mismatch.
-
+        HTTPException: 404 if collection is not found.
+        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
+            dimensions, naming the offending request index. Nothing is written; returned as
+            a 400.
+        EmbeddingNotFoundError: If an `embedding_id` is not in the collection or is hidden by
+            RLS. Nothing is written; returned as a 400.
+        RepeatedEmbeddingIdError: If the same `embedding_id` appears on more than one item;
+            returned as a 400.
     """
     collection = await ctx.dal.get_collection_by_name(collection_name)
     if not collection:
@@ -231,13 +237,12 @@ async def put_embeddings_in_collection(
         await ctx.require(embedding_authz_path, action="create")
         await ctx.require(embedding_authz_path, action="update")
 
-    vectors_no_id: list[list[float]] = []
-    metadata_list_no_id: list[dict] = []
-    items_with_id: list[tuple[UUID, list[float], dict]] = []
+    vectors: list[list[float]] = []
+    metadata_list: list[dict] = []
+    embedding_ids: list[UUID | None] = []
 
-    for index, item in enumerate(body.embeddings):
+    for item in body.embeddings:
         emb = item.embedding
-        meta = item.metadata or {}
 
         # `EmbeddingToCreate.embedding` is `Vector | TextChunks`, so a list of text chunks
         # validates too. Embedding raw text is not wired up yet, so reject it here rather
@@ -245,78 +250,27 @@ async def put_embeddings_in_collection(
         # `list[float] | list[str]`, so the list is homogeneous and element 0 decides.
         if emb and isinstance(emb[0], str):
             raise HTTPException(status_code=400, detail="Raw text embedding not implemented")
-        vector = cast(list[float], emb)
 
-        # The DAL checks this too, but too late for PUT: items with an id are written one
-        # transaction at a time before the bulk upsert runs, so a bad vector found there would
-        # fail the request after earlier rows had already committed. And the DAL only sees the
-        # id-less items, so the index it reports is not the request's.
-        if len(vector) != collection.dimensions:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Embedding at index {index} has {len(vector)} dimensions, "
-                    f"expected {collection.dimensions} for this collection"
-                ),
-            )
-
-        if item.embedding_id is not None:
-            items_with_id.append((item.embedding_id, vector, meta))
-        else:
-            vectors_no_id.append(vector)
-            metadata_list_no_id.append(meta)
+        vectors.append(cast(list[float], emb))
+        metadata_list.append(item.metadata or {})
+        embedding_ids.append(item.embedding_id)
 
     logging.debug(f"PUT (upsert) embeddings in collection.id: `{collection.id}`...")
 
-    updated_from_ids = []
-    for i, (emb_id, emb_vec, meta) in enumerate(items_with_id):
-        emb = await ctx.dal.update_embedding(
-            collection=collection,
-            embedding_id=emb_id,
-            embedding=emb_vec,
-            metadata=meta,
-            new_authz=embedding_authz_path,
-        )
-        if not emb:
-            # If embedding_id not found or RLS denied
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to update embedding with id {emb_id}",
-            )
-        updated_from_ids.append(emb)
+    # One transaction for the whole request: items with an id are updated and the rest
+    # upserted together, so a failure anywhere leaves nothing written.
+    written = await ctx.dal.upsert_embeddings_bulk(
+        collection=collection,
+        embeddings=vectors,
+        authz=embedding_authz_path,
+        metadata_list=metadata_list,
+        embedding_ids=embedding_ids,
+    )
 
-    created_or_updated = []
-    if vectors_no_id:
-        created_or_updated = await ctx.dal.upsert_embeddings_bulk(
-            collection=collection,
-            embeddings=vectors_no_id,
-            authz=embedding_authz_path,
-            metadata_list=metadata_list_no_id,
-        )
-
-    results: list[SingleEmbeddingResult] = []
-
-    # Iterate again over body.embeddings and map each to either updated_from_ids
-    # or created_or_updated in the same order.
-    id_idx = 0
-    noid_idx = 0
-
-    for i, item in enumerate(body.embeddings):
-        if item.embedding_id is not None:
-            emb = updated_from_ids[id_idx]
-            id_idx += 1
-        else:
-            emb = created_or_updated[noid_idx]
-            noid_idx += 1
-
-        results.append(
-            embedding_to_result(
-                emb=emb,
-                collection=collection,
-                input_index=i,
-                exclude_info=exclude_info,
-            )
-        )
+    results = [
+        embedding_to_result(emb=emb, collection=collection, input_index=i, exclude_info=exclude_info)
+        for i, emb in enumerate(written)
+    ]
 
     return EmbeddingResponse(embeddings=results)
 

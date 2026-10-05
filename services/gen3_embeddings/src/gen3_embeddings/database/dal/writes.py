@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
+import numpy as np
 from asyncpg.exceptions import UniqueViolationError
 
 from gen3_embeddings.database import hashing
@@ -14,9 +15,11 @@ from gen3_embeddings.database.errors import (
     CollectionCreateFailedError,
     CollectionNameNotAllowedError,
     DuplicateEmbeddingError,
+    EmbeddingNotFoundError,
     EmbeddingsAlreadyExistError,
     EmbeddingWriteInconsistencyError,
     MetadataLengthMismatchError,
+    RepeatedEmbeddingIdError,
 )
 from gen3_embeddings.database.helpers import affected_row_count, get_embeddings_table_and_cast
 from gen3_embeddings.database.models import Collection, Embedding
@@ -100,6 +103,24 @@ def _prepare_bulk_write(
     # one conversion for the whole batch; its rows are the bytes Postgres will store, which
     # is both what gets hashed and what gets bound
     array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
+    return _dedupe_rows(array, metadata_list, collection.dimensions)
+
+
+def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], dimensions: int) -> _BulkWriteBatch:
+    """
+    Hash already-converted rows and drop the duplicates among them.
+
+    Args:
+        array (np.ndarray): Storage-precision rows from `hashing.to_storage_array`.
+        metadata_list (list[dict]): Metadata per row, the same length as `array`.
+        dimensions (int): The collection's dimensionality.
+
+    Returns:
+        _BulkWriteBatch: The deduplicated batch, ready to bind.
+
+    Raises:
+        ValueError: If any metadata holds a NaN or Infinity value.
+    """
     embedding_hashes = hashing.hash_rows(array)
 
     unique_row_indices: list[int] = []
@@ -131,7 +152,7 @@ def _prepare_bulk_write(
         unique_metadata_hashes.append(metadata_hash)
 
     return _BulkWriteBatch(
-        dimensions=collection.dimensions,
+        dimensions=dimensions,
         flat_vectors=hashing.flatten_rows(array, unique_row_indices),
         metadata_json=unique_metadata_json,
         embedding_hashes=unique_embedding_hashes,
@@ -435,32 +456,50 @@ class WriteMixin(DataAccessLayerBase):
         embeddings: list[list[float]],
         authz: str,
         metadata_list: list[dict] | None,
+        embedding_ids: list[UUID | None] | None = None,
     ) -> list[Embedding]:
         """
-        Bulk upsert multiple embeddings in the given collection.
+        Write a batch of embeddings, updating the ones named by id and upserting the rest.
+
+        An item with an id replaces that embedding's vector, metadata and authz; the id has to
+        exist. An item without one is inserted, or matched to an existing row with the same
+        content and authz, whose `updated_at` is refreshed. Both halves run in one transaction,
+        so the batch is written in full or not at all.
+
+        Every vector is checked before the transaction opens, against the whole batch, so the
+        index in a validation error is the item's position in `embeddings`.
 
         Args:
             collection (Collection): Target collection; supplies dimensions and vector type.
             embeddings (list[list[float]]): Vectors to write.
             authz (str): Authz resource path assigned to every embedding in this batch.
             metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
+            embedding_ids (list[UUID | None] | None): Per vector, the embedding it replaces, or
+                None to upsert it by content. Omitted means every vector is upserted.
 
         Returns:
-            list[Embedding]: One Embedding per input vector, in input order. An input that
-            matched an existing row gets that row back with a refreshed `updated_at`.
+            list[Embedding]: One Embedding per input vector, in input order. Inputs that
+            landed on the same row share it.
 
         Raises:
+            ValueError: If `embedding_ids` is a different length than `embeddings`, or any
+                metadata holds a NaN or Infinity value, which the jsonb column cannot store.
+                The request schema refuses the latter first, so it is reached only by a caller
+                that skipped it.
             MetadataLengthMismatchError: If `metadata_list` is a different length than
                 `embeddings`.
+            RepeatedEmbeddingIdError: If an id appears more than once. One UPDATE cannot apply
+                two different writes to the same row, so it would keep one and drop the other.
             EmbeddingDimensionMismatchError: If any vector's length does not match the
                 collection's dimensionality.
             EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
                 vector type.
-            ValueError: If any metadata holds a NaN or Infinity value, which the jsonb column
-                cannot store. The request schema refuses these first, so this is reached only
-                by a caller that skipped it.
+            EmbeddingNotFoundError: If an id does not exist in the collection, or RLS hides it.
+                Nothing is written.
+            DuplicateEmbeddingError: If an update by id would collide with another row.
+                Nothing is written.
             RowLevelSecurityDeniedError: If `authz` is not a resource the caller holds this
-                action on. No embeddings are written.
+                action on. Nothing is written.
             EmbeddingWriteInconsistencyError: If the rows returned by the database do not
                 correspond exactly to the rows written.
             asyncpg.ForeignKeyViolationError: If the collection was deleted after the caller
@@ -469,54 +508,141 @@ class WriteMixin(DataAccessLayerBase):
                 query needs. A deployment fault rather than the caller's, so it stays a 500.
             asyncpg.QueryCanceledError: If the query runs past `DB_STATEMENT_TIMEOUT_MS`.
         """
-        batch = _prepare_bulk_write(collection, embeddings, metadata_list)
-        if not batch.row_count:
+        if embedding_ids is None:
+            embedding_ids = [None] * len(embeddings)
+        elif len(embedding_ids) != len(embeddings):
+            raise ValueError("embedding_ids and embeddings must be the same length")
+        if metadata_list is None:
+            metadata_list = [{} for _ in embeddings]
+        elif len(metadata_list) != len(embeddings):
+            raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
+        if not embeddings:
             return []
 
-        table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
+        seen: set[UUID] = set()
+        for embedding_id in embedding_ids:
+            if embedding_id is None:
+                continue
+            if embedding_id in seen:
+                raise RepeatedEmbeddingIdError(f"embedding_id {embedding_id} appears more than once in this request")
+            seen.add(embedding_id)
+
+        # One conversion for the whole batch, before the transaction opens: a bad vector is the
+        # caller's error, not a reason to have taken a connection, and checking both halves
+        # together is what keeps the index in the error the caller's own.
+        vector_type = VectorType(collection.vector_type)
+        array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
+        by_id = [i for i, embedding_id in enumerate(embedding_ids) if embedding_id is not None]
+        by_content = [i for i, embedding_id in enumerate(embedding_ids) if embedding_id is None]
+
+        update_ids = [embedding_ids[i] for i in by_id]
+        update_vectors = hashing.flatten_rows(array, by_id)
+        update_embedding_hashes = hashing.hash_rows(array[by_id])
+        update_metadata_json = [hashing.canonical_metadata_json(metadata_list[i]) for i in by_id]
+        update_metadata_hashes = [hashing.hash_metadata_json(text) for text in update_metadata_json]
+
+        batch = _dedupe_rows(array[by_content], [metadata_list[i] for i in by_content], collection.dimensions)
+
+        table, cast = get_embeddings_table_and_cast(vector_type)
 
         async def _query(conn):
-            stmt = await conn.prepare(
-                f"""
-                INSERT INTO {table} (
-                    collection_id, embedding, authz, metadata,
-                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
-                )
-                SELECT
-                    $1::bigint,
-                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
-                    $4::text,
-                    raw.metadata::jsonb,
-                    -- legacy md5 columns, see the note in create_embeddings_bulk
-                    raw.embedding_hash,
-                    raw.metadata_hash,
-                    raw.embedding_hash,
-                    raw.metadata_hash
-                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
-                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
-                -- Conflicts resolve on the v2 index. A new row writes the same value to the
-                -- legacy columns, so anything that would collide there collides here too and
-                -- is handled; a collision with a legacy md5 value would need sha256 and md5
-                -- to agree, which is not a case worth carrying code for.
-                ON CONFLICT (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
-                DO UPDATE SET
-                    updated_at = NOW()
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
-                          embedding_hash_v2, metadata_hash_v2;
-                """
-            )
-            # If RLS denies insert or update, this will raise an error
-            rows = await stmt.fetch(
-                collection.id,
-                batch.flat_vectors,
-                batch.dimensions,
-                authz,
-                batch.metadata_json,
-                batch.embedding_hashes,
-                batch.metadata_hashes,
-            )
+            written: dict[int, Embedding] = {}
 
-            return _bulk_write_results(rows, batch)
+            # Updates by id go first, so an id-less item with the same content as an updated row
+            # finds that row's new content and resolves onto it rather than colliding.
+            if by_id:
+                stmt = await conn.prepare(
+                    f"""
+                    UPDATE {table} AS e
+                    SET
+                        -- the same flat float4[] slicing as the bulk INSERT, so vectors stay binary
+                        embedding = ($2::float4[])[((u.ord - 1) * $3::int + 1):(u.ord * $3::int)]{cast},
+                        authz = $4::text,
+                        metadata = u.metadata::jsonb,
+                        -- legacy md5 columns, see the note in create_embeddings_bulk
+                        embedding_hash = u.embedding_hash,
+                        metadata_hash = u.metadata_hash,
+                        embedding_hash_v2 = u.embedding_hash,
+                        metadata_hash_v2 = u.metadata_hash,
+                        updated_at = NOW()
+                    FROM unnest($5::text[], $6::uuid[], $7::uuid[], $8::uuid[])
+                        WITH ORDINALITY AS u(metadata, embedding_id, embedding_hash, metadata_hash, ord)
+                    WHERE e.collection_id = $1::bigint AND e.embedding_id = u.embedding_id
+                    RETURNING e.collection_id, e.embedding_id, e.embedding, e.authz, e.metadata,
+                              e.created_at, e.updated_at, u.ord
+                    """
+                )
+                try:
+                    rows = await stmt.fetch(
+                        collection.id,
+                        update_vectors,
+                        collection.dimensions,
+                        authz,
+                        update_metadata_json,
+                        update_ids,
+                        update_embedding_hashes,
+                        update_metadata_hashes,
+                    )
+                except UniqueViolationError as exc:
+                    raise DuplicateEmbeddingError(
+                        "Update would create a duplicate embedding "
+                        "with same vector, metadata, and authz in this collection."
+                    ) from exc
+
+                for row in rows:
+                    written[by_id[row["ord"] - 1]] = Embedding.from_record(row)
+
+                missing = [embedding_id for embedding_id, i in zip(update_ids, by_id) if i not in written]
+                if missing:
+                    # Raised inside the transaction, so everything written so far rolls back.
+                    shown = ", ".join(str(embedding_id) for embedding_id in missing[:5])
+                    more = f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+                    raise EmbeddingNotFoundError(f"No embedding with id {shown}{more} in this collection")
+
+            if batch.row_count:
+                stmt = await conn.prepare(
+                    f"""
+                    INSERT INTO {table} (
+                        collection_id, embedding, authz, metadata,
+                        embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
+                    )
+                    SELECT
+                        $1::bigint,
+                        ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
+                        $4::text,
+                        raw.metadata::jsonb,
+                        -- legacy md5 columns, see the note in create_embeddings_bulk
+                        raw.embedding_hash,
+                        raw.metadata_hash,
+                        raw.embedding_hash,
+                        raw.metadata_hash
+                    FROM unnest($5::text[], $6::uuid[], $7::uuid[])
+                        WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                    -- Conflicts resolve on the v2 index. A new row writes the same value to the
+                    -- legacy columns, so anything that would collide there collides here too and
+                    -- is handled; a collision with a legacy md5 value would need sha256 and md5
+                    -- to agree, which is not a case worth carrying code for.
+                    ON CONFLICT (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
+                    DO UPDATE SET
+                        updated_at = NOW()
+                    RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                              embedding_hash_v2, metadata_hash_v2;
+                    """
+                )
+                # If RLS denies insert or update, this will raise an error
+                rows = await stmt.fetch(
+                    collection.id,
+                    batch.flat_vectors,
+                    batch.dimensions,
+                    authz,
+                    batch.metadata_json,
+                    batch.embedding_hashes,
+                    batch.metadata_hashes,
+                )
+                for position, embedding in zip(by_content, _bulk_write_results(rows, batch)):
+                    written[position] = embedding
+
+            return [written[i] for i in range(len(embeddings))]
 
         return await self._with_rls(_query)
 

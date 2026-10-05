@@ -1,5 +1,8 @@
 import pytest
 
+from gen3_embeddings.database.dal import writes as writes_module
+from gen3_embeddings.database.errors import EmbeddingWriteInconsistencyError
+
 
 def test_create_get_and_list_embeddings(client, allow_authz):
     """Creating embeddings returns input_index per item; each can be fetched by ID and appears in list."""
@@ -319,6 +322,120 @@ def test_upsert_embeddings(client, allow_authz):
     assert result["embedding_id"] == embedding_id
     assert result["vector"] == [4.0, 5.0, 6.0]
     assert result["info"]["metadata"] == {"v": "2"}
+
+
+def _create_three(client) -> list[str]:
+    """Create the `docs` collection with three embeddings and return their ids in order."""
+    client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "description": "documents", "dimensions": 3, "vector_type": "vector"},
+    )
+    created = client.post(
+        "/vectorstore/collections/docs/embeddings",
+        json={"embeddings": [{"embedding": [float(i), 0.0, 0.0], "metadata": {"v": "old"}} for i in range(1, 4)]},
+    )
+    assert created.status_code == 200, created.text
+    return [e["embedding_id"] for e in created.json()["embeddings"]]
+
+
+def test_upsert_updates_every_item_with_an_id_alongside_new_ones(client, allow_authz):
+    """Several ids and a new item in one PUT: each id is updated in place, in request order."""
+    allow_authz("docs")
+    first, second, _ = _create_three(client)
+
+    put_resp = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={
+            "embeddings": [
+                {"embedding_id": second, "embedding": [0.0, 2.0, 0.0], "metadata": {"v": "new"}},
+                {"embedding": [9.0, 9.0, 9.0]},
+                {"embedding_id": first, "embedding": [0.0, 1.0, 0.0], "metadata": {"v": "new"}},
+            ]
+        },
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    results = put_resp.json()["embeddings"]
+    assert [r["embedding_id"] for r in (results[0], results[2])] == [second, first]
+    assert [r["vector"] for r in results] == [[0.0, 2.0, 0.0], [9.0, 9.0, 9.0], [0.0, 1.0, 0.0]]
+    assert client.get(f"/vectorstore/collections/docs/embeddings/{first}").json()["info"]["metadata"] == {"v": "new"}
+
+
+def test_upsert_with_an_unknown_id_updates_none_of_the_others(client, allow_authz):
+    """
+    One unknown id fails the request without having written the ids before it.
+
+    The items with an id used to be updated one transaction each, so the ones ahead of the
+    unknown id had committed by the time the request came back as a 400.
+    """
+    allow_authz("docs")
+    first, second, _ = _create_three(client)
+    unknown = "00000000-0000-4000-8000-000000000000"
+
+    put_resp = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={
+            "embeddings": [
+                {"embedding_id": first, "embedding": [0.0, 1.0, 0.0], "metadata": {"v": "new"}},
+                {"embedding_id": second, "embedding": [0.0, 2.0, 0.0], "metadata": {"v": "new"}},
+                {"embedding_id": unknown, "embedding": [0.0, 3.0, 0.0]},
+            ]
+        },
+    )
+    assert put_resp.status_code == 400, put_resp.text
+    assert unknown in put_resp.json()["detail"]
+
+    for embedding_id, x in ((first, 1.0), (second, 2.0)):
+        unchanged = client.get(f"/vectorstore/collections/docs/embeddings/{embedding_id}").json()
+        assert unchanged["vector"] == [x, 0.0, 0.0]
+        assert unchanged["info"]["metadata"] == {"v": "old"}
+
+
+def test_upsert_failing_after_the_updates_leaves_nothing_written(client, allow_authz, monkeypatch):
+    """
+    A failure in the id-less half rolls back the updates by id made earlier in the request.
+    """
+    allow_authz("docs")
+    first, _, _ = _create_three(client)
+
+    def _inconsistent(rows, batch):
+        raise EmbeddingWriteInconsistencyError("simulated failure after the INSERT")
+
+    monkeypatch.setattr(writes_module, "_bulk_write_results", _inconsistent)
+
+    put_resp = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={
+            "embeddings": [
+                {"embedding_id": first, "embedding": [0.0, 1.0, 0.0], "metadata": {"v": "new"}},
+                {"embedding": [9.0, 9.0, 9.0]},
+            ]
+        },
+    )
+    assert put_resp.status_code == 500, put_resp.text
+
+    unchanged = client.get(f"/vectorstore/collections/docs/embeddings/{first}").json()
+    assert unchanged["vector"] == [1.0, 0.0, 0.0]
+    assert unchanged["info"]["metadata"] == {"v": "old"}
+    assert len(client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"]) == 3
+
+
+def test_upsert_with_a_repeated_id_is_refused(client, allow_authz):
+    """Two items naming the same id would be two writes to one row, so the request is refused."""
+    allow_authz("docs")
+    first, _, _ = _create_three(client)
+
+    put_resp = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={
+            "embeddings": [
+                {"embedding_id": first, "embedding": [0.0, 1.0, 0.0]},
+                {"embedding_id": first, "embedding": [0.0, 2.0, 0.0]},
+            ]
+        },
+    )
+    assert put_resp.status_code == 400, put_resp.text
+    assert "more than once" in put_resp.json()["detail"]
+    assert client.get(f"/vectorstore/collections/docs/embeddings/{first}").json()["vector"] == [1.0, 0.0, 0.0]
 
 
 def test_delete_embedding_that_does_not_exist_returns_404(client, allow_authz):

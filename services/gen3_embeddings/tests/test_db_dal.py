@@ -40,11 +40,13 @@ from gen3_embeddings.database.errors import (
     CollectionNameNotAllowedError,
     DuplicateEmbeddingError,
     EmbeddingDimensionMismatchError,
+    EmbeddingNotFoundError,
     EmbeddingNotRepresentableError,
     EmbeddingsAlreadyExistError,
     EmbeddingWriteInconsistencyError,
     InvalidCollectionNameError,
     MetadataLengthMismatchError,
+    RepeatedEmbeddingIdError,
     RowLevelSecurityDeniedError,
 )
 from gen3_embeddings.database.index_discovery import IndexStrategy, VectorIndex
@@ -1100,6 +1102,169 @@ class TestEmbeddings:
 
         with pytest.raises(DuplicateEmbeddingError):
             await dal.update_embedding(make_collection(), uuid4(), [1.0, 2.0, 3.0], None, None)
+
+    @pytest.mark.asyncio
+    async def test_updates_by_id_are_one_statement_with_binding_in_slicing_order(self):
+        """
+        Every item with an id is updated by a single UPDATE, however many there are.
+        """
+        ids = [uuid4(), uuid4(), uuid4()]
+        vectors = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+        rows = [embedding_row(embedding_id=embedding_id, ord=i + 1) for i, embedding_id in enumerate(ids)]
+        dal, conn, pool = make_dal(results=[rows])
+
+        await dal.upsert_embeddings_bulk(
+            make_collection(id=7), vectors, DOCS_AUTHZ, [{"i": 0}, {"i": 1}, {"i": 2}], embedding_ids=ids
+        )
+
+        assert pool.acquired == 1
+        assert conn.transactions == 1
+        sql = normalized(conn.sql)
+        assert sql.startswith("UPDATE embeddings_vector AS e")
+        # the legacy md5 columns get the sha256 value, as on every other write
+        assert "embedding_hash = u.embedding_hash" in sql
+        assert "embedding_hash_v2 = u.embedding_hash" in sql
+        # the placeholder types have to line up with the values bound below: text for the
+        # metadata, uuid for the ids and hashes
+        assert "unnest($5::text[], $6::uuid[], $7::uuid[], $8::uuid[])" in sql
+        assert "AS u(metadata, embedding_id, embedding_hash, metadata_hash, ord)" in sql
+
+        collection_id, flat_vectors, dimensions, authz, metadata_json, bound_ids, embedding_hashes, metadata_hashes = (
+            conn.params
+        )
+        assert collection_id == 7
+        assert flat_vectors == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+        assert dimensions == 3
+        assert authz == DOCS_AUTHZ
+        assert metadata_json == ['{"i":0}', '{"i":1}', '{"i":2}']
+        assert bound_ids == ids
+        assert embedding_hashes == [hashing.hash_vector(v, VectorType.vector, 3) for v in vectors]
+        assert metadata_hashes == [hashing.hash_metadata({"i": i}) for i in range(3)]
+
+    @pytest.mark.asyncio
+    async def test_a_mixed_batch_updates_then_upserts_in_one_transaction(self):
+        """
+        Items with and without an id are written in the same transaction, updates first.
+
+        One transaction is what makes the batch all-or-nothing; updates go first so an id-less
+        item matching an updated row's new content resolves onto that row.
+        """
+        named = uuid4()
+        vectors = [[9.0, 9.0, 9.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+        embedding_ids = [None, named, None]
+        dal, conn, pool = make_dal(
+            results=[
+                [embedding_row(embedding_id=named, ord=1)],
+                [written_row([9.0, 9.0, 9.0], {}), written_row([4.0, 5.0, 6.0], {})],
+            ]
+        )
+
+        results = await dal.upsert_embeddings_bulk(
+            make_collection(), vectors, DOCS_AUTHZ, None, embedding_ids=embedding_ids
+        )
+
+        assert pool.acquired == 1
+        assert conn.transactions == 1
+        assert [normalized(sql).split()[0] for sql, _ in conn.queries] == ["UPDATE", "INSERT"]
+        # the UPDATE binds only the item with an id, the INSERT only the two without
+        assert conn.queries[0][1][1] == [1.0, 2.0, 3.0]
+        assert conn.queries[1][1][1] == [9.0, 9.0, 9.0, 4.0, 5.0, 6.0]
+        # results come back in the caller's order, whichever statement wrote each
+        assert results[1].embedding_id == named
+        assert [r.embedding for r in results] == [[9.0, 9.0, 9.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+
+    @pytest.mark.asyncio
+    async def test_updates_by_id_come_back_in_the_order_the_ids_were_given(self):
+        """RETURNING order is not promised, so rows are put back by the position they carry."""
+        ids = [uuid4(), uuid4()]
+        rows = [embedding_row(embedding_id=ids[1], ord=2), embedding_row(embedding_id=ids[0], ord=1)]
+        dal, _, _ = make_dal(results=[rows])
+
+        results = await dal.upsert_embeddings_bulk(
+            make_collection(), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], DOCS_AUTHZ, None, embedding_ids=ids
+        )
+
+        assert [r.embedding_id for r in results] == ids
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_id_fails_the_batch_before_the_upsert_runs(self):
+        """
+        An id that matched no row is an error, not a shorter result.
+
+        It is raised inside the transaction, so the rows that did match are rolled back with it,
+        and the id-less half is never sent; test_api_embeddings.py checks the rollback against a
+        real database.
+        """
+        found, missing = uuid4(), uuid4()
+        dal, conn, _ = make_dal(results=[[embedding_row(embedding_id=found, ord=1)]])
+
+        with pytest.raises(EmbeddingNotFoundError, match=str(missing)):
+            await dal.upsert_embeddings_bulk(
+                make_collection(),
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+                DOCS_AUTHZ,
+                None,
+                embedding_ids=[found, missing, None],
+            )
+
+        assert len(conn.queries) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_repeated_id_is_rejected_before_a_connection_is_taken(self):
+        """One UPDATE cannot apply two writes to one row."""
+        repeated = uuid4()
+        dal, _, pool = make_dal()
+
+        with pytest.raises(RepeatedEmbeddingIdError, match=str(repeated)):
+            await dal.upsert_embeddings_bulk(
+                make_collection(),
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+                DOCS_AUTHZ,
+                None,
+                embedding_ids=[repeated, None, repeated],
+            )
+
+        assert pool.acquired == 0
+
+    @pytest.mark.asyncio
+    async def test_an_update_by_id_that_would_duplicate_another_row_is_reported_as_such(self):
+        """The same unique-constraint translation as the single-row update."""
+        dal, _, _ = make_dal(results=[UniqueViolationError("duplicate key value violates unique constraint")])
+
+        with pytest.raises(DuplicateEmbeddingError):
+            await dal.upsert_embeddings_bulk(
+                make_collection(), [[1.0, 2.0, 3.0]], DOCS_AUTHZ, None, embedding_ids=[uuid4()]
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_bad_vector_anywhere_in_a_mixed_batch_names_its_request_index(self):
+        """
+        Both halves are checked together before any connection is taken.
+        """
+        dal, _, pool = make_dal()
+
+        with pytest.raises(EmbeddingDimensionMismatchError, match="index 2"):
+            await dal.upsert_embeddings_bulk(
+                make_collection(),
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [1.0, 2.0]],
+                DOCS_AUTHZ,
+                None,
+                embedding_ids=[uuid4(), None, None],
+            )
+
+        assert pool.acquired == 0
+
+    @pytest.mark.asyncio
+    async def test_an_upsert_rejects_mismatched_input_lengths(self):
+        """Ids, vectors and metadata are parallel lists, so a length mismatch would misalign them."""
+        dal, _, pool = make_dal()
+
+        with pytest.raises(ValueError, match="same length"):
+            await dal.upsert_embeddings_bulk(make_collection(), [[1.0, 2.0, 3.0]], DOCS_AUTHZ, None, embedding_ids=[])
+        with pytest.raises(MetadataLengthMismatchError):
+            await dal.upsert_embeddings_bulk(make_collection(), [[1.0, 2.0, 3.0]], DOCS_AUTHZ, [])
+
+        assert pool.acquired == 0
 
     @pytest.mark.asyncio
     async def test_a_bad_vector_in_an_update_is_caught_before_a_connection_is_taken(self):
