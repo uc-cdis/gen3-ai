@@ -6,13 +6,14 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from gen3_ai_model_repo import config
 from gen3_ai_model_repo.storage.provider import StorageProvider
 
-_S3_CONCURRENCY = asyncio.Semaphore(8)
+_S3_SHORT_CONCURRENCY = asyncio.Semaphore(8)
 
 
-async def _s3_call(function, *args, **kwargs):
-    async with _S3_CONCURRENCY:
+async def _s3_call(function, *args, semaphore=None, **kwargs):
+    async with semaphore or _S3_SHORT_CONCURRENCY:
         return await asyncio.to_thread(function, *args, **kwargs)
 
 
@@ -33,6 +34,7 @@ class S3StorageProvider(StorageProvider):
         self.bucket_name = bucket_name
         self.region = region
         self.create_bucket_if_missing = create_bucket_if_missing
+        self._upload_concurrency = asyncio.Semaphore(max(1, config.S3_UPLOAD_CONCURRENCY))
         session = boto3.session.Session()
         self.client = session.client(
             "s3",
@@ -43,6 +45,12 @@ class S3StorageProvider(StorageProvider):
             aws_session_token=session_token or None,
             config=Config(s3={"addressing_style": "path"}),
         )
+
+    def _upload_semaphore(self) -> asyncio.Semaphore:
+        """Return the per-provider upload limiter, including lightweight test doubles."""
+        if not hasattr(self, "_upload_concurrency"):
+            self._upload_concurrency = asyncio.Semaphore(max(1, config.S3_UPLOAD_CONCURRENCY))
+        return self._upload_concurrency
 
     async def ensure_container(self):
         """
@@ -74,11 +82,23 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
     ):
         """Upload a local file path to S3 for provider-level file workflows."""
-        await _s3_call(self.client.upload_file, local_path, self.bucket_name, object_key)
+        await _s3_call(
+            self.client.upload_file,
+            local_path,
+            self.bucket_name,
+            object_key,
+            semaphore=self._upload_semaphore(),
+        )
 
     async def upload_stream(self, stream, object_key: str):
         """Upload a stream directly to S3."""
-        await _s3_call(self.client.upload_fileobj, stream, self.bucket_name, object_key)
+        await _s3_call(
+            self.client.upload_fileobj,
+            stream,
+            self.bucket_name,
+            object_key,
+            semaphore=self._upload_semaphore(),
+        )
 
     async def download_file(
         self,
@@ -161,6 +181,11 @@ class S3StorageProvider(StorageProvider):
             Params={"Bucket": self.bucket_name, "Key": object_key},
             ExpiresIn=expiry_seconds,
         )
+
+    async def get_file_path(self, object_key: str):
+        """Remote S3 objects have no local response path."""
+        del object_key
+        return None
 
     async def generate_upload_url(
         self,

@@ -1,6 +1,7 @@
 """Generic storage provider interfaces for the Gen3 AI model repo service."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 class StorageProvider(ABC):
@@ -77,6 +78,11 @@ class StorageProvider(ABC):
         expiry_seconds: int = 3600,
     ) -> str:
         """Generate a signed URL for downloading an object."""
+        pass
+
+    @abstractmethod
+    async def get_file_path(self, object_key: str) -> Path | None:
+        """Return a safe local path for an object, or ``None`` for remote storage."""
         pass
 
     @abstractmethod

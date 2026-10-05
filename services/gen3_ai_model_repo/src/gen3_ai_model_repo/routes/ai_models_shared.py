@@ -1,6 +1,26 @@
 """Shared route helpers for the Gen3 AI model repo service."""
 
+from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
+
+from gen3_ai_model_repo.storage.keys import validate_key_component
+
+
+async def validate_repository_path(request: Request) -> None:
+    """
+    Reject repository path components that cannot be represented safely.
+
+    Raises:
+        HTTPException: If a repository path component is invalid.
+    """
+    for name in ("namespace", "repo"):
+        value = request.path_params.get(name)
+        if value is None:
+            continue
+        try:
+            validate_key_component(value, name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class RepositoryCreateRequest(BaseModel):

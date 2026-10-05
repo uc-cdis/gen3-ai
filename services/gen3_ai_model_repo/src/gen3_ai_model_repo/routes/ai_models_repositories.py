@@ -3,11 +3,15 @@
 from fastapi import Depends, HTTPException, Query, Request
 from starlette import status
 
-from common.auth import authorize_request
 from gen3_ai_model_repo import config
-from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
+from gen3_ai_model_repo.auth import AuthorizedRouter, get_allowed_repository_paths, verify_authorization
+from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.constants import DEFAULT_SECURITY_FILE_STATUS
-from gen3_ai_model_repo.database.file_tracking import list_files_in_revision
+from gen3_ai_model_repo.database.file_tracking import (
+    get_storage_keys_for_repository,
+    list_files_in_revision,
+    storage_key_is_referenced,
+)
 from gen3_ai_model_repo.database.repo_metadata import (
     create_model_metadata,
     delete_model_metadata,
@@ -28,10 +32,16 @@ from gen3_ai_model_repo.models.schemas import (
     RevisionModel,
     TreeEntryModel,
 )
-from gen3_ai_model_repo.routes.ai_models_shared import RepositoryCreateRequest, RepositoryUpdateRequest
+from gen3_ai_model_repo.routes.ai_models_shared import (
+    RepositoryCreateRequest,
+    RepositoryUpdateRequest,
+    validate_repository_path,
+)
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
-ai_models_repositories_router = AuthorizedRouter(dependencies=[Depends(verify_authorization)])
+ai_models_repositories_router = AuthorizedRouter(
+    dependencies=[Depends(verify_authorization), Depends(validate_repository_path)]
+)
 REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
 
 
@@ -62,28 +72,16 @@ async def list_models_route(
     Raises:
         HTTPException: If authorization cannot be evaluated.
     """
-    candidates = await list_models(namespace=namespace, tags=tags, search=search)
-    permitted = []
-    for candidate in candidates:
-        try:
-            await authorize_request(
-                authz_resources=[f"/ai_model_repo/{candidate.namespace}/{candidate.repo}"],
-                authz_service_name=config.AUTHZ_SERVICE_NAME,
-                authz_access_method="read",
-                request=request,
-            )
-            permitted.append((candidate.namespace, candidate.repo))
-        except HTTPException as exc:
-            if exc.status_code != 403:
-                raise
-    if not permitted:
-        return PaginatedRepositoryResponse(
-            models=[],
-            page=page,
-            page_size=page_size,
-            next_page=None,
-            prev_page=page - 1 if page > 1 else None,
-        )
+    allowed_paths = await get_allowed_repository_paths(request)
+    permitted: list[tuple[str, str]] | None = None
+    if allowed_paths is not None:
+        permitted = []
+        for path in allowed_paths:
+            repository_path = path.removeprefix("/ai_model_repo/")
+            if "/" not in repository_path:
+                continue
+            repository_namespace, repository_name = repository_path.split("/", 1)
+            permitted.append((repository_namespace, repository_name))
     repos = await list_models(
         namespace=namespace,
         tags=tags,
@@ -244,9 +242,7 @@ async def delete_model(namespace: str, repo: str) -> DeleteModelResponse:
     if not repo_exists_check:
         raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
 
-    provider = get_storage_provider()
-    prefix = f"{namespace}/{repo}/"
-    await provider.delete_prefix(prefix)
+    storage_keys = await get_storage_keys_for_repository(namespace, repo)
 
     deleted_from_db = await delete_model_metadata(namespace, repo)
     if not deleted_from_db:
@@ -254,6 +250,18 @@ async def delete_model(namespace: str, repo: str) -> DeleteModelResponse:
             status_code=500,
             detail=f"Failed to delete repository {namespace}/{repo} from database",
         )
+
+    provider = get_storage_provider()
+    for object_key in storage_keys:
+        if await storage_key_is_referenced(object_key):
+            continue
+        try:
+            await provider.delete_file(object_key)
+        except Exception:
+            logging.exception(
+                "Repository metadata deleted but storage cleanup failed",
+                extra={"namespace": namespace, "repo": repo, "object_key": object_key},
+            )
 
     return DeleteModelResponse(status="deleted", repo=f"{namespace}/{repo}")
 

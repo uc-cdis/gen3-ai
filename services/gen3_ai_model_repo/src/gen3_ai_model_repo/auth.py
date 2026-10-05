@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Request
 
+from common import auth as common_auth
 from common.auth import authorize_request
 from gen3_ai_model_repo import config
 
@@ -41,6 +42,38 @@ async def verify_authorization(request: Request):
         request=request,
     )
     request.state.repository_scope = None
+
+
+async def get_allowed_repository_paths(request: Request) -> list[str] | None:
+    """
+    Return repository read paths from one Arborist auth-mapping call.
+
+    ``None`` means debug authorization is bypassed and the caller may see all
+    repositories. An empty list is a real fail-closed authorization result.
+
+    Returns:
+        Allowed repository resource paths, or ``None`` in debug bypass mode.
+    """
+    if config.DEBUG_SKIP_AUTH and not request.headers.get("authorization"):
+        return None
+    cached = getattr(request.state, "allowed_repository_paths", None)
+    if cached is not None:
+        return cached
+    token = await common_auth._get_token(None, request)
+    if not token:
+        return []
+    mapping = await common_auth.arborist.auth_mapping(jwt=token.credentials)
+    allowed = []
+    for resource, permissions in mapping.items():
+        if not resource.startswith("/ai_model_repo/") or not isinstance(permissions, list):
+            continue
+        if any(
+            entry.get("service") in {config.AUTHZ_SERVICE_NAME, "*"} and entry.get("method") in {"read", "*"}
+            for entry in permissions
+        ):
+            allowed.append(resource)
+    request.state.allowed_repository_paths = allowed
+    return allowed
 
     # Model routes add a second, repository-level gate.  Routes without these
     # path parameters (for example, GET /api/models) are covered by the

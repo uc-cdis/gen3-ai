@@ -79,6 +79,8 @@ STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
     default=True,
 )
 
+S3_UPLOAD_CONCURRENCY = int(starlette_config("S3_UPLOAD_CONCURRENCY", cast=int, default="2"))
+
 URL_PREFIX = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX",
     default="",

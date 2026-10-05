@@ -10,7 +10,9 @@ from gen3_ai_model_repo.database.file_tracking import (
     delete_file,
     delete_files_for_revision,
     get_file_record,
+    get_storage_keys_for_revision,
     list_files_in_revision,
+    storage_key_is_referenced,
 )
 from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import delete_revision
@@ -23,9 +25,12 @@ from gen3_ai_model_repo.models.schemas import (
     TreeEntryModel,
 )
 from gen3_ai_model_repo.response import build_head_response
+from gen3_ai_model_repo.routes.ai_models_shared import validate_repository_path
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
-ai_models_files_router = AuthorizedRouter(dependencies=[Depends(verify_authorization)])
+ai_models_files_router = AuthorizedRouter(
+    dependencies=[Depends(verify_authorization), Depends(validate_repository_path)]
+)
 REVISION_NOT_FOUND_DETAIL = "Revision not found"
 FILE_NOT_FOUND_DETAIL = "File not found"
 INVALID_FILE_ID_DETAIL = "file_id must be namespace:repo:revision:path for the requested repository"
@@ -169,7 +174,8 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     etag = file_record["etag"]
 
     provider = get_storage_provider()
-    if hasattr(provider, "local_path"):
+    local_path = await provider.get_file_path(file_record["object_key"])
+    if local_path is not None:
         return Response(
             status_code=200,
             headers={
@@ -214,8 +220,8 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
 
     provider = get_storage_provider()
-    if hasattr(provider, "local_path"):
-        local_path = provider.local_path(file_record["object_key"])
+    local_path = await provider.get_file_path(file_record["object_key"])
+    if local_path is not None:
         if not local_path.is_file():
             raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
         return FileResponse(
@@ -315,9 +321,18 @@ async def delete_model_file(namespace: str, repo: str, file_id: str) -> Revision
     """
 
     revision, path = _parse_file_id(namespace, repo, file_id)
+    record = await get_file_record(namespace, repo, revision, path)
+    if not record:
+        raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
     deleted = await delete_file(namespace, repo, revision, path)
     if not deleted:
         raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
+    object_key = record["object_key"]
+    if object_key and not await storage_key_is_referenced(object_key):
+        try:
+            await get_storage_provider().delete_file(object_key)
+        except Exception:
+            logging.exception("File metadata deleted but storage cleanup failed", extra={"object_key": object_key})
     return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)
 
 
@@ -339,8 +354,20 @@ async def delete_model_revision(namespace: str, repo: str, revision: str) -> Rev
         HTTPException: If the revision or repository is not found.
     """
 
+    storage_keys = await get_storage_keys_for_revision(namespace, repo, revision)
     deleted_files = await delete_files_for_revision(namespace, repo, revision)
     deleted_revision = await delete_revision(namespace, repo, revision)
     if not deleted_revision and not deleted_files:
         raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
+    provider = get_storage_provider()
+    for object_key in storage_keys:
+        if await storage_key_is_referenced(object_key):
+            continue
+        try:
+            await provider.delete_file(object_key)
+        except Exception:
+            logging.exception(
+                "Revision metadata deleted but storage cleanup failed",
+                extra={"namespace": namespace, "repo": repo, "revision": revision, "object_key": object_key},
+            )
     return RevisionDeleteResponse(status="deleted", repo=f"{namespace}/{repo}", revision=revision)

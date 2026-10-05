@@ -27,8 +27,10 @@ def test_list_models_empty_returns_200(monkeypatch):
     """Return an empty paginated model list when the database has no models."""
     import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
 
-    async def fake_list_models(namespace=None, tags=None, search=None, limit=100, offset=0):
-        del namespace, tags, search, limit, offset
+    async def fake_list_models(
+        namespace=None, tags=None, search=None, limit=100, offset=0, permitted_repositories=None
+    ):
+        del namespace, tags, search, limit, offset, permitted_repositories
         return []
 
     monkeypatch.setattr(repo_routes, "list_models", fake_list_models)

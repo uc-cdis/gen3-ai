@@ -31,7 +31,7 @@ class LocalStorageProvider(StorageProvider):
             raise ValueError("Storage object key escapes the local storage root")
         return path
 
-    def local_path(self, object_key: str) -> Path:
+    async def get_file_path(self, object_key: str) -> Path | None:
         """Return a validated path for an authorized local-file response."""
         return self._resolve_object_path(object_key)
 

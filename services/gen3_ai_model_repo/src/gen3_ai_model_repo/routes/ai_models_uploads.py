@@ -11,11 +11,13 @@ from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.database.file_tracking import track_file
 from gen3_ai_model_repo.database.revisions import create_revision
 from gen3_ai_model_repo.models.schemas import RevisionCreateRequest, RevisionModel, UploadUrlRequest, UploadUrlResponse
-from gen3_ai_model_repo.routes.ai_models_shared import MultipartUploadResponse
+from gen3_ai_model_repo.routes.ai_models_shared import MultipartUploadResponse, validate_repository_path
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 from gen3_ai_model_repo.storage.keys import build_object_key, validate_key_component
 
-ai_models_uploads_router = AuthorizedRouter(dependencies=[Depends(verify_authorization)])
+ai_models_uploads_router = AuthorizedRouter(
+    dependencies=[Depends(verify_authorization), Depends(validate_repository_path)]
+)
 
 
 def _build_object_key(namespace: str, repo: str, revision_name: str, filename: str) -> str:
@@ -322,12 +324,13 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
 
     object_key = _build_object_key(namespace, repo, request.revision_name, request.file_name)
     provider = get_storage_provider()
-    if provider.__class__.__name__ == "LocalStorageProvider":
+    try:
+        upload_url = await provider.generate_upload_url(object_key)
+    except NotImplementedError as exc:
         raise HTTPException(
             status_code=409,
             detail="Direct upload URLs are not supported for local storage; use the multipart upload endpoint",
-        )
-    upload_url = await provider.generate_upload_url(object_key)
+        ) from exc
     return UploadUrlResponse(upload_url=upload_url, object_key=object_key, method="PUT")
 
 

@@ -8,6 +8,45 @@ adding, retrieving, and listing files associated with revisions.
 from gen3_ai_model_repo.database.db import get_db_pool
 
 
+async def get_storage_keys_for_repository(namespace: str, model_name: str) -> list[str]:
+    """Return distinct storage keys referenced by every repository revision."""
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT DISTINCT mf.s3_key FROM model_files mf
+               JOIN model_revisions mr ON mr.id = mf.revision_id
+               JOIN models m ON m.id = mr.model_id
+               WHERE m.namespace=$1 AND m.model_name=$2 AND mf.s3_key IS NOT NULL""",
+            namespace,
+            model_name,
+        )
+    return [row["s3_key"] for row in rows]
+
+
+async def get_storage_keys_for_revision(namespace: str, model_name: str, revision_name: str) -> list[str]:
+    """Return storage keys referenced by one revision."""
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT DISTINCT mf.s3_key FROM model_files mf
+               JOIN model_revisions mr ON mr.id = mf.revision_id
+               JOIN models m ON m.id = mr.model_id
+               WHERE m.namespace=$1 AND m.model_name=$2 AND mr.revision_name=$3
+                 AND mf.s3_key IS NOT NULL""",
+            namespace,
+            model_name,
+            revision_name,
+        )
+    return [row["s3_key"] for row in rows]
+
+
+async def storage_key_is_referenced(object_key: str) -> bool:
+    """Return whether any remaining database record references an object key."""
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        return bool(await conn.fetchval("SELECT 1 FROM model_files WHERE s3_key=$1 LIMIT 1", object_key))
+
+
 async def track_file(
     namespace: str,
     model_name: str,
