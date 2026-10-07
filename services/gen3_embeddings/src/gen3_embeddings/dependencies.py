@@ -134,9 +134,9 @@ class AuthzContext:
     collection_name: str | None
     request: Request
 
-    async def require(self, *resources: str, action: AuthzAction | None = None) -> None:
+    async def require(self, *resources: str, actions: Sequence[AuthzAction] = ()) -> None:
         """
-        Check the caller may perform `action` on resources not derivable from the path.
+        Check the caller may perform `actions` on resources not derivable from the path.
 
         This is for authz paths that arrive in a request body, where the resource is only
         known once the body is parsed. It is the same policy-engine check the dependency
@@ -144,17 +144,19 @@ class AuthzContext:
 
         Args:
             *resources: Authz resource paths to check. Passing none is a no-op.
-            action (AuthzAction | None): Action to check, defaulting to the declared action.
+            actions (Sequence[AuthzAction]): Actions the caller must hold on every resource,
+                all checked in one policy-engine request. Defaults to the declared action.
 
         Raises:
-            HTTPException: 403 if the caller lacks the access, 401 if the token is invalid.
+            HTTPException: 403 if the caller lacks any of the access, 401 if the token is
+                invalid.
         """
         if not resources:
             return
 
         await authorize_request(
             authz_resources=list(resources),
-            authz_access_method=action or self.action,
+            authz_access_method=list(actions or (self.action,)),
             request=self.request,
             authz_config=AUTHZ,
         )
@@ -205,16 +207,16 @@ class AuthzDependency:
 
         allowed_authz = await get_allowed_authz_for_request(request, method=self.action, authz_config=AUTHZ)
 
-        # Deny before taking a connection out of the pool.
+        # Deny before taking a connection out of the pool. One request covers every action:
+        # Arborist grants it only if each one is granted.
         if collection_name is not None:
             resource = get_authz_resource_path_from_collection_name(collection_name)
-            for required_action in (self.action, *self.also_require):
-                await authorize_request(
-                    authz_resources=[resource],
-                    authz_access_method=required_action,
-                    request=request,
-                    authz_config=AUTHZ,
-                )
+            await authorize_request(
+                authz_resources=[resource],
+                authz_access_method=[self.action, *self.also_require],
+                request=request,
+                authz_config=AUTHZ,
+            )
 
         allowed_collection_names = get_allowed_collection_names_from_authz(allowed_authz)
 

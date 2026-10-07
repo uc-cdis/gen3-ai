@@ -234,8 +234,7 @@ async def put_embeddings_in_collection(
     # body-supplied path is a different resource, so it needs the same pair of checks.
     if embedding_authz_path != default_collection_authz:
         logging.debug(f"authorizing `create` and `update` on embedding authz path {embedding_authz_path}")
-        await ctx.require(embedding_authz_path, action="create")
-        await ctx.require(embedding_authz_path, action="update")
+        await ctx.require(embedding_authz_path, actions=("create", "update"))
 
     vectors: list[list[float]] = []
     metadata_list: list[dict] = []

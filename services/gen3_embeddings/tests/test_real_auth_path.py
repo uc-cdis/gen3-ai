@@ -34,7 +34,8 @@ class FakeArboristClient:
     Records what it was asked to authorize and answers with a fixed verdict.
 
     The verdict is either one answer for everything, or a per-method mapping for routes that
-    authorize more than one action; a method missing from the mapping is denied.
+    authorize more than one action; a method missing from the mapping is denied. Like Arborist,
+    a call asking about several methods is granted only if every one of them is.
     """
 
     def __init__(self, verdict: bool | dict[str, bool]):
@@ -44,7 +45,7 @@ class FakeArboristClient:
     async def auth_request(self, token, service, methods, resources):
         self.calls.append({"token": token, "service": service, "methods": methods, "resources": resources})
         if isinstance(self.verdict, dict):
-            return self.verdict.get(methods, False)
+            return all(self.verdict.get(method, False) for method in methods)
         return self.verdict
 
 
@@ -143,7 +144,7 @@ def test_the_route_authorizes_its_own_action_on_its_own_collection(client, allow
 
     call = arborist.calls[0]
     assert call["resources"] == ["/vectorstore/collections/docs"]
-    assert call["methods"] == "read"
+    assert call["methods"] == ["read"]
     assert call["service"] == AUTHZ_SERVICE_NAME
     assert call["token"] == "some-token", "the caller's bearer credentials were not forwarded"
 
@@ -154,8 +155,8 @@ def test_upsert_is_denied_without_create_even_with_update(client, allow_authz, r
 
     `test_authz_context` pins that the route declares `also_require=("create",)`; this pins that
     the declaration is enforced. A caller holding only `update` must be refused, and the policy
-    engine must have been asked about both actions -- so dropping `also_require`, or the loop
-    that honors it, turns this 403 into a 200.
+    engine must have been asked about both actions in a single request -- so dropping
+    `also_require`, or the dependency forwarding it, turns this 403 into a 200.
     """
     allow_authz("docs")
     arborist = real_auth(verdict={"update": True, "create": False})
@@ -167,8 +168,36 @@ def test_upsert_is_denied_without_create_even_with_update(client, allow_authz, r
     )
 
     assert response.status_code == 403, response.text
-    assert [call["methods"] for call in arborist.calls] == ["update", "create"]
-    assert all(call["resources"] == ["/vectorstore/collections/docs"] for call in arborist.calls)
+    assert [call["methods"] for call in arborist.calls] == [["update", "create"]]
+    assert arborist.calls[0]["resources"] == ["/vectorstore/collections/docs"]
+
+
+def test_upsert_checks_a_body_authz_for_both_actions_in_one_request(client, allow_authz_paths, real_auth):
+    """
+    A body-supplied `authz` is a second resource, checked for `create` and `update` together.
+
+    The collection path is covered by the dependency; this pins that the handler's own check on
+    the body's path asks about both actions, and does so without a request per action.
+    """
+    allow_authz_paths("/vectorstore/collections/docs", "/programs/foo/projects/bar")
+    create = client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "docs", "dimensions": 3, "vector_type": "vector"},
+    )
+    assert create.status_code == 200, create.text
+
+    arborist = real_auth(verdict=True)
+    response = client.put(
+        "/vectorstore/collections/docs/embeddings",
+        json={"authz": "/programs/foo/projects/bar", "embeddings": [{"embedding": [0.1, 0.2, 0.3]}]},
+        headers={"Authorization": "Bearer some-token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [(call["resources"], call["methods"]) for call in arborist.calls] == [
+        (["/vectorstore/collections/docs"], ["update", "create"]),
+        (["/programs/foo/projects/bar"], ["create", "update"]),
+    ]
 
 
 def test_a_granted_token_reaches_the_handler(client, allow_authz, real_auth):

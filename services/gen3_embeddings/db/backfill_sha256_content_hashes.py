@@ -83,8 +83,6 @@ def row_hashes(embedding, metadata, vector_type: VectorType) -> tuple[UUID, UUID
     Returns:
         tuple[UUID, UUID]: (embedding_hash_v2, metadata_hash_v2).
     """
-    # The service's byte order is little-endian (see `_STORAGE_DTYPE` in hashing.py). `to_numpy()`
-    # is in host order, so it is pinned here; on little-endian hosts this costs nothing.
     dtype = hashing.storage_dtype_for_precision(vector_type.precision)
     array = embedding.to_numpy().reshape(1, -1).astype(dtype, copy=False)
     embedding_hash = hashing.hash_rows(array)[0]

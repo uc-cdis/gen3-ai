@@ -38,7 +38,7 @@ CONFIGURATION
   client's configured base URL and connection pool are actually used.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -164,7 +164,7 @@ def _cache_set(request: Request | None, key: str, value: Any) -> None:
 async def authorize_request(
     authz_resources: list[str],
     authz_service_name: str | None = None,
-    authz_access_method: str = "access",
+    authz_access_method: str | Sequence[str] = "access",
     token: HTTPAuthorizationCredentials | None = None,
     request: Request | None = None,
     authz_config: AuthzConfig | None = None,
@@ -176,7 +176,9 @@ async def authorize_request(
         authz_resources (list[str]): The list of resources to check against.
         authz_service_name (str | None): The Arborist service to supply for the check.
             Ignored when `authz_config` is given, which carries its own service name.
-        authz_access_method (str): The Arborist access method to check (default is "access").
+        authz_access_method (str | Sequence[str]): The Arborist access method(s) to check
+            (default is "access"). Every method is checked on every resource in one request
+            to Arborist, which grants only if all of those pairs are granted.
         token (HTTPAuthorizationCredentials): an authorization token (optional, you can also provide request
             and this can be parsed from there). This has priority over any token from request.
         request (Request): The incoming HTTP request. Used to parse tokens from header.
