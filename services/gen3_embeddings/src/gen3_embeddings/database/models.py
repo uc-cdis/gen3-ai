@@ -39,6 +39,7 @@ class Collection:
         Raises:
             TypeError: If the row's columns do not match this dataclass's fields, which
                 happens when a migration adds a column that is not mirrored here.
+            ValueError: If the row's `vector_type` is not a known `VectorType`.
         """
         data = dict(row)
         data["vector_type"] = VectorType(data["vector_type"])
@@ -64,6 +65,9 @@ class Embedding:
 
         This normalizes:
         - metadata:  string -> dict (JSON)
+
+        Returns:
+            Self: The Embedding built from `row`.
         """
         return cls(
             collection_id=row["collection_id"],

@@ -3,6 +3,8 @@
 import re
 from uuid import UUID
 
+from gen3_embeddings.config import MAX_COLLECTION_NAME_LENGTH
+from gen3_embeddings.database import hashing
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.schemas import (
     CollectionModel,
@@ -19,9 +21,22 @@ def normalize_collection_name(name: str) -> str:
 
     - strip whitespace
     - lower-case
+    - bound the length, since this also runs on path parameters and query strings, which
+      no Pydantic model gets to constrain first
     - ensure only [a-z0-9_-]
+
+    Args:
+        name (str): Raw collection name.
+
+    Returns:
+        str: The normalized name.
+
+    Raises:
+        ValueError: If the name is too long or contains characters outside [a-z0-9_-].
     """
     name = name.strip().lower()
+    if len(name) > MAX_COLLECTION_NAME_LENGTH:
+        raise ValueError(f"collection_name may be at most {MAX_COLLECTION_NAME_LENGTH} characters, got {len(name)}")
     pattern = re.compile(r"^[a-z0-9_-]+$")
     if not pattern.match(name):
         raise ValueError("collection_name may only contain lowercase letters, digits, hyphen (-), and underscore (_)")
@@ -34,6 +49,15 @@ def normalize_authz(authz: str | None) -> str | None:
 
     - strip whitespace
     - ensure it starts with a slash if not None or empty
+
+    Args:
+        authz (str | None): Raw authz resource path.
+
+    Returns:
+        str | None: The normalized path, or None if nothing was supplied.
+
+    Raises:
+        ValueError: If the path does not start with a slash.
     """
     if not authz:
         return None
@@ -111,7 +135,9 @@ def embedding_to_binary_result(
         collection: Optional Collection dataclass for the embedding
         exclude_info: whether or not to exclude extra info per embedding
         input_index: Position of this embedding in the original request/input
-        precision: string to represent prevision of the embedding for binary response
+        precision: Precision to encode the vector at, which must be the collection's own or
+            the bytes will not mean what `precision` says they do. Determines both the float
+            width on the wire and the label the client decodes by.
 
     Returns:
         SingleEmbeddingResultBinary object
@@ -129,11 +155,14 @@ def embedding_to_binary_result(
         )
 
     if hasattr(emb.embedding, "to_numpy"):
-        # to_numpy() is a zero-copy native-byte-order view we can serialize directly.
-        emb_bytes = emb.embedding.to_numpy().tobytes()
+        array = emb.embedding.to_numpy()
     else:
         # already a numpy array
-        emb_bytes = emb.embedding.tobytes()
+        array = emb.embedding
+
+    # The service's byte order is little-endian (see `_STORAGE_DTYPE` in hashing.py). `to_numpy()`
+    # is in host order, so it is pinned here; on little-endian hosts this costs nothing.
+    emb_bytes = array.astype(hashing.storage_dtype_for_precision(precision), copy=False).tobytes()
 
     return SingleEmbeddingResultBinary(
         vector_base64=emb_bytes,
