@@ -5,6 +5,7 @@ import json
 
 import numpy as np
 import pytest
+from pgvector import HalfVector, Vector
 
 from gen3_embeddings.database import hashing
 from gen3_embeddings.database.errors import (
@@ -113,10 +114,7 @@ def test_the_same_vector_hashes_differently_per_storage_type():
 
 def test_to_storage_array_rejects_a_wrong_length_vector():
     """
-    A wrong-length vector has to fail here.
-
-    The bulk INSERT binds the batch as one flat array sliced by the collection's
-    dimensionality, so a short or long row would shift every row after it instead of erroring.
+    A wrong-length vector fails here, naming the row, rather than as a numpy error.
     """
     with pytest.raises(EmbeddingDimensionMismatchError, match="index 1"):
         hashing.to_storage_array([[1.0, 2.0], [1.0, 2.0, 3.0]], VectorType.vector, 2)
@@ -136,12 +134,50 @@ def test_to_storage_array_allows_large_values_within_float32():
     assert array[0][0] == pytest.approx(70000.0)
 
 
-def test_flatten_rows_concatenates_selected_rows_in_order():
-    """The flat float4[] the INSERT slices is the selected rows, row-major."""
+def test_to_pgvector_rows_keeps_the_selected_rows_in_order():
+    """The objects bound to the write are the selected rows, in the order given."""
     array = hashing.to_storage_array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], VectorType.vector, 2)
 
-    assert hashing.flatten_rows(array, [0, 1, 2]) == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-    assert hashing.flatten_rows(array, [0, 2]) == [1.0, 2.0, 5.0, 6.0]
+    assert hashing.to_pgvector_rows(array, [0, 1, 2], VectorType.vector) == [
+        Vector([1.0, 2.0]),
+        Vector([3.0, 4.0]),
+        Vector([5.0, 6.0]),
+    ]
+    assert hashing.to_pgvector_rows(array, [2, 0], VectorType.vector) == [Vector([5.0, 6.0]), Vector([1.0, 2.0])]
+
+
+@pytest.mark.parametrize(
+    ("vector_type", "wrapper", "dtype"),
+    [(VectorType.vector, Vector, "<f4"), (VectorType.halfvec, HalfVector, "<f2")],
+)
+def test_to_pgvector_rows_carry_exactly_the_hashed_bytes(vector_type, wrapper, dtype):
+    """
+    What is bound is byte-for-byte what was hashed, for both column types.
+
+    If the two drifted, the stored hash would describe a vector other than the stored one, and
+    the unique constraint would stop meaning "same content".
+    """
+    array = hashing.to_storage_array([[0.1, -2.5, 3.14159], [1e-3, 7.0, -0.333]], vector_type, 3)
+
+    rows = hashing.to_pgvector_rows(array, [0, 1], vector_type)
+
+    assert all(isinstance(row, wrapper) for row in rows)
+    for row, expected in zip(rows, array):
+        assert row.to_numpy().astype(dtype).tobytes() == expected.tobytes()
+
+
+def test_pgvector_reads_rows_by_value_not_by_byte_order():
+    """
+    A big-endian copy of the rows produces the same pgvector objects as the little-endian one.
+
+    This is why the code layer can keep little-endian arrays: pgvector converts by value, and
+    the byte order on the wire is its codec's concern, not ours.
+    """
+    array = hashing.to_storage_array([[0.1, -2.5, 3.14159]], VectorType.vector, 3)
+
+    assert hashing.to_pgvector_rows(array.astype(">f4"), [0], VectorType.vector) == hashing.to_pgvector_rows(
+        array, [0], VectorType.vector
+    )
 
 
 def test_hash_rows_matches_hash_vector_row_by_row():

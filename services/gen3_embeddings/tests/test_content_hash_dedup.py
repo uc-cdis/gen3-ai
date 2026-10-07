@@ -239,9 +239,8 @@ def test_dimension_mismatch_is_rejected_before_the_write(client, allow_authz):
     """
     A wrong-length vector is a 400.
 
-    POST leaves this check to the data access layer, which has to make it anyway: the bulk
-    INSERT binds the batch as one flat array sliced by the collection's dimensionality, so a
-    wrong length there would silently shift every following row rather than fail.
+    POST leaves this check to the data access layer, which makes it while building the batch,
+    before a connection is taken, and names the offending row.
     """
     allow_authz("docs")
     _create_collection(client, "docs")

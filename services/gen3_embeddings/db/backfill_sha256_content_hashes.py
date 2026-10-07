@@ -71,9 +71,9 @@ def row_hashes(embedding, metadata, vector_type: VectorType) -> tuple[UUID, UUID
     Compute the v2 hashes for one existing row.
 
     The vector arrives from pgvector's binary codec as a Vector/HalfVector holding exactly the
-    stored float32/float16 values, and its numpy view is the same bytes the app hashes when
-    writing a new row. So a backfilled row and a fresh write of identical content agree,
-    which is the whole point: the unique index has to see them as one.
+    stored float32/float16 values. Pinned to the service's byte order, those are the same bytes
+    the app hashes when writing a new row, so a backfilled row and a fresh write of identical
+    content agree, which is the whole point: the unique index has to see them as one.
 
     Args:
         embedding: Vector or HalfVector as decoded by pgvector.
@@ -83,7 +83,10 @@ def row_hashes(embedding, metadata, vector_type: VectorType) -> tuple[UUID, UUID
     Returns:
         tuple[UUID, UUID]: (embedding_hash_v2, metadata_hash_v2).
     """
-    array = embedding.to_numpy().reshape(1, -1)
+    # The service's byte order is little-endian (see `_STORAGE_DTYPE` in hashing.py). `to_numpy()`
+    # is in host order, so it is pinned here; on little-endian hosts this costs nothing.
+    dtype = hashing.storage_dtype_for_precision(vector_type.precision)
+    array = embedding.to_numpy().reshape(1, -1).astype(dtype, copy=False)
     embedding_hash = hashing.hash_rows(array)[0]
 
     if isinstance(metadata, str):

@@ -155,19 +155,13 @@ def embedding_to_binary_result(
         )
 
     if hasattr(emb.embedding, "to_numpy"):
-        # to_numpy() is a zero-copy view, but a NATIVE-byte-order one: pgvector byteswaps the
-        # big-endian wire bytes into an array('f'), which is host order. Serializing that view
-        # directly would put the server's endianness on the wire, and clients decode these bytes
-        # as little-endian, so a big-endian host would hand out byte-swapped floats that decode
-        # into valid-looking, wrong numbers.
         array = emb.embedding.to_numpy()
     else:
         # already a numpy array
         array = emb.embedding
 
-    # Pin the byte order to match `precision`, from the same table that pins it for content
-    # hashes. `copy=False` makes this a no-op wherever the view already matches, which is every
-    # little-endian host, so the zero-copy path above is preserved.
+    # The service's byte order is little-endian (see `_STORAGE_DTYPE` in hashing.py). `to_numpy()`
+    # is in host order, so it is pinned here; on little-endian hosts this costs nothing.
     emb_bytes = array.astype(hashing.storage_dtype_for_precision(precision), copy=False).tobytes()
 
     return SingleEmbeddingResultBinary(

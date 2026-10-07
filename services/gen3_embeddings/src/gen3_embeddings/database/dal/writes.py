@@ -7,6 +7,7 @@ from uuid import UUID
 import asyncpg
 import numpy as np
 from asyncpg.exceptions import UniqueViolationError
+from pgvector import HalfVector, Vector
 
 from gen3_embeddings.database import hashing
 from gen3_embeddings.database.dal.base import DataAccessLayerBase
@@ -31,14 +32,13 @@ class _BulkWriteBatch:
     """
     A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
 
-    Vectors travel as one flat float32 array that the INSERT slices per row, and the per-row
-    columns travel as parallel arrays. That is what keeps the whole batch on asyncpg's binary
-    encoding path: nothing here is a JSON document, so no float is ever formatted as text.
+    Every column travels as one array parameter, unnested in parallel by the INSERT. The
+    vectors are pgvector objects, which its asyncpg codec encodes in binary, so no float is
+    ever formatted as text.
     """
 
-    dimensions: int
-    # len == row_count * dimensions, row-major
-    flat_vectors: list[float]
+    # one per unique row; Vector or HalfVector to match the collection's column type
+    vectors: list[Vector | HalfVector]
     # canonical JSON text, one per unique row; also what the metadata hash was taken over
     metadata_json: list[str]
     embedding_hashes: list[UUID]
@@ -103,17 +103,17 @@ def _prepare_bulk_write(
     # one conversion for the whole batch; its rows are the bytes Postgres will store, which
     # is both what gets hashed and what gets bound
     array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
-    return _dedupe_rows(array, metadata_list, collection.dimensions)
+    return _dedupe_rows(array, metadata_list, vector_type)
 
 
-def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], dimensions: int) -> _BulkWriteBatch:
+def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], vector_type: VectorType) -> _BulkWriteBatch:
     """
     Hash already-converted rows and drop the duplicates among them.
 
     Args:
         array (np.ndarray): Storage-precision rows from `hashing.to_storage_array`.
         metadata_list (list[dict]): Metadata per row, the same length as `array`.
-        dimensions (int): The collection's dimensionality.
+        vector_type (VectorType): Storage type of the target collection.
 
     Returns:
         _BulkWriteBatch: The deduplicated batch, ready to bind.
@@ -152,8 +152,7 @@ def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], dimensions: int) 
         unique_metadata_hashes.append(metadata_hash)
 
     return _BulkWriteBatch(
-        dimensions=dimensions,
-        flat_vectors=hashing.flatten_rows(array, unique_row_indices),
+        vectors=hashing.to_pgvector_rows(array, unique_row_indices, vector_type),
         metadata_json=unique_metadata_json,
         embedding_hashes=unique_embedding_hashes,
         metadata_hashes=unique_metadata_hashes,
@@ -410,10 +409,8 @@ class WriteMixin(DataAccessLayerBase):
                 )
                 SELECT
                     $1::bigint,
-                    -- one flat float4[] for the batch, sliced per row. asyncpg encodes it in
-                    -- binary, so the vectors never become text on the way here.
-                    ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
-                    $4::text,
+                    raw.embedding,
+                    $3::text,
                     raw.metadata::jsonb,
                     -- legacy md5 columns, written with the sha256 value so their NOT NULL and
                     -- unique constraint stay satisfied until the contract migration drops
@@ -422,8 +419,8 @@ class WriteMixin(DataAccessLayerBase):
                     raw.metadata_hash,
                     raw.embedding_hash,
                     raw.metadata_hash
-                FROM unnest($5::text[], $6::uuid[], $7::uuid[])
-                    WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[])
+                    AS raw(embedding, metadata, embedding_hash, metadata_hash)
                 -- the hashes come back so results can be matched to inputs by content rather
                 -- than by an order Postgres does not guarantee
                 RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
@@ -433,8 +430,7 @@ class WriteMixin(DataAccessLayerBase):
             try:
                 rows = await stmt.fetch(
                     collection.id,
-                    batch.flat_vectors,
-                    batch.dimensions,
+                    batch.vectors,
                     authz,
                     batch.metadata_json,
                     batch.embedding_hashes,
@@ -536,12 +532,12 @@ class WriteMixin(DataAccessLayerBase):
         by_content = [i for i, embedding_id in enumerate(embedding_ids) if embedding_id is None]
 
         update_ids = [embedding_ids[i] for i in by_id]
-        update_vectors = hashing.flatten_rows(array, by_id)
+        update_vectors = hashing.to_pgvector_rows(array, by_id, vector_type)
         update_embedding_hashes = hashing.hash_rows(array[by_id])
         update_metadata_json = [hashing.canonical_metadata_json(metadata_list[i]) for i in by_id]
         update_metadata_hashes = [hashing.hash_metadata_json(text) for text in update_metadata_json]
 
-        batch = _dedupe_rows(array[by_content], [metadata_list[i] for i in by_content], collection.dimensions)
+        batch = _dedupe_rows(array[by_content], [metadata_list[i] for i in by_content], vector_type)
 
         table, cast = get_embeddings_table_and_cast(vector_type)
 
@@ -555,9 +551,8 @@ class WriteMixin(DataAccessLayerBase):
                     f"""
                     UPDATE {table} AS e
                     SET
-                        -- the same flat float4[] slicing as the bulk INSERT, so vectors stay binary
-                        embedding = ($2::float4[])[((u.ord - 1) * $3::int + 1):(u.ord * $3::int)]{cast},
-                        authz = $4::text,
+                        embedding = u.embedding,
+                        authz = $3::text,
                         metadata = u.metadata::jsonb,
                         -- legacy md5 columns, see the note in create_embeddings_bulk
                         embedding_hash = u.embedding_hash,
@@ -565,8 +560,8 @@ class WriteMixin(DataAccessLayerBase):
                         embedding_hash_v2 = u.embedding_hash,
                         metadata_hash_v2 = u.metadata_hash,
                         updated_at = NOW()
-                    FROM unnest($5::text[], $6::uuid[], $7::uuid[], $8::uuid[])
-                        WITH ORDINALITY AS u(metadata, embedding_id, embedding_hash, metadata_hash, ord)
+                    FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[], $7::uuid[])
+                        WITH ORDINALITY AS u(embedding, metadata, embedding_id, embedding_hash, metadata_hash, ord)
                     WHERE e.collection_id = $1::bigint AND e.embedding_id = u.embedding_id
                     RETURNING e.collection_id, e.embedding_id, e.embedding, e.authz, e.metadata,
                               e.created_at, e.updated_at, u.ord
@@ -576,7 +571,6 @@ class WriteMixin(DataAccessLayerBase):
                     rows = await stmt.fetch(
                         collection.id,
                         update_vectors,
-                        collection.dimensions,
                         authz,
                         update_metadata_json,
                         update_ids,
@@ -608,16 +602,16 @@ class WriteMixin(DataAccessLayerBase):
                     )
                     SELECT
                         $1::bigint,
-                        ($2::float4[])[((raw.ord - 1) * $3::int + 1):(raw.ord * $3::int)]{cast},
-                        $4::text,
+                        raw.embedding,
+                        $3::text,
                         raw.metadata::jsonb,
                         -- legacy md5 columns, see the note in create_embeddings_bulk
                         raw.embedding_hash,
                         raw.metadata_hash,
                         raw.embedding_hash,
                         raw.metadata_hash
-                    FROM unnest($5::text[], $6::uuid[], $7::uuid[])
-                        WITH ORDINALITY AS raw(metadata, embedding_hash, metadata_hash, ord)
+                    FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[])
+                        AS raw(embedding, metadata, embedding_hash, metadata_hash)
                     -- Conflicts resolve on the v2 index. A new row writes the same value to the
                     -- legacy columns, so anything that would collide there collides here too and
                     -- is handled; a collision with a legacy md5 value would need sha256 and md5
@@ -632,8 +626,7 @@ class WriteMixin(DataAccessLayerBase):
                 # If RLS denies insert or update, this will raise an error
                 rows = await stmt.fetch(
                     collection.id,
-                    batch.flat_vectors,
-                    batch.dimensions,
+                    batch.vectors,
                     authz,
                     batch.metadata_json,
                     batch.embedding_hashes,

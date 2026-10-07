@@ -12,6 +12,7 @@ import importlib.util
 from pathlib import Path
 
 import asyncpg
+import numpy as np
 import pytest
 from pgvector.asyncpg import register_vector
 
@@ -111,6 +112,27 @@ def test_backfill_writes_the_hashes_the_app_would_write(test_database, table, ve
         assert row["metadata_hash_v2"] == hashing.hash_metadata({})
         # the legacy columns are left exactly as they were
         assert row["embedding_hash"] != row["embedding_hash_v2"]
+
+
+@pytest.mark.parametrize(
+    ("vector_type", "host_dtype"),
+    [(VectorType.vector, ">f4"), (VectorType.halfvec, ">f2")],
+)
+def test_backfill_hashes_do_not_depend_on_host_byte_order(vector_type, host_dtype):
+    """
+    The hash is the same whatever byte order `to_numpy()` hands back.
+
+    pgvector's `to_numpy()` is in host order, so this stands in for a big-endian host. Hashing
+    that view as-is would write hashes no little-endian app write could ever match.
+    """
+
+    class BigEndianHostVector:
+        def to_numpy(self):
+            return np.asarray([1.0, 2.0, 3.0], dtype=host_dtype)
+
+    embedding_hash, _ = backfill.row_hashes(BigEndianHostVector(), "{}", vector_type)
+
+    assert embedding_hash == hashing.hash_vector([1.0, 2.0, 3.0], vector_type, 3)
 
 
 def test_backfill_is_idempotent(test_database):

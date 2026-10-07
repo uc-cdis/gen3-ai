@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 from asyncpg.exceptions import InsufficientPrivilegeError, UniqueViolationError
+from pgvector import Vector
 from pgvector.asyncpg import register_vector
 
 from gen3_embeddings import config
@@ -387,8 +388,8 @@ class TestPrepareBulkWrite:
         assert batch.row_count == 2
         assert batch.has_duplicates is True
         assert batch.original_to_unique == [0, 1, 0]
-        # only the surviving rows are bound, row-major
-        assert batch.flat_vectors == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        # only the surviving rows are bound
+        assert batch.vectors == [Vector([1.0, 2.0, 3.0]), Vector([4.0, 5.0, 6.0])]
 
     def test_a_batch_without_repeats_maps_one_to_one(self):
         """Nothing to collapse means the identity mapping and the cheap result path."""
@@ -446,11 +447,10 @@ class TestPrepareBulkWrite:
 
     def test_a_wrong_length_vector_is_rejected_before_any_binding(self):
         """
-        A vector of the wrong length cannot be bound at all.
+        A vector of the wrong length is rejected before anything is bound.
 
-        The INSERT binds the batch as one flat float4[] and slices row `i` by the collection's
-        dimensionality, so a short vector would shift every following row's slice rather than
-        fail: row 2 would be stored holding the tail of row 1.
+        The column type would refuse it too, but only after a connection is taken and the
+        whole batch is sent, and with an error that does not say which row was wrong.
         """
         with pytest.raises(EmbeddingDimensionMismatchError):
             _prepare_bulk_write(make_collection(), [[1.0, 2.0, 3.0], [1.0, 2.0]], None)
@@ -465,7 +465,7 @@ class TestPrepareBulkWrite:
         batch = _prepare_bulk_write(make_collection(), [], None)
 
         assert batch.row_count == 0
-        assert batch.flat_vectors == []
+        assert batch.vectors == []
         assert batch.original_to_unique == []
 
     def test_row_keys_pair_the_hashes_positionally(self):
@@ -886,14 +886,14 @@ class TestEmbeddings:
         assert pool.acquired == 0
 
     @pytest.mark.asyncio
-    async def test_a_bulk_write_binds_the_batch_in_the_order_the_insert_slices_it(self):
+    async def test_a_bulk_write_binds_the_batch_as_parallel_arrays(self):
         """
-        The seven parameters are what let one statement write a whole batch in binary.
+        The six parameters are what let one statement write a whole batch in binary.
 
-        $2 is the flat float4[] and $3 the stride the INSERT slices it by, so the vectors never
-        become text on the way to the server; $5-$7 are the parallel per-row arrays. Everything
-        here is positional, and a wrong stride or a swapped pair of arrays would store rows made
-        of other rows' halves rather than fail.
+        $2 is a `vector[]` of pgvector objects, which pgvector's codec encodes in binary, so the
+        vectors never become text on the way to the server; $4-$6 are the other per-row arrays,
+        unnested alongside it. Everything here is positional, and a swapped pair of arrays would
+        store rows with another row's metadata or hashes rather than fail.
         """
         vectors = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
         metadata_list = [{"i": 0}, {"i": 1}]
@@ -902,10 +902,10 @@ class TestEmbeddings:
 
         results = await dal.create_embeddings_bulk(make_collection(id=7), vectors, DOCS_AUTHZ, metadata_list)
 
-        collection_id, flat_vectors, dimensions, authz, metadata_json, embedding_hashes, metadata_hashes = conn.params
+        assert "unnest($2::vector[], $4::text[], $5::uuid[], $6::uuid[])" in normalized(conn.sql)
+        collection_id, bound_vectors, authz, metadata_json, embedding_hashes, metadata_hashes = conn.params
         assert collection_id == 7
-        assert flat_vectors == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-        assert dimensions == 3
+        assert bound_vectors == [Vector(vector) for vector in vectors]
         assert authz == DOCS_AUTHZ
         assert metadata_json == ['{"i":0}', '{"i":1}']
         assert all(isinstance(h, UUID) for h in embedding_hashes + metadata_hashes)
@@ -991,7 +991,7 @@ class TestEmbeddings:
         results = await dal.upsert_embeddings_bulk(make_collection(), vectors, DOCS_AUTHZ, None)
 
         # one row written, two results
-        assert conn.params[1] == [1.0, 2.0, 3.0]
+        assert conn.params[1] == [Vector([1.0, 2.0, 3.0])]
         assert len(results) == 2
         assert results[0] is results[1]
 
@@ -1102,7 +1102,7 @@ class TestEmbeddings:
             await dal.update_embedding(make_collection(), uuid4(), [1.0, 2.0, 3.0], None, None)
 
     @pytest.mark.asyncio
-    async def test_updates_by_id_are_one_statement_with_binding_in_slicing_order(self):
+    async def test_updates_by_id_are_one_statement_with_binding_in_unnest_order(self):
         """
         Every item with an id is updated by a single UPDATE, however many there are.
         """
@@ -1122,17 +1122,14 @@ class TestEmbeddings:
         # the legacy md5 columns get the sha256 value, as on every other write
         assert "embedding_hash = u.embedding_hash" in sql
         assert "embedding_hash_v2 = u.embedding_hash" in sql
-        # the placeholder types have to line up with the values bound below: text for the
-        # metadata, uuid for the ids and hashes
-        assert "unnest($5::text[], $6::uuid[], $7::uuid[], $8::uuid[])" in sql
-        assert "AS u(metadata, embedding_id, embedding_hash, metadata_hash, ord)" in sql
+        # the placeholder types have to line up with the values bound below: the column's
+        # vector type, text for the metadata, uuid for the ids and hashes
+        assert "unnest($2::vector[], $4::text[], $5::uuid[], $6::uuid[], $7::uuid[])" in sql
+        assert "AS u(embedding, metadata, embedding_id, embedding_hash, metadata_hash, ord)" in sql
 
-        collection_id, flat_vectors, dimensions, authz, metadata_json, bound_ids, embedding_hashes, metadata_hashes = (
-            conn.params
-        )
+        collection_id, bound_vectors, authz, metadata_json, bound_ids, embedding_hashes, metadata_hashes = conn.params
         assert collection_id == 7
-        assert flat_vectors == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
-        assert dimensions == 3
+        assert bound_vectors == [Vector(vector) for vector in vectors]
         assert authz == DOCS_AUTHZ
         assert metadata_json == ['{"i":0}', '{"i":1}', '{"i":2}']
         assert bound_ids == ids
@@ -1165,8 +1162,8 @@ class TestEmbeddings:
         assert conn.transactions == 1
         assert [normalized(sql).split()[0] for sql, _ in conn.queries] == ["UPDATE", "INSERT"]
         # the UPDATE binds only the item with an id, the INSERT only the two without
-        assert conn.queries[0][1][1] == [1.0, 2.0, 3.0]
-        assert conn.queries[1][1][1] == [9.0, 9.0, 9.0, 4.0, 5.0, 6.0]
+        assert conn.queries[0][1][1] == [Vector([1.0, 2.0, 3.0])]
+        assert conn.queries[1][1][1] == [Vector([9.0, 9.0, 9.0]), Vector([4.0, 5.0, 6.0])]
         # results come back in the caller's order, whichever statement wrote each
         assert results[1].embedding_id == named
         assert [r.embedding for r in results] == [[9.0, 9.0, 9.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]

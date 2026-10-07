@@ -20,8 +20,9 @@ PUT conflicts on to turn an insert into an update. Two properties matter.
    most visibly on halfvec collections, where float16 has ~3 decimal digits.
 
 Hashing here (rather than as `md5(...)` inside the INSERT) also means the vector never has
-to be serialized to text for the database to hash it, which is what makes the binary
-float32-array write path in `db.py` possible.
+to be serialized to text for the database to hash it, so the write path can bind vectors in
+pgvector's binary format. docs/binary_architecture.md describes the whole path, from JSON to
+the stored row.
 """
 
 import hashlib
@@ -29,6 +30,7 @@ import json
 from uuid import UUID
 
 import numpy as np
+from pgvector import HalfVector, Vector
 
 from gen3_embeddings.database.errors import (
     EmbeddingDimensionMismatchError,
@@ -82,8 +84,8 @@ def to_storage_array(
     """
     Convert a batch of vectors into one (n, dimensions) array at storage precision.
 
-    The array is the input to both the row hashes and the flat float32 array the bulk INSERT
-    binds, so it is built once per request.
+    The array is the input to both the row hashes and the pgvector objects the bulk writes
+    bind, so it is built once per request.
 
     Args:
         vectors (list[list[float]]): Vectors to convert; all must have `dimensions` elements.
@@ -96,10 +98,9 @@ def to_storage_array(
 
     Raises:
         EmbeddingDimensionMismatchError: If any vector's length is not `dimensions`. The
-            route layer already checks this per request, but the bulk INSERT binds these
-            vectors as one flat array sliced by `dimensions`, so a wrong length here would
-            silently shift every following row rather than fail. This check is what makes
-            that flattening safe.
+            route layer already checks this per request; checking again here means a ragged
+            batch fails with this error, naming the offending row, rather than as a generic
+            numpy error from building the array.
         EmbeddingNotRepresentableError: If a value overflows the storage type (only reachable
             for halfvec, whose float16 range stops at ~65504).
     """
@@ -139,28 +140,28 @@ def hash_rows(array: np.ndarray) -> list[UUID]:
     return [UUID(bytes=hashlib.sha256(row.tobytes()).digest()[:DIGEST_BYTES]) for row in array]
 
 
-def flatten_rows(array: np.ndarray, row_indices: list[int]) -> list[float]:
+def to_pgvector_rows(
+    array: np.ndarray,
+    row_indices: list[int],
+    vector_type: VectorType,
+) -> list[Vector | HalfVector]:
     """
-    Flatten the selected rows into the row-major float list bound as the INSERT's float32 array parameter.
+    Convert the selected rows into the pgvector objects bound as a write's `vector[]` or `halfvec[]`.
 
-    The bulk INSERT binds one flat array for the whole batch and slices out row `i` with
-    `arr[((i - 1) * dimensions + 1):(i * dimensions)]`, which is what keeps vectors off the
-    text-serialization path: asyncpg encodes the float32 array in binary, so no float ever
-    gets formatted as a string.
+    pgvector reads the rows by value, so their little-endian byte order is interpreted
+    correctly, and its asyncpg codec owns the wire format from here on.
 
     Args:
         array (np.ndarray): Storage-precision array from `to_storage_array`.
-        row_indices (list[int]): Ascending indices of the rows to keep, after deduplication.
+        row_indices (list[int]): Indices of the rows to keep, after deduplication.
+        vector_type (VectorType): Storage type of the target collection, which decides
+            whether the rows become `Vector` or `HalfVector`.
 
     Returns:
-        list[float]: Concatenated rows, in `row_indices` order.
+        list[Vector | HalfVector]: One object per selected row, in `row_indices` order.
     """
-    if len(row_indices) == len(array):
-        # every row survived deduplication, so skip the fancy-index copy
-        selected = array
-    else:
-        selected = array[row_indices]
-    return selected.reshape(-1).tolist()
+    wrap = Vector if vector_type == VectorType.vector else HalfVector
+    return [wrap(array[index]) for index in row_indices]
 
 
 def hash_vector(vector: list[float], vector_type: VectorType, dimensions: int) -> UUID:
