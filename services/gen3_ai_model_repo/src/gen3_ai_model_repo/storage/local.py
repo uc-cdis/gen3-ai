@@ -122,14 +122,9 @@ class LocalStorageProvider(StorageProvider):
         object_key: str,
         expiry_seconds: int = 3600,
     ) -> str:
-        """
-        Return the validated object key for the local authorized-response path.
-
-        Returns:
-            str: The validated object key.
-        """
-        self._resolve_object_path(object_key)
-        return object_key
+        """Local storage cannot generate URLs for filesystem objects."""
+        del object_key, expiry_seconds
+        raise NotImplementedError("Signed URLs are not supported by local storage; use get_file_path")
 
     async def generate_upload_url(
         self,

@@ -9,6 +9,7 @@ from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
 from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.database.file_tracking import track_file
+from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import create_revision
 from gen3_ai_model_repo.models.schemas import RevisionCreateRequest, RevisionModel, UploadUrlRequest, UploadUrlResponse
 from gen3_ai_model_repo.routes.ai_models_shared import MultipartUploadResponse, validate_repository_path
@@ -213,6 +214,11 @@ async def upload_model(
         raise HTTPException(status_code=413, detail="Upload exceeds the maximum allowed size")
 
     _validate_request_components(namespace, repo, revision_name)
+    # The multipart endpoint creates a repository. Reject existing repositories
+    # before touching storage; callers adding a revision must use the revision
+    # and direct-upload completion flow.
+    if await db_model_exists(namespace, repo):
+        raise HTTPException(status_code=409, detail=f"Repository {namespace}/{repo} already exists")
     for upload in files:
         if not upload.filename:
             raise HTTPException(status_code=422, detail="Each uploaded file must have a filename")

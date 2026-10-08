@@ -45,8 +45,8 @@ def get_storage_provider():
             region=S3_REGION,
             endpoint_url=S3_ENDPOINT_URL,
             access_key_id=S3_ACCESS_KEY_ID,
-            secret_access_key=S3_SECRET_ACCESS_KEY,
-            session_token=S3_SESSION_TOKEN,
+            secret_access_key=str(S3_SECRET_ACCESS_KEY) if S3_SECRET_ACCESS_KEY is not None else None,
+            session_token=str(S3_SESSION_TOKEN) if S3_SESSION_TOKEN is not None else None,
             create_bucket_if_missing=STORAGE_CREATE_BUCKET_IF_MISSING,
         )
         return _provider_cache

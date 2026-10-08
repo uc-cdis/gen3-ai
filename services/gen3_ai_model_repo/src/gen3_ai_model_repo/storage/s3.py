@@ -1,6 +1,7 @@
 """S3 storage for the Gen3 AI model repo service."""
 
 import asyncio
+import base64
 
 import boto3
 from botocore.config import Config
@@ -46,12 +47,6 @@ class S3StorageProvider(StorageProvider):
             config=Config(s3={"addressing_style": "path"}),
         )
 
-    def _upload_semaphore(self) -> asyncio.Semaphore:
-        """Return the per-provider upload limiter, including lightweight test doubles."""
-        if not hasattr(self, "_upload_concurrency"):
-            self._upload_concurrency = asyncio.Semaphore(max(1, config.S3_UPLOAD_CONCURRENCY))
-        return self._upload_concurrency
-
     async def ensure_container(self):
         """
         Ensure the configured S3 bucket exists.
@@ -87,7 +82,7 @@ class S3StorageProvider(StorageProvider):
             local_path,
             self.bucket_name,
             object_key,
-            semaphore=self._upload_semaphore(),
+            semaphore=self._upload_concurrency,
         )
 
     async def upload_stream(self, stream, object_key: str):
@@ -97,7 +92,8 @@ class S3StorageProvider(StorageProvider):
             stream,
             self.bucket_name,
             object_key,
-            semaphore=self._upload_semaphore(),
+            ExtraArgs={"ChecksumAlgorithm": "SHA256"},
+            semaphore=self._upload_concurrency,
         )
 
     async def download_file(
@@ -201,7 +197,7 @@ class S3StorageProvider(StorageProvider):
         return await _s3_call(
             self.client.generate_presigned_url,
             ClientMethod="put_object",
-            Params={"Bucket": self.bucket_name, "Key": object_key},
+            Params={"Bucket": self.bucket_name, "Key": object_key, "ChecksumAlgorithm": "SHA256"},
             ExpiresIn=expiry_seconds,
         )
 
@@ -210,10 +206,20 @@ class S3StorageProvider(StorageProvider):
         object_key: str,
     ) -> dict:
         """Return metadata for an S3 object key."""
-        response = await _s3_call(self.client.head_object, Bucket=self.bucket_name, Key=object_key)
+        response = await _s3_call(
+            self.client.head_object,
+            Bucket=self.bucket_name,
+            Key=object_key,
+            ChecksumMode="ENABLED",
+        )
+        checksum = response.get("ChecksumSHA256")
+        try:
+            checksum = base64.b64decode(checksum, validate=True).hex() if checksum else None
+        except (ValueError, TypeError):
+            checksum = None
         return {
             "size": int(response.get("ContentLength", 0)),
             "etag": str(response.get("ETag", "")).strip('"') or None,
-            "checksum_sha256": response.get("ChecksumSHA256"),
+            "checksum_sha256": checksum,
             "last_modified": response.get("LastModified"),
         }

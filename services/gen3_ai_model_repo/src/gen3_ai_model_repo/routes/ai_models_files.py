@@ -118,6 +118,10 @@ async def list_repo_tree(
     description="Retrieve detailed metadata for a specific revision of a model repository including commit hash and ETag.",
     tags=["Models"],
 )
+@ai_models_files_router.get(
+    "/api/models/{namespace}/{repo}/revision/{revision}",
+    description="Retrieve metadata for a repository revision.",
+)
 async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionModel:
     """
     Retrieve revision metadata by revision name.
@@ -144,6 +148,10 @@ async def get_model_revision(namespace: str, repo: str, revision: str) -> Revisi
         status.HTTP_404_NOT_FOUND: {"description": "File not found"},
     },
     tags=["Models"],
+)
+@ai_models_files_router.head(
+    "/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    description="Retrieve file metadata without downloading file content.",
 )
 async def head_file(namespace: str, repo: str, rev: str, path: str):
     """
@@ -198,6 +206,10 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
         status.HTTP_404_NOT_FOUND: {"description": "File not found"},
     },
     tags=["Models"],
+)
+@ai_models_files_router.get(
+    "/{namespace}/{repo}/resolve/{rev}/{path:path}",
+    description="Download a model file from a repository revision.",
 )
 async def get_file(namespace: str, repo: str, rev: str, path: str):
     """

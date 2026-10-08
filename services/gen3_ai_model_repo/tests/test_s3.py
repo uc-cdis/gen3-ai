@@ -16,6 +16,7 @@ def provider():
     storage = S3StorageProvider.__new__(S3StorageProvider)
     storage.bucket_name = "test-bucket"
     storage.client = MagicMock()
+    storage._upload_concurrency = asyncio.Semaphore(2)
     return storage
 
 
@@ -76,8 +77,8 @@ async def test_s3_generates_signed_urls(provider):
 async def test_slow_upload_does_not_block_health_work(provider):
     """Allow another coroutine to run while a synchronous upload is slow."""
 
-    def slow_upload(*args):
-        del args
+    def slow_upload(*args, **kwargs):
+        del args, kwargs
         time.sleep(0.1)
 
     provider.client.upload_fileobj.side_effect = slow_upload

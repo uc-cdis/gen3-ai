@@ -14,7 +14,7 @@ logging.name = "gen3_ai_model_repo"
 
 PGDRIVER = starlette_config("PGDRIVER", default="postgresql")
 PGUSER = starlette_config("PGUSER", default="postgres")
-PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default="postgres")
+PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default=None)
 PGHOST = starlette_config("PGHOST", default="localhost")
 PGPORT = int(starlette_config("PGPORT", cast=int, default="5432"))
 PGDATABASE = starlette_config("PGDATABASE", default="gen3_ai_model_repo")
@@ -63,14 +63,14 @@ S3_ACCESS_KEY_ID = starlette_config(
 
 S3_SECRET_ACCESS_KEY = starlette_config(
     "S3_SECRET_ACCESS_KEY",
-    default="",
-    cast=str,
+    default=None,
+    cast=Secret,
 )
 
 S3_SESSION_TOKEN = starlette_config(
     "S3_SESSION_TOKEN",
-    default="",
-    cast=str,
+    default=None,
+    cast=Secret,
 )
 
 STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
@@ -79,7 +79,7 @@ STORAGE_CREATE_BUCKET_IF_MISSING = starlette_config(
     default=True,
 )
 
-S3_UPLOAD_CONCURRENCY = int(starlette_config("S3_UPLOAD_CONCURRENCY", cast=int, default="2"))
+S3_UPLOAD_CONCURRENCY = starlette_config("S3_UPLOAD_CONCURRENCY", cast=int, default=2)
 
 URL_PREFIX = starlette_config(
     "GEN3_AI_MODEL_REPO_PROXY_URL_PREFIX",
