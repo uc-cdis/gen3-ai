@@ -184,6 +184,8 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     provider = get_storage_provider()
     local_path = await provider.get_file_path(file_record["object_key"])
     if local_path is not None:
+        if not local_path.is_file():
+            raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
         return Response(
             status_code=200,
             headers={

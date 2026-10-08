@@ -19,6 +19,38 @@ get_bearer_token = HTTPBearer(auto_error=False)
 arborist = ArboristClient()
 
 
+async def get_authz_mapping(request: Request):
+    """Return the caller's Arborist authorization mapping for this request."""
+    if config.DEBUG_SKIP_AUTH and not request.headers.get("authorization"):
+        return {}
+    cached = getattr(request.state, "user_authz_mapping", None)
+    if cached is not None:
+        return cached
+    token = await _get_token(None, request)
+    if not token:
+        return {}
+    mapping = await arborist.auth_mapping(jwt=token.credentials)
+    request.state.user_authz_mapping = mapping
+    return mapping
+
+
+def get_allowed_authz_from_mapping(mapping, *, service: str, method: str) -> list[str]:
+    """
+    Extract resource paths granted a method for a service from Arborist data.
+
+    Returns:
+        Resource paths with the requested service and method grant.
+    """
+    return [
+        resource
+        for resource, permissions in mapping.items()
+        if isinstance(permissions, list)
+        and any(
+            entry.get("service") in {service, "*"} and entry.get("method") in {method, "*"} for entry in permissions
+        )
+    ]
+
+
 async def authorize_request(
     authz_resources: list[str],
     authz_service_name: str,

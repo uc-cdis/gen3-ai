@@ -73,20 +73,11 @@ async def list_models_route(
         HTTPException: If authorization cannot be evaluated.
     """
     allowed_paths = await get_allowed_repository_paths(request)
-    permitted: list[tuple[str, str]] | None = None
-    if allowed_paths is not None:
-        permitted = []
-        for path in allowed_paths:
-            repository_path = path.removeprefix("/ai_model_repo/")
-            if "/" not in repository_path:
-                continue
-            repository_namespace, repository_name = repository_path.split("/", 1)
-            permitted.append((repository_namespace, repository_name))
     repos = await list_models(
         namespace=namespace,
         tags=tags,
         search=search,
-        permitted_repositories=permitted,
+        permitted_resource_paths=allowed_paths,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -262,6 +253,14 @@ async def delete_model(namespace: str, repo: str) -> DeleteModelResponse:
                 "Repository metadata deleted but storage cleanup failed",
                 extra={"namespace": namespace, "repo": repo, "object_key": object_key},
             )
+    prefix = f"{namespace}/{repo}/"
+    try:
+        await provider.delete_prefix(prefix)
+    except Exception:
+        logging.exception(
+            "Repository untracked storage cleanup failed",
+            extra={"namespace": namespace, "repo": repo, "prefix": prefix},
+        )
 
     return DeleteModelResponse(status="deleted", repo=f"{namespace}/{repo}")
 

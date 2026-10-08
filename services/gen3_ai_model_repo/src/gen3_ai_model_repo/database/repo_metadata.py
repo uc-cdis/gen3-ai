@@ -193,6 +193,7 @@ async def list_models(
     limit: int = 100,
     offset: int = 0,
     permitted_repositories: list[tuple[str, str]] | None = None,
+    permitted_resource_paths: list[str] | None = None,
 ) -> list[RepositoryMetadataModel]:
     """
     List repositories, optionally filtered by namespace, tags, or free-text search.
@@ -205,7 +206,6 @@ async def list_models(
     """
     if search and len(search) > MAX_SEARCH_LENGTH:
         raise ValueError(f"search must be {MAX_SEARCH_LENGTH} characters or fewer")
-    pool = await get_db_pool()
     clauses = []
     values: list[object] = []
     if namespace:
@@ -225,6 +225,16 @@ async def list_models(
             values.extend([repository_namespace, repository_name])
             scope_clauses.append(f"(namespace = ${len(values) - 1} AND model_name = ${len(values)})")
         clauses.append("(" + " OR ".join(scope_clauses) + ")")
+    if permitted_resource_paths is not None:
+        if not permitted_resource_paths:
+            return []
+        values.append(permitted_resource_paths)
+        paths_param = len(values)
+        clauses.append(
+            f"(('/ai_model_repo/' || namespace || '/' || model_name) = ANY(${paths_param}::text[]) "
+            f"OR ('/ai_model_repo/' || namespace) = ANY(${paths_param}::text[]))"
+        )
+    pool = await get_db_pool()
     sql = """
         SELECT namespace, model_name AS repo_name, description, tags, created_at
         FROM models

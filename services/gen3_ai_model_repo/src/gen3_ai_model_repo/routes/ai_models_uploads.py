@@ -1,6 +1,7 @@
 """Upload routes for the Gen3 AI model repo service."""
 
 import hashlib
+from uuid import UUID, uuid4
 
 from fastapi import Depends, File, Form, HTTPException, Request, UploadFile
 
@@ -11,7 +12,14 @@ from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.database.file_tracking import track_file
 from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import create_revision
-from gen3_ai_model_repo.models.schemas import RevisionCreateRequest, RevisionModel, UploadUrlRequest, UploadUrlResponse
+from gen3_ai_model_repo.database.upload_intents import complete_upload_intents, get_upload_intents, reserve_upload
+from gen3_ai_model_repo.models.schemas import (
+    DirectUploadCompleteRequest,
+    RevisionCreateRequest,
+    RevisionModel,
+    UploadUrlRequest,
+    UploadUrlResponse,
+)
 from gen3_ai_model_repo.routes.ai_models_shared import MultipartUploadResponse, validate_repository_path
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 from gen3_ai_model_repo.storage.keys import build_object_key, validate_key_component
@@ -134,6 +142,7 @@ async def _process_uploaded_files(
     namespace: str,
     repo: str,
     revision_name: str,
+    attempt_id: str,
 ) -> tuple[list[str], list[tuple[str, str, str, str, int, str | None]], int]:
     """
     Upload files to object storage and collect file metadata for persistence.
@@ -160,7 +169,7 @@ async def _process_uploaded_files(
         if total_size > config.MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="Total upload size exceeds the maximum allowed size")
 
-        object_key = _build_object_key(namespace, repo, revision_name, upload.filename)
+        object_key = _build_object_key(namespace, repo, revision_name, f"{attempt_id}/{upload.filename}")
         await provider.upload_stream(upload.file, object_key)
 
         meta = await provider.get_file_metadata(object_key)
@@ -225,6 +234,7 @@ async def upload_model(
         _build_object_key(namespace, repo, revision_name, upload.filename)
 
     provider = get_storage_provider()
+    attempt_id = uuid4().hex
     uploaded_objects: list[str] = []
     try:
         uploaded_objects, uploaded_file_records, total_size = await _process_uploaded_files(
@@ -233,6 +243,7 @@ async def upload_model(
             namespace,
             repo,
             revision_name,
+            attempt_id,
         )
 
         pool = await get_db_pool()
@@ -337,7 +348,17 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
             status_code=409,
             detail="Direct upload URLs are not supported for local storage; use the multipart upload endpoint",
         ) from exc
-    return UploadUrlResponse(upload_url=upload_url, object_key=object_key, method="PUT")
+    try:
+        upload_id = await reserve_upload(namespace, repo, request.revision_name, request.file_name, object_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    return UploadUrlResponse(
+        upload_url=upload_url,
+        object_key=object_key,
+        method="PUT",
+        upload_id=str(upload_id),
+        headers={"x-amz-checksum-sha256": "<base64-sha256>"},
+    )
 
 
 @ai_models_uploads_router.post(
@@ -350,7 +371,7 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
 async def complete_upload(
     namespace: str,
     repo: str,
-    request: RevisionCreateRequest,
+    request: DirectUploadCompleteRequest,
 ) -> RevisionModel:
     """
     Finalize an upload by creating/updating revision and file tracking records.
@@ -364,8 +385,15 @@ async def complete_upload(
 
     _validate_request_components(namespace, repo, request.revision_name)
     provider = get_storage_provider()
+    try:
+        intent_ids = [UUID(value) for value in request.upload_ids]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid upload intent") from exc
+    intents = await get_upload_intents(intent_ids, namespace, repo, request.revision_name)
+    if not intents:
+        raise HTTPException(status_code=404, detail="No active upload intents found")
+    object_keys = [row["object_key"] for row in intents]
     storage_prefix = f"{namespace}/{repo}/{request.revision_name}"
-    object_keys = await provider.list_files(storage_prefix)
     if not object_keys:
         raise HTTPException(status_code=404, detail="No uploaded files found for the requested revision")
 
@@ -404,6 +432,9 @@ async def complete_upload(
     for file_path, object_key, metadata in file_records:
         content_etag = metadata.get("etag")
         content_sha = metadata.get("checksum_sha256")
+        expected_sha = request.checksums_sha256.get(file_path)
+        if expected_sha is not None and content_sha != expected_sha.lower():
+            raise HTTPException(status_code=400, detail=f"Checksum mismatch for {file_path}")
 
         await track_file(
             namespace=namespace,
@@ -416,4 +447,5 @@ async def complete_upload(
             s3_key=object_key,
         )
 
+    await complete_upload_intents(intent_ids)
     return RevisionModel(id=str(revision["id"]), revision=revision["revision"], sha=revision["sha"] or "")

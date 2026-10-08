@@ -106,6 +106,15 @@ class UploadUrlResponse(BaseModel):
     upload_url: str
     object_key: str
     method: str = "PUT"
+    upload_id: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class DirectUploadCompleteRequest(RevisionCreateRequest):
+    """Request identifying bounded direct-upload intents to complete."""
+
+    upload_ids: list[str] = Field(default_factory=list)
+    checksums_sha256: dict[str, str] = Field(default_factory=dict)
 
 
 class FileMetadataModel(BaseModel):

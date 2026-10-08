@@ -148,3 +148,37 @@ async def test_get_or_create_revision_none_when_missing_repo(monkeypatch):
 
     monkeypatch.setattr(revisions, "get_db_pool", fake_get_db_pool)
     assert await revisions.get_or_create_revision("ns", "repo") is None
+
+
+@pytest.mark.asyncio
+async def test_list_models_uses_bound_array_scope_before_pagination(monkeypatch):
+    """Authorization scope is bound once and applied before LIMIT/OFFSET."""
+    conn = FakeConn()
+
+    async def fake_get_db_pool():
+        return FakePool(conn)
+
+    monkeypatch.setattr(repo_metadata, "get_db_pool", fake_get_db_pool)
+    scope = ["/ai_model_repo/ns/repo", "/ai_model_repo/other"] * 600
+    await repo_metadata.list_models(permitted_resource_paths=scope, limit=25, offset=100)
+
+    query, args = conn.executed[-1]
+    assert "ANY($1::text[])" in query
+    assert args[0] == scope
+    assert query.index("WHERE") < query.index("ORDER BY") < query.index("LIMIT")
+    assert args[-2:] == (25, 100)
+
+
+@pytest.mark.asyncio
+async def test_list_models_empty_scope_returns_before_database_query(monkeypatch):
+    """No grants must not accidentally expose repositories or query all rows."""
+    called = False
+
+    async def fake_get_db_pool():
+        nonlocal called
+        called = True
+        raise AssertionError("empty authorization scope must short-circuit")
+
+    monkeypatch.setattr(repo_metadata, "get_db_pool", fake_get_db_pool)
+    assert await repo_metadata.list_models(permitted_resource_paths=[]) == []
+    assert called is False

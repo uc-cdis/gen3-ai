@@ -5,6 +5,7 @@ from importlib.metadata import version
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import PlainTextResponse
 
 from common.auth import get_user_id
 from common.logging_setup import configure_logging
@@ -22,6 +23,10 @@ API_REQUESTS_COUNTER = "gen3_ai_model_repo_api_requests"
 API_REQUESTS_COUNTER_DESCRIPTION = "API requests for Gen3 AI Model Repo."
 METRICS_PATH = "/metrics"
 UNMATCHED_PATH = "<unmatched>"
+
+
+class UploadBodyTooLargeError(Exception):
+    """Raised by the upload receive wrapper when the wire body exceeds its limit."""
 
 
 @asynccontextmanager
@@ -97,6 +102,44 @@ def get_app() -> FastAPI:
     unrouted_paths = frozenset(path for path in (app.docs_url, app.redoc_url, app.openapi_url, METRICS_PATH) if path)
 
     @app.middleware("http")
+    async def middleware_limit_multipart_upload(request: Request, call_next):
+        """
+        Reject oversized multipart uploads before FastAPI parses form fields.
+
+        Returns:
+            The downstream response, or HTTP 413 for an oversized request.
+        """
+        is_upload = request.method == "POST" and request.url.path.endswith("/upload")
+        content_type = request.headers.get("content-type", "")
+        if not is_upload or not content_type.lower().startswith("multipart/form-data"):
+            return await call_next(request)
+
+        # Multipart framing and field headers are bounded overhead; content
+        # validation remains enforced by the endpoint after parsing.
+        wire_limit = config.MAX_UPLOAD_BYTES + 1024 * 1024
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > wire_limit:
+            return PlainTextResponse("Upload exceeds the maximum allowed size", status_code=413)
+
+        received = 0
+        original_receive = request._receive
+
+        async def limited_receive():
+            nonlocal received
+            message = await original_receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > wire_limit:
+                    raise UploadBodyTooLargeError
+            return message
+
+        request._receive = limited_receive
+        response = await call_next(request)
+        if received > wire_limit:
+            return PlainTextResponse("Upload exceeds the maximum allowed size", status_code=413)
+        return response
+
+    @app.middleware("http")
     async def middleware_record_api_metric(request: Request, call_next):
         response = await call_next(request)
 
@@ -130,6 +173,12 @@ def get_app() -> FastAPI:
         )
 
         return response
+
+    @app.exception_handler(UploadBodyTooLargeError)
+    async def upload_body_too_large_handler(request: Request, exc: UploadBodyTooLargeError):
+        """Return a stable 413 response for chunked oversized uploads."""
+        del request, exc
+        return PlainTextResponse("Upload exceeds the maximum allowed size", status_code=413)
 
     @app.get("/_status", include_in_schema=False)
     async def status():

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -28,9 +29,15 @@ def test_list_models_empty_returns_200(monkeypatch):
     import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
 
     async def fake_list_models(
-        namespace=None, tags=None, search=None, limit=100, offset=0, permitted_repositories=None
+        namespace=None,
+        tags=None,
+        search=None,
+        limit=100,
+        offset=0,
+        permitted_repositories=None,
+        permitted_resource_paths=None,
     ):
-        del namespace, tags, search, limit, offset, permitted_repositories
+        del namespace, tags, search, limit, offset, permitted_repositories, permitted_resource_paths
         return []
 
     monkeypatch.setattr(repo_routes, "list_models", fake_list_models)
@@ -148,6 +155,45 @@ def test_update_repository_requires_authorization():
     response = client.patch("/api/models/ns/repo", json={"description": "updated"})
 
     assert response.status_code in {401, 403}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "expected_action"),
+    [
+        ("GET", "/api/models/ns/repo", "read"),
+        ("HEAD", "/api/models/ns/repo/resolve/main/config.json", "read"),
+        ("PATCH", "/api/models/ns/repo", "update"),
+        ("DELETE", "/api/models/ns/repo", "delete"),
+        ("DELETE", "/api/models/ns/repo/files/ns:repo:main:config.json", "delete"),
+    ],
+)
+def test_repository_authorization_denial_happens_before_handlers(monkeypatch, method, path, expected_action):
+    """Deny repository access after service access and before route/database work."""
+    import gen3_ai_model_repo.auth as auth
+
+    calls = []
+
+    async def fake_authorize_request(*, authz_resources, authz_service_name, authz_access_method, request):
+        del authz_service_name, request
+        calls.append((authz_resources, authz_access_method))
+        if authz_resources == ["/ai_model_repo/ns/repo"]:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=403)
+
+    monkeypatch.setattr(auth, "authorize_request", fake_authorize_request)
+    app = FastAPI()
+    app.include_router(ai_models_files_router)
+    app.include_router(ai_models_repositories_router)
+    app.include_router(ai_models_uploads_router)
+    client = TestClient(app)
+    response = client.request(method, path, json={"description": "must not run"})
+
+    assert response.status_code == 403
+    assert calls == [
+        ([auth.config.AUTHZ_SERVICE_RESOURCE], "access"),
+        (["/ai_model_repo/ns/repo"], expected_action),
+    ]
 
 
 def test_upload_rejects_too_many_files(monkeypatch):

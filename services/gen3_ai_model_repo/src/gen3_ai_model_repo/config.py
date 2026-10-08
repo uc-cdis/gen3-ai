@@ -25,6 +25,10 @@ MAX_PAGE_SIZE = int(starlette_config("MAX_PAGE_SIZE", cast=int, default="1000"))
 MAX_SEARCH_LENGTH = int(starlette_config("MAX_SEARCH_LENGTH", cast=int, default="256"))
 MAX_UPLOAD_FILES = int(starlette_config("MAX_UPLOAD_FILES", cast=int, default="100"))
 MAX_UPLOAD_BYTES = int(starlette_config("MAX_UPLOAD_BYTES", cast=int, default="5368709120"))
+DIRECT_UPLOAD_QUOTA_BYTES = int(starlette_config("DIRECT_UPLOAD_QUOTA_BYTES", cast=int, default="10737418240"))
+DIRECT_UPLOAD_MAX_FILE_BYTES = int(starlette_config("DIRECT_UPLOAD_MAX_FILE_BYTES", cast=int, default="5368709120"))
+DIRECT_UPLOAD_MAX_INTENTS = int(starlette_config("DIRECT_UPLOAD_MAX_INTENTS", cast=int, default="100"))
+DIRECT_UPLOAD_EXPIRY_SECONDS = int(starlette_config("DIRECT_UPLOAD_EXPIRY_SECONDS", cast=int, default="3600"))
 
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",
