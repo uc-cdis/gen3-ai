@@ -2,10 +2,16 @@
 Common handling for metrics
 """
 
+# isort: off
+# prometheus_client freezes its choice of storage backend when it is first imported, based on
+# PROMETHEUS_MULTIPROC_DIR being present. common.config is what puts that in the environment, so
+# it has to be imported before anything that reaches prometheus_client - cdispyutils does.
+# Get this backwards and /metrics serves an empty 200 forever, silently.
+from common import config
+
 from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
 from fastapi import FastAPI
-
-from common import config
+# isort: on
 
 
 class ServiceMetrics:
@@ -43,6 +49,12 @@ def get_metrics_client(fastapi_app: FastAPI):
     Args:
         fastapi_app: The FastAPI application to which the metrics
             endpoint should be added (if any)
+
+    Returns:
+        The metrics client, or None when metrics are disabled.
+
+    Raises:
+        Exception: If metrics are enabled but METRICS_PROVIDER names an unsupported provider.
     """
     metrics_client = None
     metrics_client_kwargs = {}

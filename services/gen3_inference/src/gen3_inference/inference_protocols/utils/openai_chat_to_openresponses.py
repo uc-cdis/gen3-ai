@@ -159,6 +159,9 @@ def convert_chat_completion_stream_to_sse(
     async def _generator() -> AsyncGenerator[bytes]:
         """
         Yield each chat completion chunk as SSE events following Open Responses spec
+
+        Yields:
+            bytes: Server-sent event chunks.
         """
         usage_info = None
         sequence_number = 0
@@ -247,6 +250,11 @@ def convert_chat_completion_stream_to_sse(
     return StreamingResponse(_generator(), media_type="text/event-stream")
 
 
+"""
+Convert OpenAI Chat Completions response to Open Responses response format
+"""
+
+
 def chat_completion_to_openresponses_response(
     chat_response: ChatCompletion,
     metadata: dict[str, Any] | None = None,
@@ -256,6 +264,7 @@ def chat_completion_to_openresponses_response(
 
     Args:
         chat_response (ChatCompletion): Non-streaming chat completion response.
+        metadata (dict[str, Any] | None): Metadata to carry onto the converted response.
 
     Returns:
         ResponseResource: Open Responses response format
@@ -280,6 +289,9 @@ def _openai_chat_completion_to_openresponses(
           This is not ideal, but this is a shim anyway. Ideally we connect to inference providers
           that either expose Open Responses directly OR OpenAI's Responses, which is much more
           compatible.
+
+    Returns:
+        ResponseResource: The converted response.
     """
 
     return ResponseResource(
