@@ -90,6 +90,7 @@ class StorageProvider(ABC):
         self,
         object_key: str,
         expiry_seconds: int = 3600,
+        checksum_sha256: str | None = None,
     ) -> str:
         """Generate a signed URL for uploading an object."""
         pass

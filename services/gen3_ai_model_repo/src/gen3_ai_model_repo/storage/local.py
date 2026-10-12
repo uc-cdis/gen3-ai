@@ -130,6 +130,7 @@ class LocalStorageProvider(StorageProvider):
         self,
         object_key: str,
         expiry_seconds: int = 3600,
+        checksum_sha256: str | None = None,
     ) -> str:
         """
         Generate an upload URL for an object in local storage.
@@ -137,7 +138,7 @@ class LocalStorageProvider(StorageProvider):
         Raises:
             NotImplementedError: Direct uploads are unavailable for local storage.
         """
-        del expiry_seconds
+        del object_key, expiry_seconds, checksum_sha256
         raise NotImplementedError("Direct upload URLs are not supported by local storage; use multipart upload")
 
     async def get_file_metadata(

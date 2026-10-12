@@ -151,6 +151,21 @@ async def test_get_or_create_revision_none_when_missing_repo(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_file_record_accepts_revision_identifier(monkeypatch):
+    """Resolve files by either a human revision name or its commit identifier."""
+    conn = FakeConn()
+
+    async def fake_get_db_pool():
+        return FakePool(conn)
+
+    monkeypatch.setattr(file_tracking, "get_db_pool", fake_get_db_pool)
+    assert await file_tracking.get_file_record("ns", "repo", "commit-sha", "config.json") is None
+    query, args = conn.executed[-1]
+    assert "mr.revision_name = $3 OR mr.revision_identifier = $3" in query
+    assert args == ("ns", "repo", "commit-sha", "config.json")
+
+
+@pytest.mark.asyncio
 async def test_list_models_uses_bound_array_scope_before_pagination(monkeypatch):
     """Authorization scope is bound once and applied before LIMIT/OFFSET."""
     conn = FakeConn()

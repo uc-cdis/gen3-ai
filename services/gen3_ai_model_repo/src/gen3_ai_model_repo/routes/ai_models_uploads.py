@@ -1,5 +1,6 @@
 """Upload routes for the Gen3 AI model repo service."""
 
+import base64
 import hashlib
 from uuid import UUID, uuid4
 
@@ -9,10 +10,9 @@ from gen3_ai_model_repo import config
 from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
 from gen3_ai_model_repo.config import logging
 from gen3_ai_model_repo.database.db import get_db_pool
-from gen3_ai_model_repo.database.file_tracking import track_file
 from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import create_revision
-from gen3_ai_model_repo.database.upload_intents import complete_upload_intents, get_upload_intents, reserve_upload
+from gen3_ai_model_repo.database.upload_intents import get_upload_intents, reserve_upload
 from gen3_ai_model_repo.models.schemas import (
     DirectUploadCompleteRequest,
     RevisionCreateRequest,
@@ -339,17 +339,34 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
         HTTPException: If local storage does not support direct upload URLs.
     """
 
-    object_key = _build_object_key(namespace, repo, request.revision_name, request.file_name)
+    try:
+        checksum_bytes = base64.b64decode(request.checksum_sha256, validate=True)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="checksum_sha256 must be valid base64") from None
+    if len(checksum_bytes) != 32:
+        raise HTTPException(status_code=422, detail="checksum_sha256 must decode to 32 bytes")
+    checksum_hex = checksum_bytes.hex()
+    intent_id = uuid4()
+    object_key = _build_object_key(namespace, repo, request.revision_name, f"{intent_id}/{request.file_name}")
     provider = get_storage_provider()
     try:
-        upload_url = await provider.generate_upload_url(object_key)
+        upload_url = await provider.generate_upload_url(object_key, checksum_sha256=request.checksum_sha256)
     except NotImplementedError as exc:
         raise HTTPException(
             status_code=409,
             detail="Direct upload URLs are not supported for local storage; use the multipart upload endpoint",
         ) from exc
     try:
-        upload_id = await reserve_upload(namespace, repo, request.revision_name, request.file_name, object_key)
+        upload_id = await reserve_upload(
+            namespace,
+            repo,
+            request.revision_name,
+            request.file_name,
+            object_key,
+            checksum_hex,
+            request.file_size,
+            intent_id=intent_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     return UploadUrlResponse(
@@ -357,7 +374,10 @@ async def generate_upload_url(namespace: str, repo: str, request: UploadUrlReque
         object_key=object_key,
         method="PUT",
         upload_id=str(upload_id),
-        headers={"x-amz-checksum-sha256": "<base64-sha256>"},
+        headers={
+            "x-amz-sdk-checksum-algorithm": "SHA256",
+            "x-amz-checksum-sha256": request.checksum_sha256,
+        },
     )
 
 
@@ -385,30 +405,30 @@ async def complete_upload(
 
     _validate_request_components(namespace, repo, request.revision_name)
     provider = get_storage_provider()
+    if not request.upload_ids or len(request.upload_ids) > config.DIRECT_UPLOAD_MAX_INTENTS:
+        raise HTTPException(status_code=422, detail="upload_ids must contain between 1 and the configured maximum")
+    if len(set(request.upload_ids)) != len(request.upload_ids):
+        raise HTTPException(status_code=409, detail="upload_ids must be unique")
     try:
         intent_ids = [UUID(value) for value in request.upload_ids]
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid upload intent") from exc
     intents = await get_upload_intents(intent_ids, namespace, repo, request.revision_name)
-    if not intents:
-        raise HTTPException(status_code=404, detail="No active upload intents found")
-    object_keys = [row["object_key"] for row in intents]
-    storage_prefix = f"{namespace}/{repo}/{request.revision_name}"
-    if not object_keys:
-        raise HTTPException(status_code=404, detail="No uploaded files found for the requested revision")
+    if len(intents) != len(intent_ids):
+        raise HTTPException(status_code=404, detail="One or more upload intents are missing, expired, or completed")
+    if len({row["file_name"] for row in intents}) != len(intents):
+        raise HTTPException(status_code=409, detail="Upload intents contain duplicate file paths")
 
-    prefix_with_slash = f"{storage_prefix}/"
     file_records = []
-    for object_key in object_keys:
-        if not object_key.startswith(prefix_with_slash):
-            continue
-        file_path = object_key[len(prefix_with_slash) :]
-        if not file_path:
-            continue
-        file_records.append((file_path, object_key, await provider.get_file_metadata(object_key)))
-
-    if not file_records:
-        raise HTTPException(status_code=404, detail="No uploaded files found for the requested revision")
+    for row in intents:
+        metadata = await provider.get_file_metadata(row["object_key"])
+        size = int(metadata.get("size") or 0)
+        if size > config.DIRECT_UPLOAD_MAX_FILE_BYTES:
+            raise HTTPException(status_code=413, detail=f"Uploaded object is too large: {row['file_name']}")
+        actual_checksum = (metadata.get("checksum_sha256") or "").lower()
+        if actual_checksum != row["checksum_sha256"]:
+            raise HTTPException(status_code=400, detail=f"Checksum mismatch for {row['file_name']}")
+        file_records.append((row["file_name"], row["object_key"], metadata))
 
     derived_revision_identifier = request.revision_identifier
     if not derived_revision_identifier:
@@ -419,33 +439,53 @@ async def complete_upload(
                 digest.update(f"{file_path}:{checksum}".encode())
             derived_revision_identifier = digest.hexdigest()
 
-    revision = await create_revision(
-        namespace,
-        repo,
-        request.revision_name,
-        derived_revision_identifier,
-        request.etag or (derived_revision_identifier[:32] if derived_revision_identifier else None),
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            locked = await conn.fetch(
+                """SELECT id, file_name, object_key, checksum_sha256 FROM model_upload_intents
+                   WHERE id=ANY($1::uuid[]) AND completed_at IS NULL AND expires_at > NOW()
+                   FOR UPDATE""",
+                intent_ids,
+            )
+            expected_by_key = {item[1]: item[2].get("checksum_sha256", "").lower() for item in file_records}
+            if len(locked) != len(intent_ids) or any(
+                row["checksum_sha256"] != expected_by_key.get(row["object_key"]) for row in locked
+            ):
+                raise HTTPException(status_code=409, detail="Upload intents changed during completion")
+            model_row = await conn.fetchrow(
+                "SELECT id FROM models WHERE namespace=$1 AND model_name=$2 FOR UPDATE", namespace, repo
+            )
+            if not model_row:
+                raise HTTPException(status_code=404, detail="Repository not found")
+            revision = await conn.fetchrow(
+                """INSERT INTO model_revisions (model_id, revision_name, revision_identifier, etag)
+                   VALUES ($1,$2,$3,$4)
+                   ON CONFLICT (model_id, revision_name) DO UPDATE SET revision_identifier=EXCLUDED.revision_identifier, etag=EXCLUDED.etag
+                   RETURNING id, revision_name, revision_identifier, etag""",
+                model_row["id"],
+                request.revision_name,
+                derived_revision_identifier,
+                request.etag or (derived_revision_identifier[:32] if derived_revision_identifier else None),
+            )
+            for file_path, object_key, metadata in file_records:
+                await conn.execute(
+                    """INSERT INTO model_files (revision_id,file_path,file_size,content_sha,content_etag,s3_key)
+                       VALUES ($1,$2,$3,$4,$5,$6)
+                       ON CONFLICT (revision_id,file_path) DO UPDATE SET file_size=EXCLUDED.file_size,
+                       content_sha=EXCLUDED.content_sha, content_etag=EXCLUDED.content_etag, s3_key=EXCLUDED.s3_key""",
+                    revision["id"],
+                    file_path,
+                    int(metadata["size"]),
+                    metadata["checksum_sha256"],
+                    metadata.get("etag"),
+                    object_key,
+                )
+            await conn.execute(
+                "UPDATE model_upload_intents SET completed_at=NOW() WHERE id=ANY($1::uuid[])", intent_ids
+            )
+    return RevisionModel(
+        id=str(revision["id"]),
+        revision=revision["revision_name"],
+        sha=revision["revision_identifier"] or "",
     )
-    if not revision:
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    for file_path, object_key, metadata in file_records:
-        content_etag = metadata.get("etag")
-        content_sha = metadata.get("checksum_sha256")
-        expected_sha = request.checksums_sha256.get(file_path)
-        if expected_sha is not None and content_sha != expected_sha.lower():
-            raise HTTPException(status_code=400, detail=f"Checksum mismatch for {file_path}")
-
-        await track_file(
-            namespace=namespace,
-            model_name=repo,
-            revision_name=request.revision_name,
-            file_path=file_path,
-            file_size=int(metadata["size"]),
-            content_sha=content_sha,
-            content_etag=content_etag,
-            s3_key=object_key,
-        )
-
-    await complete_upload_intents(intent_ids)
-    return RevisionModel(id=str(revision["id"]), revision=revision["revision"], sha=revision["sha"] or "")

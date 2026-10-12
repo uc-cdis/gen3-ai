@@ -135,7 +135,8 @@ CREATE TABLE public.model_upload_intents (
     object_key text NOT NULL,
     reserved_bytes bigint NOT NULL,
     expires_at timestamp with time zone NOT NULL,
-    completed_at timestamp with time zone
+    completed_at timestamp with time zone,
+    checksum_sha256 text NOT NULL
 );
 
 
@@ -395,4 +396,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260713142638'),
     ('20260721110000'),
     ('20260903174000'),
-    ('20261009000000');
+    ('20261009000000'),
+    ('20261012000000');

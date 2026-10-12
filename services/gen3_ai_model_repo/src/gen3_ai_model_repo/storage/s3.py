@@ -187,6 +187,7 @@ class S3StorageProvider(StorageProvider):
         self,
         object_key: str,
         expiry_seconds: int = 3600,
+        checksum_sha256: str | None = None,
     ) -> str:
         """
         Generate a pre-signed upload URL for an S3 object.
@@ -197,7 +198,12 @@ class S3StorageProvider(StorageProvider):
         return await _s3_call(
             self.client.generate_presigned_url,
             ClientMethod="put_object",
-            Params={"Bucket": self.bucket_name, "Key": object_key, "ChecksumAlgorithm": "SHA256"},
+            Params={
+                "Bucket": self.bucket_name,
+                "Key": object_key,
+                "ChecksumAlgorithm": "SHA256",
+                **({"ChecksumSHA256": checksum_sha256} if checksum_sha256 else {}),
+            },
             ExpiresIn=expiry_seconds,
         )
 

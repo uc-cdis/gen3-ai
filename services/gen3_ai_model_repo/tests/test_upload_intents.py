@@ -1,5 +1,7 @@
 """Tests for durable direct-upload reservations."""
 
+from uuid import uuid4
+
 import pytest
 
 
@@ -19,6 +21,8 @@ class _Conn:
 
     async def fetchval(self, query, *args):
         self.args.append((query, args))
+        if "COUNT(*)" in query:
+            return 0
         return self.used
 
     async def execute(self, query, *args):
@@ -57,7 +61,7 @@ async def test_direct_upload_quota_exhaustion(monkeypatch):
 
     monkeypatch.setattr(upload_intents, "get_db_pool", pool)
     with pytest.raises(ValueError, match="quota exhausted"):
-        await upload_intents.reserve_upload("ns", "repo", "main", "x", "ns/repo/main/x")
+        await upload_intents.reserve_upload("ns", "repo", "main", "x", "ns/repo/main/x", "a" * 64, 1)
     assert not any("INSERT INTO" in query for query, _ in conn.args)
 
 
@@ -72,8 +76,41 @@ async def test_direct_upload_reservation_has_expiry_and_bound_completion(monkeyp
         return _Pool(conn)
 
     monkeypatch.setattr(upload_intents, "get_db_pool", pool)
-    intent_id = await upload_intents.reserve_upload("ns", "repo", "main", "x", "ns/repo/main/x")
+    intent_id = await upload_intents.reserve_upload("ns", "repo", "main", "x", "ns/repo/main/x", "a" * 64, 1)
     insert_query, insert_args = conn.args[-1]
     assert "expires_at" in insert_query
     assert insert_args[0] == intent_id
     assert await upload_intents.get_upload_intents([intent_id] * 101, "ns", "repo", "main") == []
+
+
+@pytest.mark.asyncio
+async def test_upload_url_returns_and_signs_exact_checksum(monkeypatch):
+    """The response header and presigned PUT use the caller's checksum exactly."""
+    import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
+    from gen3_ai_model_repo.models.schemas import UploadUrlRequest
+
+    # 32-byte value: base64 encoding of 32 zero bytes.
+    checksum = "A" * 43 + "="
+    captured = {}
+
+    class Provider:
+        async def generate_upload_url(self, object_key, **kwargs):
+            captured["object_key"] = object_key
+            captured["checksum"] = kwargs["checksum_sha256"]
+            return "https://storage.invalid/upload"
+
+    async def reserve(*args, **kwargs):
+        return uuid4()
+
+    monkeypatch.setattr(upload_routes, "get_storage_provider", lambda: Provider())
+    monkeypatch.setattr(upload_routes, "reserve_upload", reserve)
+    response = await upload_routes.generate_upload_url(
+        "ns",
+        "repo",
+        UploadUrlRequest(revision_name="v1", file_name="weights.bin", checksum_sha256=checksum, file_size=1),
+    )
+
+    assert response.headers["x-amz-checksum-sha256"] == checksum
+    assert response.headers["x-amz-sdk-checksum-algorithm"] == "SHA256"
+    assert captured["checksum"] == checksum
+    assert response.object_key == captured["object_key"]

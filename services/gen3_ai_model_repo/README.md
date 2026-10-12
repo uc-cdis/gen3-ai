@@ -321,6 +321,11 @@ optionally `S3_SESSION_TOKEN`; never commit them to source control.
 
 ## Production deployment
 
+The deployment ingress or reverse proxy must enforce the same request-body
+limit as `MAX_UPLOAD_BYTES` (including multipart overhead). The application
+also enforces this limit in ASGI middleware, but ingress enforcement is
+required so oversized requests are rejected before reaching the service.
+
 Production requires PostgreSQL, durable shared object storage, and Arborist
 reachable through `ARBORIST_URL`. Do not use local storage with multiple
 application instances, and do not enable either auth bypass flag.

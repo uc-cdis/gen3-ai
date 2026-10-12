@@ -16,6 +16,11 @@ dev = []
 [tool.uv]
 package = true
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires a running model-repository service and optional test dependencies",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

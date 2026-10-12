@@ -98,6 +98,8 @@ class UploadUrlRequest(BaseModel):
 
     revision_name: str = "main"
     file_name: str
+    checksum_sha256: str
+    file_size: int = Field(gt=0)
 
 
 class UploadUrlResponse(BaseModel):
