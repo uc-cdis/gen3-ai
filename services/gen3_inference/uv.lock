@@ -152,7 +152,7 @@ wheels = [
 [[package]]
 name = "cdispyutils"
 version = "2.6.0"
-source = { git = "https://github.com/uc-cdis/cdis-python-utils.git?rev=feat%2Fobservability#5f3141a835693605b3843bfe819484bd0e61608e" }
+source = { git = "https://github.com/uc-cdis/cdis-python-utils.git?rev=feat%2Fobservability#0b7783e621e336d15fdae8fabfa8f6343dacaa55" }
 dependencies = [
     { name = "cdiserrors" },
     { name = "flask" },
@@ -337,7 +337,7 @@ requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "gen3authz", specifier = ">=3.0.1" },
-    { name = "gen3logging", git = "https://github.com/uc-cdis/cdislogging.git?rev=feat%2Fjson" },
+    { name = "gen3logging", specifier = ">=2.0.0" },
     { name = "httpx2", specifier = ">=2.12.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
     { name = "opentelemetry-instrumentation-asyncpg", specifier = ">=0.65b0" },
@@ -517,7 +517,11 @@ wheels = [
 [[package]]
 name = "gen3logging"
 version = "2.0.0"
-source = { git = "https://github.com/uc-cdis/cdislogging.git?rev=feat%2Fjson#66e6d96eff1b8d73279ab1256fb4c811c9043722" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/48/789b277168e45395294fa809cdb56ab5a58cc1e7275a797ce91347fe165e/gen3logging-2.0.0.tar.gz", hash = "sha256:0c337f47132c16152a69de93e58e83a9b97123e67008a530d32d6d88dd9693eb", size = 10384, upload-time = "2026-10-12T20:26:55.255Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/f9/2eb951c0a7285a5773fa8c12b95c8af4949a2af5c81763814b1339410fc0/gen3logging-2.0.0-py3-none-any.whl", hash = "sha256:43b8adae8698e72481b9ba6ffe5c1ecdebc25e772b79f5cd7a4b890a5e03d89b", size = 12068, upload-time = "2026-10-12T20:26:56.179Z" },
+]
 
 [[package]]
 name = "googleapis-common-protos"

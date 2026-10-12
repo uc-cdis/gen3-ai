@@ -17,7 +17,7 @@ dependencies = [
   "click>=8.3.1",
   "fastapi>=0.128.0",
   "gen3authz>=3.0.1",
-  "gen3logging @ git+https://github.com/uc-cdis/cdislogging.git@feat/json",
+  "gen3logging>=2.0.0",
   "opentelemetry-api>=1.39.1",
   "opentelemetry-instrumentation-httpx>=0.65b0",
   "opentelemetry-instrumentation-asyncpg>=0.65b0",
