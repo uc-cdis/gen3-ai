@@ -71,20 +71,6 @@ class S3StorageProvider(StorageProvider):
             create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": self.region}
         await _s3_call(self.client.create_bucket, **create_kwargs)
 
-    async def upload_file(
-        self,
-        local_path: str,
-        object_key: str,
-    ):
-        """Upload a local file path to S3 for provider-level file workflows."""
-        await _s3_call(
-            self.client.upload_file,
-            local_path,
-            self.bucket_name,
-            object_key,
-            semaphore=self._upload_concurrency,
-        )
-
     async def upload_stream(self, stream, object_key: str):
         """Upload a stream directly to S3."""
         await _s3_call(

@@ -13,15 +13,6 @@ class StorageProvider(ABC):
         pass
 
     @abstractmethod
-    async def upload_file(
-        self,
-        local_path: str,
-        object_key: str,
-    ):
-        """Upload a file from disk to the backing storage."""
-        pass
-
-    @abstractmethod
     async def download_file(
         self,
         object_key: str,

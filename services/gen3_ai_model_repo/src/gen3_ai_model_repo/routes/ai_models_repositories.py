@@ -331,30 +331,6 @@ async def get_model_info(namespace: str, repo: str) -> RepositoryInfoModel:
     Raises:
         HTTPException: If the repository or metadata is not found.
     """
-    repo_exists_in_db = await db_model_exists(namespace, repo)
-    if not repo_exists_in_db:
-        raise HTTPException(status_code=404, detail=REPOSITORY_NOT_FOUND_DETAIL)
-
-    metadata = await get_model_metadata(namespace, repo)
-    if not metadata:
-        raise HTTPException(status_code=404, detail="Metadata not found")
-
-    revision_info = await db_get_revision(namespace, repo, "main")
-
-    files_from_db = await list_files_in_revision(
-        namespace=namespace,
-        model_name=repo,
-        revision_name="main",
-    )
-
-    total_size = sum(f["size"] for f in files_from_db)
-
-    return RepositoryInfoModel(
-        id=f"{namespace}/{repo}",
-        sha=(revision_info["sha"] if revision_info else ""),
-        etag=((revision_info["etag"] or revision_info["sha"]) if revision_info else ""),
-        size=total_size,
-        files=[TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files_from_db],
-        metadata=metadata,
-        security_status=DEFAULT_SECURITY_FILE_STATUS,
-    )
+    # Keep the legacy `/info` alias behavior identical to the canonical
+    # repository metadata endpoint used by Hugging Face clients.
+    return await get_repository(namespace, repo)

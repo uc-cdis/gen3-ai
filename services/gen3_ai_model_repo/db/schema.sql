@@ -62,7 +62,7 @@ COMMENT ON TABLE public.model_files IS 'Model files mapped to object storage';
 -- Name: COLUMN model_files.s3_key; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.model_files.s3_key IS 'Object storage key (MinIO / AWS S3 compatible)';
+COMMENT ON COLUMN public.model_files.s3_key IS 'Object storage key (AWS S3 compatible)';
 
 
 --
@@ -277,7 +277,7 @@ CREATE INDEX idx_model_files_created_at ON public.model_files USING btree (creat
 -- Name: idx_model_files_path; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_model_files_path ON public.model_files USING btree (revision_id, file_path);
+CREATE INDEX idx_model_files_path ON public.model_files USING btree (file_path);
 
 
 --
@@ -351,6 +351,13 @@ CREATE INDEX idx_models_namespace ON public.models USING btree (namespace);
 
 
 --
+-- Name: model_files update_model_files_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER update_model_files_updated_at BEFORE UPDATE ON public.model_files FOR EACH ROW EXECUTE FUNCTION public.update_models_updated_at();
+
+
+--
 -- Name: model_revisions update_model_revisions_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -392,7 +399,6 @@ ALTER TABLE ONLY public.model_revisions
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
-    ('20260712145829'),
     ('20260713142638'),
     ('20260721110000'),
     ('20260903174000'),

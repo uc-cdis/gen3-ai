@@ -146,15 +146,24 @@ def test_file_id_rejects_malformed_and_mismatched_ids():
     assert mismatched.status_code == 422
 
 
-def test_update_repository_requires_authorization():
+def test_update_repository_requires_authorization(monkeypatch):
     """Require authorization for repository metadata updates."""
+    import gen3_ai_model_repo.auth as auth
+
+    async def deny_request(**kwargs):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=403, detail="denied")
+
+    monkeypatch.setattr(auth, "authorize_request", deny_request)
     app = FastAPI()
     app.include_router(ai_models_repositories_router)
     client = TestClient(app)
 
     response = client.patch("/api/models/ns/repo", json={"description": "updated"})
 
-    assert response.status_code in {401, 403}
+    assert "/api/models/{namespace}/{repo}" in client.get("/openapi.json").json()["paths"]
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize(

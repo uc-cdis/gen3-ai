@@ -9,6 +9,9 @@ import asyncio
 import base64
 import hashlib
 import os
+import subprocess
+import sys
+import tempfile
 from uuid import uuid4
 
 import pytest
@@ -211,6 +214,224 @@ async def test_locked_recheck_rejects_expired_intent_without_writes(pg_connectio
 
 
 @pytest.mark.asyncio
+async def test_completion_rejects_object_larger_than_reserved_bytes(pg_connection, monkeypatch):
+    """Completion rechecks the stored size against the locked intent reservation."""
+    import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
+    from gen3_ai_model_repo.models.schemas import DirectUploadCompleteRequest
+
+    namespace = f"tx-{uuid4().hex}"
+    repo = "size-check"
+    intent_id = uuid4()
+    checksum = hashlib.sha256(b"too-large").hexdigest()
+    try:
+        async with pg_connection.acquire() as connection:
+            await connection.execute("INSERT INTO models(namespace,model_name) VALUES($1,$2)", namespace, repo)
+            await connection.execute(
+                """INSERT INTO model_upload_intents
+                   (id,namespace,repo,revision_name,file_name,object_key,checksum_sha256,reserved_bytes,expires_at)
+                   VALUES($1,$2,$3,'main','file.bin',$4,$5,1,NOW()+INTERVAL '1 hour')""",
+                intent_id,
+                namespace,
+                repo,
+                f"{namespace}/{intent_id}/file.bin",
+                checksum,
+            )
+
+        class Provider:
+            async def get_file_metadata(self, object_key):
+                return {"size": 2, "etag": "etag", "checksum_sha256": checksum}
+
+        monkeypatch.setattr(upload_routes, "get_storage_provider", lambda: Provider())
+        with pytest.raises(Exception, match="exceed their reservations"):
+            await upload_routes.complete_upload(
+                namespace,
+                repo,
+                DirectUploadCompleteRequest(upload_ids=[str(intent_id)]),
+            )
+        async with pg_connection.acquire() as connection:
+            assert (
+                await connection.fetchval(
+                    "SELECT COUNT(*) FROM model_revisions mr JOIN models m ON m.id=mr.model_id WHERE m.namespace=$1",
+                    namespace,
+                )
+                == 0
+            )
+            assert (
+                await connection.fetchval(
+                    "SELECT completed_at IS NULL FROM model_upload_intents WHERE id=$1", intent_id
+                )
+                is True
+            )
+    finally:
+        async with pg_connection.acquire() as connection:
+            await connection.execute("DELETE FROM models WHERE namespace=$1", namespace)
+
+
+def test_metrics_follow_create_upload_file_delete_and_repository_delete():
+    """Run the metrics transition test in a fresh Prometheus subprocess."""
+    database_url = os.environ.get("GEN3_AI_MODEL_REPO_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("set GEN3_AI_MODEL_REPO_TEST_DATABASE_URL for PostgreSQL integration tests")
+    metrics_dir = tempfile.mkdtemp(prefix="gen3-model-repo-test-metrics-")
+    environment = os.environ.copy()
+    environment["GEN3_AI_MODEL_REPO_TEST_DATABASE_URL"] = database_url
+    environment["PROMETHEUS_MULTIPROC_DIR"] = metrics_dir
+    environment["MODEL_REPO_METRICS_CHILD"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-o",
+            "python_functions=metrics_transition_child",
+            f"{__file__}::metrics_transition_child",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"metrics child failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert "1 passed" in result.stdout, (
+        f"metrics child did not report a passing test:\n{result.stdout}\n{result.stderr}"
+    )
+
+
+@pytest.mark.asyncio
+async def metrics_transition_child(pg_connection, monkeypatch):
+    """Exercise the real transition flow inside the isolated child process."""
+    """Repository gauges track real route mutations against PostgreSQL."""
+    from httpx import ASGITransport, AsyncClient
+
+    import gen3_ai_model_repo.database.db as database
+    import gen3_ai_model_repo.database.file_tracking as file_tracking
+    import gen3_ai_model_repo.database.repo_metadata as repo_metadata
+    import gen3_ai_model_repo.database.revisions as revisions
+    import gen3_ai_model_repo.main as main
+    import gen3_ai_model_repo.routes.ai_models_files as file_routes
+    import gen3_ai_model_repo.routes.ai_models_repositories as repo_routes
+    import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
+    from gen3_ai_model_repo.auth import verify_authorization
+
+    namespace = f"metrics-{uuid4().hex}"
+    repo = "transitions"
+    payload = b"metrics-payload"
+    checksum_b64 = base64.b64encode(hashlib.sha256(payload).digest()).decode()
+
+    class Provider:
+        def __init__(self):
+            self.objects = {}
+
+        async def generate_upload_url(self, object_key, **kwargs):
+            return f"stub://{object_key}"
+
+        async def get_file_metadata(self, object_key):
+            value = self.objects[object_key]
+            return {"size": len(value), "etag": "etag", "checksum_sha256": hashlib.sha256(value).hexdigest()}
+
+        async def delete_file(self, object_key):
+            self.objects.pop(object_key, None)
+
+        async def delete_prefix(self, prefix):
+            for key in list(self.objects):
+                if key.startswith(prefix):
+                    self.objects.pop(key, None)
+
+    provider = Provider()
+
+    async def get_test_pool():
+        return pg_connection
+
+    monkeypatch.setattr(database, "db_pool", pg_connection)
+    for module in (file_tracking, repo_metadata, revisions, upload_routes, file_routes, repo_routes):
+        if hasattr(module, "get_db_pool"):
+            monkeypatch.setattr(module, "get_db_pool", get_test_pool)
+        if hasattr(module, "get_storage_provider"):
+            monkeypatch.setattr(module, "get_storage_provider", lambda provider=provider: provider)
+    monkeypatch.setattr(main, "get_db_pool", get_test_pool)
+    monkeypatch.setattr(main, "get_repository_metrics", repo_metadata.get_repository_metrics)
+    app = main.get_app()
+    app.dependency_overrides[verify_authorization] = lambda: None
+
+    def gauge_values(body):
+        values = {}
+        for name in ("models_count", "files_count", "total_size_bytes"):
+            prefix = f"gen3_ai_model_repo_{name}{{"
+            line = next(line for line in body.splitlines() if line.startswith(prefix))
+            values[name] = float(line.rsplit(" ", 1)[1])
+        return values
+
+    async def assert_gauges(client, expected):
+        response = await client.get("/metrics/")
+        assert response.status_code == 200
+        assert response.text
+        assert gauge_values(response.text) == expected
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+            await main.update_metrics(app)
+            baseline = gauge_values((await client.get("/metrics/")).text)
+            created = await client.post(f"/api/models/{namespace}/{repo}", json={"description": "metrics"})
+            assert created.status_code == 200
+            await main.update_metrics(app)
+            await assert_gauges(
+                client,
+                {
+                    "models_count": baseline["models_count"] + 1,
+                    "files_count": baseline["files_count"],
+                    "total_size_bytes": baseline["total_size_bytes"],
+                },
+            )
+
+            intent_response = await client.post(
+                f"/api/models/{namespace}/{repo}/upload-url",
+                json={
+                    "revision_name": "main",
+                    "file_name": "config.json",
+                    "checksum_sha256": checksum_b64,
+                    "file_size": len(payload),
+                },
+            )
+            assert intent_response.status_code == 200, intent_response.text
+            intent = intent_response.json()
+            provider.objects[intent["object_key"]] = payload
+            completed = await client.post(
+                f"/api/models/{namespace}/{repo}/complete-upload",
+                json={"revision_name": "main", "upload_ids": [intent["upload_id"]]},
+            )
+            assert completed.status_code == 200, completed.text
+            await assert_gauges(
+                client,
+                {
+                    "models_count": baseline["models_count"] + 1,
+                    "files_count": baseline["files_count"] + 1,
+                    "total_size_bytes": baseline["total_size_bytes"] + len(payload),
+                },
+            )
+
+            deleted_file = await client.delete(
+                f"/api/models/{namespace}/{repo}/files/{namespace}:{repo}:main:config.json"
+            )
+            assert deleted_file.status_code == 200, deleted_file.text
+            await assert_gauges(
+                client,
+                {
+                    "models_count": baseline["models_count"] + 1,
+                    "files_count": baseline["files_count"],
+                    "total_size_bytes": baseline["total_size_bytes"],
+                },
+            )
+
+            deleted_repo = await client.delete(f"/api/models/{namespace}/{repo}")
+            assert deleted_repo.status_code == 200, deleted_repo.text
+            await assert_gauges(client, baseline)
+    finally:
+        async with pg_connection.acquire() as connection:
+            await connection.execute("DELETE FROM models WHERE namespace=$1", namespace)
+
+
+@pytest.mark.asyncio
 async def test_two_reservations_compete_for_last_capacity(pg_connection, monkeypatch):
     """Advisory locking allows exactly one reservation at the quota boundary."""
     namespace = f"tx-{uuid4().hex}"
@@ -220,7 +441,12 @@ async def test_two_reservations_compete_for_last_capacity(pg_connection, monkeyp
     monkeypatch.setattr(
         upload_intents.config,
         "DIRECT_UPLOAD_QUOTA_BYTES",
-        upload_intents.config.DIRECT_UPLOAD_MAX_FILE_BYTES,
+        2,
+    )
+    monkeypatch.setattr(
+        upload_intents.config,
+        "DIRECT_UPLOAD_MAX_FILE_BYTES",
+        max(2, upload_intents.config.DIRECT_UPLOAD_MAX_FILE_BYTES),
     )
     monkeypatch.setattr(upload_intents.config, "DIRECT_UPLOAD_MAX_INTENTS", 10)
     reserve_upload = upload_intents.reserve_upload
@@ -309,8 +535,15 @@ async def test_existing_repository_later_revision_direct_upload_flow(pg_connecti
             ).status_code == 200
             upload_url = await client.post(
                 f"/api/models/{namespace}/{repo}/upload-url",
-                json={"revision_name": "v2", "file_name": "config.json", "checksum_sha256": checksum_b64},
+                json={
+                    "revision_name": "v2",
+                    "file_name": "config.json",
+                    "checksum_sha256": checksum_b64,
+                    "file_size": len(payload),
+                },
             )
+            if upload_url.status_code == 422:
+                raise AssertionError(upload_url.text)
             assert upload_url.status_code == 200
             intent = upload_url.json()
             provider.objects[intent["object_key"]] = payload

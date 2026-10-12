@@ -7,8 +7,13 @@ from gen3_ai_model_repo.main import get_app
 COUNTER = "gen3_ai_model_repo_api_requests_total"
 
 
-def test_served_request_is_counted_with_route_template() -> None:
+def test_served_request_is_counted_with_route_template(monkeypatch) -> None:
     """A request is counted using its route template rather than its URL value."""
+    import gen3_ai_model_repo.config as service_config
+    from common import config as common_config
+
+    monkeypatch.setattr(common_config, "DEBUG_SKIP_AUTH", False)
+    monkeypatch.setattr(service_config, "DEBUG_SKIP_AUTH", False)
     client = TestClient(get_app())
 
     response = client.get("/api/models/ns/repo/revisions")
@@ -56,3 +61,19 @@ def test_startup_metrics_exposes_repository_gauges(monkeypatch) -> None:
     assert "gen3_ai_model_repo_models_count{" in body and 'service="gen3_ai_model_repo"} 2.0' in body
     assert "gen3_ai_model_repo_files_count{" in body and 'service="gen3_ai_model_repo"} 3.0' in body
     assert "gen3_ai_model_repo_total_size_bytes{" in body and 'service="gen3_ai_model_repo"} 4096.0' in body
+
+
+def test_disabled_metrics_do_not_raise_or_record_api_interactions(monkeypatch) -> None:
+    """The API remains usable when the metrics client is disabled."""
+    app = get_app()
+    app.state.metrics.metrics_client.enabled = False
+    monkeypatch.setattr(
+        app.state.metrics,
+        "add_to_api_interaction_counter",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("counter called while disabled")),
+    )
+    client = TestClient(app)
+
+    response = client.get("/_status")
+
+    assert response.status_code == 200

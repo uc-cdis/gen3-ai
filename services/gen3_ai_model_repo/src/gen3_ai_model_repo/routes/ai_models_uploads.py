@@ -443,16 +443,22 @@ async def complete_upload(
     async with pool.acquire() as conn:
         async with conn.transaction():
             locked = await conn.fetch(
-                """SELECT id, file_name, object_key, checksum_sha256 FROM model_upload_intents
+                """SELECT id, file_name, object_key, checksum_sha256, reserved_bytes FROM model_upload_intents
                    WHERE id=ANY($1::uuid[]) AND completed_at IS NULL AND expires_at > NOW()
                    FOR UPDATE""",
                 intent_ids,
             )
-            expected_by_key = {item[1]: item[2].get("checksum_sha256", "").lower() for item in file_records}
+            metadata_by_key = {item[1]: item[2] for item in file_records}
             if len(locked) != len(intent_ids) or any(
-                row["checksum_sha256"] != expected_by_key.get(row["object_key"]) for row in locked
+                row["checksum_sha256"]
+                != (metadata_by_key.get(row["object_key"], {}).get("checksum_sha256") or "").lower()
+                or int(metadata_by_key.get(row["object_key"], {}).get("size") or 0) > int(row["reserved_bytes"])
+                for row in locked
             ):
-                raise HTTPException(status_code=409, detail="Upload intents changed during completion")
+                raise HTTPException(
+                    status_code=409,
+                    detail="Upload intents changed or stored objects exceed their reservations",
+                )
             model_row = await conn.fetchrow(
                 "SELECT id FROM models WHERE namespace=$1 AND model_name=$2 FOR UPDATE", namespace, repo
             )

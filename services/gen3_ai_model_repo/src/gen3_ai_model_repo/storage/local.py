@@ -39,21 +39,6 @@ class LocalStorageProvider(StorageProvider):
         """Ensure the local root directory exists."""
         self.root_directory.mkdir(parents=True, exist_ok=True)
 
-    async def upload_file(
-        self,
-        local_path: str,
-        object_key: str,
-    ):
-        """Upload a file to the local storage root."""
-        destination = self._resolve_object_path(object_key)
-
-        destination.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        await asyncio.to_thread(shutil.copyfile, local_path, destination)
-
     async def upload_stream(self, stream, object_key: str):
         """Upload a data stream to the local storage root."""
         destination = self._resolve_object_path(object_key)

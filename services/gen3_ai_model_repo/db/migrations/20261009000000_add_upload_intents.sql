@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS model_upload_intents (
   revision_name text NOT NULL,
   file_name text NOT NULL,
   object_key text NOT NULL UNIQUE,
-  checksum_sha256 text NOT NULL,
   reserved_bytes bigint NOT NULL,
   expires_at timestamptz NOT NULL,
   completed_at timestamptz
