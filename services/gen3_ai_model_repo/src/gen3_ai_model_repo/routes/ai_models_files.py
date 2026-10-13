@@ -1,7 +1,7 @@
 """File routes for the Gen3 AI model repo service."""
 
 from fastapi import Depends, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from starlette import status
 
 from gen3_ai_model_repo.auth import AuthorizedRouter, verify_authorization
@@ -34,6 +34,25 @@ ai_models_files_router = AuthorizedRouter(
 REVISION_NOT_FOUND_DETAIL = "Revision not found"
 FILE_NOT_FOUND_DETAIL = "File not found"
 INVALID_FILE_ID_DETAIL = "file_id must be namespace:repo:revision:path for the requested repository"
+
+
+def _local_file_response(local_path, file_record):
+    """
+    Build the local response used by both GET and HEAD resolve routes.
+
+    Returns:
+        FileResponse: A response that lets Starlette derive file metadata and
+        suppress the body automatically for HEAD requests.
+    """
+    return FileResponse(
+        local_path,
+        media_type="application/octet-stream",
+        headers={
+            "X-Repo-Commit": file_record["sha"],
+            "X-Linked-Etag": file_record["etag"] or "",
+            "X-Linked-Size": str(file_record["size"]),
+        },
+    )
 
 
 def _parse_file_id(namespace: str, repo: str, file_id: str) -> tuple[str, str]:
@@ -186,14 +205,7 @@ async def head_file(namespace: str, repo: str, rev: str, path: str):
     if local_path is not None:
         if not local_path.is_file():
             raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
-        return Response(
-            status_code=200,
-            headers={
-                "X-Repo-Commit": commit_hash,
-                "X-Linked-Etag": etag or "",
-                "X-Linked-Size": str(size),
-            },
-        )
+        return _local_file_response(local_path, file_record)
     signed_url = await provider.generate_signed_url(file_record["object_key"])
 
     return build_head_response(commit_hash, etag, size, signed_url)
@@ -238,15 +250,7 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
     if local_path is not None:
         if not local_path.is_file():
             raise HTTPException(status_code=404, detail=FILE_NOT_FOUND_DETAIL)
-        return FileResponse(
-            local_path,
-            media_type="application/octet-stream",
-            headers={
-                "X-Repo-Commit": file_record["sha"],
-                "X-Linked-Etag": file_record["etag"] or "",
-                "X-Linked-Size": str(file_record["size"]),
-            },
-        )
+        return _local_file_response(local_path, file_record)
     signed_url = await provider.generate_signed_url(file_record["object_key"])
     logging.info(f"Redirecting to signed URL for {file_record['object_key']}")
     return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)

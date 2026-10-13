@@ -94,11 +94,21 @@ def test_info_matches_canonical_repository_metadata(monkeypatch):
     monkeypatch.setattr(repo_routes, "list_files_in_revision", lambda *args, **kwargs: _async_value(files))
     app = FastAPI()
     app.include_router(ai_models_repositories_router)
+    app.dependency_overrides[verify_authorization] = lambda: None
 
     client = TestClient(app)
-    canonical = client.get("/api/models/ns/repo").json()
-    alias = client.get("/api/models/ns/repo/info").json()
+    canonical_response = client.get("/api/models/ns/repo")
+    alias_response = client.get("/api/models/ns/repo/info")
+    assert canonical_response.status_code == 200
+    assert alias_response.status_code == 200
+    canonical = canonical_response.json()
+    alias = alias_response.json()
 
+    assert canonical["id"] == alias["id"] == "ns/repo"
+    assert canonical["metadata"]["namespace"] == alias["metadata"]["namespace"] == "ns"
+    assert canonical["metadata"]["repo"] == alias["metadata"]["repo"] == "repo"
+    assert canonical["metadata"]["description"] == alias["metadata"]["description"] == "demo"
+    assert canonical["metadata"]["tags"] == alias["metadata"]["tags"] == []
     assert alias == canonical
 
 

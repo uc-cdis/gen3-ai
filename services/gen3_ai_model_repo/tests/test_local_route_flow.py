@@ -69,6 +69,7 @@ def test_local_upload_resolve_head_and_delete_filesystem(monkeypatch, tmp_path: 
     import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
 
     provider = LocalStorageProvider(str(tmp_path))
+    payload = b'{"ok":true}'
     inserted: list[str] = []
     pool = _Pool(_Conn(inserted))
     record = {}
@@ -135,24 +136,40 @@ def test_local_upload_resolve_head_and_delete_filesystem(monkeypatch, tmp_path: 
         response = client.post(
             "/api/models/ns/repo/upload",
             data={"revision_name": "main"},
-            files={"files": ("config.json", b'{"ok":true}', "application/json")},
+            files={"files": ("config.json", payload, "application/json")},
         )
         assert response.status_code == 200
         repository_exists = True
         key = inserted[0]
-        record.update({"object_key": key, "size": 11, "sha": "commit", "etag": "etag", "path": "config.json"})
+        record.update({"object_key": key, "size": len(payload), "sha": "commit", "etag": "etag", "path": "config.json"})
         stored = tmp_path / key
-        assert stored.read_bytes() == b'{"ok":true}'
+        assert stored.read_bytes() == payload
 
         resolved = client.get("/api/models/ns/repo/resolve/main/config.json")
         assert resolved.status_code == 200
-        assert resolved.content == b'{"ok":true}'
+        assert resolved.content == payload
+        assert resolved.headers["content-length"] == str(len(payload))
+        assert resolved.headers["accept-ranges"] == "bytes"
         assert resolved.headers["x-repo-commit"] == "commit"
         assert resolved.headers["x-linked-etag"] == "etag"
 
         head = client.head("/api/models/ns/repo/resolve/main/config.json")
         assert head.status_code == 200
-        assert head.headers["x-linked-size"] == "11"
+        assert head.content == b""
+        assert head.headers["content-length"] == str(len(payload))
+        assert head.headers["accept-ranges"] == resolved.headers["accept-ranges"]
+        assert head.headers["x-repo-commit"] == resolved.headers["x-repo-commit"]
+        assert head.headers["x-linked-etag"] == resolved.headers["x-linked-etag"]
+        assert head.headers["x-linked-size"] == str(len(payload))
+
+        root_resolved = client.get("/ns/repo/resolve/main/config.json")
+        assert root_resolved.status_code == 200
+        assert root_resolved.content == payload
+        assert root_resolved.headers["content-length"] == str(len(payload))
+        root_head = client.head("/ns/repo/resolve/main/config.json")
+        assert root_head.status_code == 200
+        assert root_head.content == b""
+        assert root_head.headers["content-length"] == str(len(payload))
 
         untracked = tmp_path / "ns/repo/direct-upload.bin"
         untracked.parent.mkdir(parents=True, exist_ok=True)
@@ -185,3 +202,5 @@ def test_missing_local_storage_object_is_not_reported_as_available(monkeypatch, 
     with TestClient(app) as client:
         assert client.get("/api/models/ns/repo/resolve/main/missing.bin").status_code == 404
         assert client.head("/api/models/ns/repo/resolve/main/missing.bin").status_code == 404
+        assert client.get("/ns/repo/resolve/main/missing.bin").status_code == 404
+        assert client.head("/ns/repo/resolve/main/missing.bin").status_code == 404
