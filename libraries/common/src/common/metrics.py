@@ -52,7 +52,9 @@ def get_metrics_client(fastapi_app: FastAPI):
             endpoint should be added (if any)
 
     Returns:
-        The metrics client, or None when metrics are disabled.
+        The metrics client, or None when METRICS_PROVIDER is unsupported and metrics are
+        disabled. With metrics disabled and a supported provider, the client is returned
+        with `enabled` False, so its methods are no-ops.
 
     Raises:
         Exception: If metrics are enabled but METRICS_PROVIDER names an unsupported provider.
@@ -63,18 +65,16 @@ def get_metrics_client(fastapi_app: FastAPI):
     # before this function runs keeps the in-memory class, and its values never reach /metrics.
     # Build counters on first use, not at import.
     metrics_client = None
-    metrics_client_kwargs = {}
     if config.METRICS_PROVIDER == "prometheus":
-        metrics_client_kwargs = {"path": config.PROMETHEUS_MULTIPROC_DIR}
         metrics_client = PrometheusMetrics(
             enabled=config.ENABLE_METRICS, prometheus_dir=config.PROMETHEUS_MULTIPROC_DIR
         )
         if config.ENABLE_METRICS:
-            metrics_app = metrics_client.get_metrics_app(**metrics_client_kwargs)
+            metrics_app = metrics_client.get_metrics_app(path=config.PROMETHEUS_MULTIPROC_DIR)
         else:
-            # get_metrics_app reads PROMETHEUS_MULTIPROC_DIR, which BaseMetrics only creates
-            # when enabled. The client's own registry is empty when disabled, so /metrics
-            # still answers 200 for scrapers.
+            # get_metrics_app raises unless the multiprocess directory exists, and BaseMetrics
+            # only creates it when enabled. The client's own registry is empty when disabled,
+            # so /metrics still answers 200 and a Prometheus scrape does not mark the target down.
             metrics_app = metrics_client.get_asgi_app()
         fastapi_app.mount("/metrics", metrics_app)
 

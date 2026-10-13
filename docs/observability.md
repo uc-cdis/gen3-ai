@@ -34,7 +34,7 @@ unchanged, so service code imports them from there and never names the library d
 | `OTEL_EXPORTER_OTLP_PROTOCOL`                 | `http/protobuf`                | `http/protobuf` pairs with port 4318, `grpc` with 4317. A mismatched pair fails at export time, not at startup. |
 | `ENABLE_METRICS`                              | `True`                         | Off means `/metrics` serves nothing useful and the counters are never created.                       |
 | `METRICS_PROVIDER`                            | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
-| `PROMETHEUS_MULTIPROC_DIR`                    | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. **Must exist**, see below.                          |
+| `PROMETHEUS_MULTIPROC_DIR`                    | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. Created at startup when metrics are on, see below.  |
 | `GEN3_JSON_LOGS`                              | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
 | `ENABLE_CONTINUOUS_PROFILING`                 | `False`                        | Off means no Pyroscope agent and no profiles. Off by default because there is no console fallback: with nothing listening the agent retries pushes for the life of the process. |
 | `PYROSCOPE_SERVER_ADDRESS`                    | `http://alloy.monitoring:4040` | Where profiles are pushed. **Not** an OTLP endpoint, so this cannot be 4317/4318, see below.         |
@@ -200,16 +200,18 @@ the concrete path would mint a new time series per collection. A request that ma
 is recorded as `<unmatched>`, so scanners and typos collapse into one series instead of one
 each.
 
-### `PROMETHEUS_MULTIPROC_DIR` must exist
+### `PROMETHEUS_MULTIPROC_DIR`
 
-`prometheus_client` chooses between its in-memory and its multiprocess value class **once**,
-when it is first imported, based on this variable. Two consequences worth knowing:
+With metrics on, the metrics client creates this directory (and any missing parents) at
+startup and sets the environment variable to it. A path the process cannot create fails
+startup. With metrics off, the directory is never created or read, and
+`/metrics` answers 200 with an empty body so a scraper still sees the target as up.
 
-- If the directory does not exist, the service dies at startup with
-  `ValueError: env PROMETHEUS_MULTIPROC_DIR is not set or not a directory`.
-- Anything that sets the variable *after* import leaves counters in memory, where they are
-  written nowhere and every scrape comes back empty. This is why the test suite sets it in
-  `conftest.py` before importing the app.
+`prometheus_client` chooses between its in-memory and its multiprocess value class when it is
+first imported. The metrics client re-runs that choice after setting the variable, so import
+order does not matter for the counters it creates. A metric constructed anywhere before
+`get_metrics_client` runs keeps the in-memory class: its values are written nowhere and never
+appear in a scrape. Beware!
 
 On startup you should see it confirmed in the logs:
 
