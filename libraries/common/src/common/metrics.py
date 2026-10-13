@@ -69,7 +69,13 @@ def get_metrics_client(fastapi_app: FastAPI):
         metrics_client = PrometheusMetrics(
             enabled=config.ENABLE_METRICS, prometheus_dir=config.PROMETHEUS_MULTIPROC_DIR
         )
-        metrics_app = metrics_client.get_metrics_app(**metrics_client_kwargs)
+        if config.ENABLE_METRICS:
+            metrics_app = metrics_client.get_metrics_app(**metrics_client_kwargs)
+        else:
+            # get_metrics_app reads PROMETHEUS_MULTIPROC_DIR, which BaseMetrics only creates
+            # when enabled. The client's own registry is empty when disabled, so /metrics
+            # still answers 200 for scrapers.
+            metrics_app = metrics_client.get_asgi_app()
         fastapi_app.mount("/metrics", metrics_app)
 
     if not metrics_client and config.ENABLE_METRICS:
