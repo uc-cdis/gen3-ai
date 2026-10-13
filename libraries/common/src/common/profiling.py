@@ -1,22 +1,22 @@
 """
 Continuous profiling with Pyroscope, shared by all services.
 
-The agent handling lives in `cdispyutils.observability.continuous_profiling`, which is Gen3-wide
+The agent handling lives in `gen3pyutils.observability.continuous_profiling`, which is Gen3-wide
 and configured through keyword arguments. This module is where those arguments come from
 `common.config`.
 """
 
-from cdispyutils.observability.continuous_profiling import (
+from gen3pyutils.observability.continuous_profiling import (
     configure_profiling as _configure_profiling,
 )
 
 # Re-exported so service code imports these from here and never names the library directly.
 # Repeating the name after `as` is what marks an import as a deliberate re-export: nothing in
 # this module calls them, so ruff would otherwise prune them as unused.
-from cdispyutils.observability.continuous_profiling import (
+from gen3pyutils.observability.continuous_profiling import (
     profiling_active as profiling_active,
 )
-from cdispyutils.observability.continuous_profiling import (
+from gen3pyutils.observability.continuous_profiling import (
     stop_profiling as stop_profiling,
 )
 

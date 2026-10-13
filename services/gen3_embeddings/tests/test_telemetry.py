@@ -5,8 +5,8 @@ from typing import cast
 
 import pytest
 from asyncpg import Pool
-from cdispyutils.observability import continuous_profiling
 from fastapi.testclient import TestClient
+from gen3pyutils.observability import continuous_profiling
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor

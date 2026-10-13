@@ -5,9 +5,9 @@ FastAPI app creation, general entrypoint into the service.
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
-from cdispyutils.observability.constants import UNKNOWN_LABEL_VALUE
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from gen3authz.client.arborist.async_client import ArboristClient
+from gen3pyutils.observability.constants import UNKNOWN_LABEL_VALUE
 
 from common.auth import get_user_id
 from common.logging_setup import configure_logging

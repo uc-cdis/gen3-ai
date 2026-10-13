@@ -2,15 +2,15 @@
 Common handling for metrics
 """
 
-from cdispyutils.metrics import BaseMetrics as PrometheusMetrics
+from fastapi import FastAPI
+from gen3pyutils.metrics import BaseMetrics as PrometheusMetrics
 
 # Re-exported for services to import from here. Repeating the name after `as` is what marks an
 # import as a deliberate re-export: nothing in this module calls it, so ruff would otherwise
 # prune it as unused.
-from cdispyutils.observability.request_metrics import (
+from gen3pyutils.observability.request_metrics import (
     add_request_metrics_middleware as add_request_metrics_middleware,
 )
-from fastapi import FastAPI
 
 from common import config
 

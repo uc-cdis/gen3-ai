@@ -150,35 +150,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cdispyutils"
-version = "2.6.0"
-source = { git = "https://github.com/uc-cdis/cdis-python-utils.git?rev=feat%2Fobservability#0b7783e621e336d15fdae8fabfa8f6343dacaa55" }
-dependencies = [
-    { name = "cdiserrors" },
-    { name = "flask" },
-    { name = "gen3logging" },
-    { name = "prometheus-client" },
-    { name = "pyjwt" },
-    { name = "requests" },
-]
-
-[package.optional-dependencies]
-observability = [
-    { name = "fastapi" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp" },
-    { name = "opentelemetry-instrumentation-asyncpg" },
-    { name = "opentelemetry-instrumentation-fastapi" },
-    { name = "opentelemetry-instrumentation-httpx" },
-    { name = "opentelemetry-instrumentation-logging" },
-    { name = "opentelemetry-instrumentation-requests" },
-    { name = "opentelemetry-sdk" },
-    { name = "pyroscope-io" },
-    { name = "pyroscope-otel" },
-    { name = "starlette" },
-]
-
-[[package]]
 name = "certifi"
 version = "2026.7.22"
 source = { registry = "https://pypi.org/simple" }
@@ -301,12 +272,12 @@ source = { directory = "../../libraries/common" }
 dependencies = [
     { name = "asyncpg" },
     { name = "authutils" },
-    { name = "cdispyutils", extra = ["observability"] },
     { name = "click" },
     { name = "dotenv" },
     { name = "fastapi" },
     { name = "gen3authz" },
     { name = "gen3logging" },
+    { name = "gen3pyutils", extra = ["observability"] },
     { name = "httpx2" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-instrumentation-asyncpg" },
@@ -332,12 +303,12 @@ dependencies = [
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "authutils", specifier = ">=8.0.0" },
-    { name = "cdispyutils", extras = ["observability"], git = "https://github.com/uc-cdis/cdis-python-utils.git?rev=feat%2Fobservability" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "gen3authz", specifier = ">=3.0.1" },
     { name = "gen3logging", specifier = ">=2.0.0" },
+    { name = "gen3pyutils", extras = ["observability"], specifier = ">=3.0.0" },
     { name = "httpx2", specifier = ">=2.12.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
     { name = "opentelemetry-instrumentation-asyncpg", specifier = ">=0.65b0" },
@@ -519,6 +490,39 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/56/48/789b277168e45395294fa809cdb56ab5a58cc1e7275a797ce91347fe165e/gen3logging-2.0.0.tar.gz", hash = "sha256:0c337f47132c16152a69de93e58e83a9b97123e67008a530d32d6d88dd9693eb", size = 10384, upload-time = "2026-10-12T20:26:55.255Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/f9/2eb951c0a7285a5773fa8c12b95c8af4949a2af5c81763814b1339410fc0/gen3logging-2.0.0-py3-none-any.whl", hash = "sha256:43b8adae8698e72481b9ba6ffe5c1ecdebc25e772b79f5cd7a4b890a5e03d89b", size = 12068, upload-time = "2026-10-12T20:26:56.179Z" },
+]
+
+[[package]]
+name = "gen3pyutils"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cdiserrors" },
+    { name = "flask" },
+    { name = "gen3logging" },
+    { name = "prometheus-client" },
+    { name = "pyjwt" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4d/12/8f3070be97a14aef68728c626062d6895e0bab0cab1d470455454d7e98c4/gen3pyutils-3.0.0.tar.gz", hash = "sha256:1173c155a4cd7117e3c25c63d2c53d24081ab42d97906791885d7ce4312c7de8", size = 84798, upload-time = "2026-10-13T15:42:48.113Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/0a/60e59843b9dffe59fcd7ff50eb8141502560cea7d175cd54035120fd637d/gen3pyutils-3.0.0-py3-none-any.whl", hash = "sha256:7fbc2bb9094c9ebdd3044fa390be355b0cd6e27b11aaca3896cc375a1b80225c", size = 95146, upload-time = "2026-10-13T15:42:49.292Z" },
+]
+
+[package.optional-dependencies]
+observability = [
+    { name = "fastapi" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-instrumentation-asyncpg" },
+    { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-httpx" },
+    { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-instrumentation-requests" },
+    { name = "opentelemetry-sdk" },
+    { name = "pyroscope-io" },
+    { name = "pyroscope-otel" },
+    { name = "starlette" },
 ]
 
 [[package]]

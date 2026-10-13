@@ -2,7 +2,7 @@
 Tests that the endpoints this monorepo exempts from observability are the ones excluded.
 
 The span helpers themselves - `traced`, `no_trace`, `instrument_class`, `instrument_module` -
-live in `cdispyutils.observability.tracing` and are tested there. What is checked here is the
+live in `gen3pyutils.observability.tracing` and are tested there. What is checked here is the
 set of paths common.config hands them.
 """
 

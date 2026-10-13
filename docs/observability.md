@@ -17,7 +17,7 @@ Pyroscope labels, so a slow span leads to the flamegraph for that one request.
 ## Where this lives
 
 The tracing, profiling and request-metrics machinery is
-[`cdispyutils.observability`](https://github.com/uc-cdis/cdis-python-utils/blob/master/cdispyutils/observability/README.md),
+[`gen3pyutils.observability`](https://github.com/uc-cdis/gen3pyutils/blob/master/gen3pyutils/observability/README.md),
 shared with the rest of Gen3. What this repo keeps is the configuration: `common/telemetry.py`
 and `common/profiling.py` read `common/config.py` and pass those values in, so a service calls
 `configure_tracing(app, name)` and gets the settings the monorepo agrees on. `common.telemetry`
@@ -214,7 +214,7 @@ when it is first imported, based on this variable. Two consequences worth knowin
 On startup you should see it confirmed in the logs:
 
 ```
-{"logger": "cdispyutils.metrics", "level": "INFO", "message": "PROMETHEUS_MULTIPROC_DIR is /var/tmp/prometheus_metrics", ...}
+{"logger": "gen3pyutils.metrics", "level": "INFO", "message": "PROMETHEUS_MULTIPROC_DIR is /var/tmp/prometheus_metrics", ...}
 ```
 
 ### Checking metrics work
@@ -330,7 +330,7 @@ Logs go to stdout as one JSON object per line, carrying `timestamp`, `logger`, `
 `message`, and the correlation fields `trace_id`, `span_id`, `service`:
 
 ```json
-{"timestamp": "2026-08-19T18:04:52.162Z", "logger": "cdispyutils.metrics", "level": "INFO", "message": "...", "trace_id": "ac5e71a8c2806eb002e264b525b1253d", "span_id": "b2f936774956355f", "service": "gen3_embeddings"}
+{"timestamp": "2026-08-19T18:04:52.162Z", "logger": "gen3pyutils.metrics", "level": "INFO", "message": "...", "trace_id": "ac5e71a8c2806eb002e264b525b1253d", "span_id": "b2f936774956355f", "service": "gen3_embeddings"}
 ```
 
 `trace_id` and `span_id` are `null` outside a request, which is expected for lines emitted at

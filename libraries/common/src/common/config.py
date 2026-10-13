@@ -124,7 +124,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", de
 FORCE_DISABLE_CUSTOM_TRACING = starlette_config("FORCE_DISABLE_CUSTOM_TRACING", cast=bool, default=False)
 
 # `traced` decides whether to wrap when the module it decorates is imported, which is before any
-# app factory runs, so cdispyutils reads these two from the environment rather than from anything
+# app factory runs, so gen3pyutils reads these two from the environment rather than from anything
 # passed to `configure_tracing`. Publishing what CONFIG_PATH resolved is what makes a `.env` file
 # reach the per-function spans; without it, turning tracing off in that file would still leave
 # every `@traced` function wrapped.

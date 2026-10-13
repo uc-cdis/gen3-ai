@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from cdispyutils.observability import continuous_profiling
+from gen3pyutils.observability import continuous_profiling
 
 from common import config
 from common.profiling import configure_profiling

@@ -1,28 +1,28 @@
 """
 OpenTelemetry tracing shared by all services.
 
-The tracing itself lives in `cdispyutils.observability.tracing`, which is Gen3-wide and
+The tracing itself lives in `gen3pyutils.observability.tracing`, which is Gen3-wide and
 configured through keyword arguments. This module is where those arguments come from
 `common.config`, so a service calls `configure_tracing(app, name)` and gets the settings the
 rest of the monorepo reads.
 """
 
-from cdispyutils.observability.tracing import LoggingInstrumentorWithContext
-from cdispyutils.observability.tracing import configure_tracing as _configure_tracing
+from fastapi import FastAPI
+from gen3pyutils.observability.tracing import LoggingInstrumentorWithContext
+from gen3pyutils.observability.tracing import configure_tracing as _configure_tracing
 
 # Re-exported so service code imports the span helpers from here and never names the library
 # directly. Repeating the name after `as` is what marks an import as a deliberate re-export:
 # nothing in this module calls these, so ruff would otherwise prune them as unused.
-from cdispyutils.observability.tracing import (
+from gen3pyutils.observability.tracing import (
     excluded_url_patterns as excluded_url_patterns,
 )
-from cdispyutils.observability.tracing import get_tracer as get_tracer
-from cdispyutils.observability.tracing import instrument_class as instrument_class
-from cdispyutils.observability.tracing import instrument_module as instrument_module
-from cdispyutils.observability.tracing import no_trace as no_trace
-from cdispyutils.observability.tracing import reset_tracing_state as reset_tracing_state
-from cdispyutils.observability.tracing import traced as traced
-from fastapi import FastAPI
+from gen3pyutils.observability.tracing import get_tracer as get_tracer
+from gen3pyutils.observability.tracing import instrument_class as instrument_class
+from gen3pyutils.observability.tracing import instrument_module as instrument_module
+from gen3pyutils.observability.tracing import no_trace as no_trace
+from gen3pyutils.observability.tracing import reset_tracing_state as reset_tracing_state
+from gen3pyutils.observability.tracing import traced as traced
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
