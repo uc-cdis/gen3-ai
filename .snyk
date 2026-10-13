@@ -3,6 +3,10 @@
 version: v1.25.1
 # ignores vulnerabilities
 ignore:
+  SNYK-PYTHON-AUTHLIB-20257410:
+    - '*':
+        reason: The affected code path is not reachable here
+        created: 2026-10-13T00:00:00.000Z
   'snyk:lic:pip:pathspec:MPL-2.0':
     - '*':
         reason: False Positive license issue

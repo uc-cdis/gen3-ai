@@ -109,6 +109,9 @@ async def get_pool():
 
     Without this, asyncpg defaults to treating it like a string - which is incredibly
     inefficient b/c that's not how it's stored.
+
+    Returns:
+        asyncpg.Pool: The shared pool, created on first use.
     """
     global _pool
     if _pool is None:
@@ -207,6 +210,9 @@ class DataAccessLayer:
 
         The caller (route layer) is responsible for:
         - determining the allowed_authz list from the user's authz mapping.
+
+        Returns:
+            Any: Whatever `fn` returns.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -221,6 +227,9 @@ class DataAccessLayer:
 
           /vectorstore/collections
           /vectorstore/collections/{collection_name}
+
+        Returns:
+            set[str]: Collection names the caller may access.
         """
         base = "/vectorstore/collections"
         allowed: set[str] = set()
@@ -487,6 +496,11 @@ class DataAccessLayer:
 
         Returns:
             List of created Embedding instances.
+
+        Raises:
+            HTTPException: 400 if metadata_list length does not match embeddings, 409 if any
+                embedding already exists in the collection, 500 if the insert returns an
+                unexpected number of rows.
         """
         if metadata_list is None:
             metadata_list = [{} for _ in embeddings]
@@ -628,6 +642,13 @@ class DataAccessLayer:
     ) -> list[Embedding]:
         """
         Bulk upsert multiple embeddings in the given collection.
+
+        Returns:
+            list[Embedding]: The inserted or updated embeddings.
+
+        Raises:
+            HTTPException: 400 if metadata_list length does not match embeddings, 500 if the
+                upsert returns an unexpected number of rows.
         """
         if metadata_list is None:
             metadata_list = [{} for _ in embeddings]
@@ -740,6 +761,9 @@ class DataAccessLayer:
 
         The combination (collection_id, embedding_hash, metadata_hash, authz)
         must remain unique (per the DB constraint).
+
+        Returns:
+            Embedding | None: The updated embedding, or None if no row matched.
         """
         table, vector_cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -861,8 +885,7 @@ class DataAccessLayer:
             limit (int): Maximum number of rows to return.
 
         Returns:
-            list[Embedding]: Embeddings visible to this caller under RLS. Ordering is by
-            `created_at`, which is not unique, so rows can shift between pages.
+            list[Embedding]: Embeddings visible to this caller under RLS.
         """
         table, _ = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -892,6 +915,9 @@ class DataAccessLayer:
 
         If vector_type is given, only that table is queried.
         If None, both tables are queried and results combined.
+
+        Returns:
+            list[Embedding]: The embeddings found, in no guaranteed order.
         """
 
         async def _query(conn):
@@ -1022,6 +1048,9 @@ class DataAccessLayer:
     ) -> list[asyncpg.Record]:
         """
         Search embeddings within a single collection using the collection's vector_type.
+
+        Returns:
+            list[asyncpg.Record]: Matching rows, nearest first.
         """
         table, cast = get_embeddings_table_and_cast(VectorType(collection.vector_type))
 
@@ -1064,6 +1093,12 @@ class DataAccessLayer:
 
         The collections list will be filtered to only those whose vector_type matches
         the given `vector_type` AND whose dimensions match the query vector length.
+
+        Returns:
+            list[asyncpg.Record]: Matching rows across all requested collections, nearest first.
+
+        Raises:
+            HTTPException: 400 if no available collection uses the requested vector_type.
         """
         if not collections:
             return []

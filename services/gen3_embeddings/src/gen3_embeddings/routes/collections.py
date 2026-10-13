@@ -51,8 +51,10 @@ async def list_collections(
 
     Args:
         request: The request object
-        dal: Data access layer dependency.
+        page: Which page of collections to return, counting from 1.
+        page_size: How many collections to return per page.
         counts: Whether to include available embeddings count.
+        dal: Data access layer dependency.
 
     Returns:
         PaginatedCollectionsResponse containing all collections.
@@ -114,6 +116,9 @@ async def create_collection(
 
     Returns:
         CollectionModel for the created collection.
+
+    Raises:
+        HTTPException: 400 if the collection name or dimensions are invalid.
     """
     logging.debug(f"Creating collection: {body}...")
 
@@ -162,6 +167,7 @@ async def get_collection(
 
     Args:
         collection_name: Name of the collection.
+        counts: Whether to include available embeddings count.
         dal: Data access layer dependency.
 
     Returns:

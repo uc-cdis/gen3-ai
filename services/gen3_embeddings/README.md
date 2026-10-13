@@ -567,6 +567,13 @@ PGUSER=embeddings_user
 PGPASSWORD=embeddings_pass
 PGDATABASE=gen3embeddings
 
+# embeddings_user has no CREATEDB and does not own the database (this is required
+# for appropriate application of row-level security). So `just db_setup` and
+# `just db_migrate` need an admin role to run migrations. These default to PGUSER/PGPASSWORD
+# if you don't provide the below.
+DB_MIGRATION_USER=adminuser
+DB_MIGRATION_PASSWORD=adminpass
+
 DEBUG=True
 ARBORIST_URL="http://localhost:4280"
 VERBOSE_INTERNAL_LOGS=True
@@ -578,12 +585,10 @@ run this under gen3-ai folder
 
 ```bash
 uv run --directory "./services/gen3_embeddings" \
-  gunicorn \
+  uvicorn \
   gen3_embeddings.main:app_instance \
-  -k uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:4142 \
-  --access-logfile - \
-  --error-logfile -
+  --host 0.0.0.0 \
+  --port 8000
 ```
 
 ### Run tests
@@ -608,17 +613,17 @@ uv run pytest -n auto . --maxfail=1 --disable-warnings \
 
 ```bash
 export TOKEN=...
-curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections/public/embeddings" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings?page=2&page_size=200" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections/public/embeddings?page=2&page_size=200" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings?no_embeddings_info=true" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections/public/embeddings?no_embeddings_info=true" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/public/embeddings/e3c5cfe0-20f8-4270-8c3d-30e73adbe83c" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections/public/embeddings/e3c5cfe0-20f8-4270-8c3d-30e73adbe83c" -H "Authorization: Bearer $TOKEN"
 
-curl -X DELETE "http://localhost:4142/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:8000/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 
-curl -X POST "http://localhost:4142/vectorstore/collections" \
+curl -X POST "http://localhost:8000/vectorstore/collections" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -628,16 +633,16 @@ curl -X POST "http://localhost:4142/vectorstore/collections" \
     "vector_type": "halfvec"
   }'
 
-curl -X GET "http://localhost:4142/vectorstore/collections" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections" -H "Authorization: Bearer $TOKEN"
 
-curl -X GET "http://localhost:4142/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
+curl -X GET "http://localhost:8000/vectorstore/collections/internal" -H "Authorization: Bearer $TOKEN"
 
-curl -X PATCH "http://localhost:4142/vectorstore/collections/internal" \
+curl -X PATCH "http://localhost:8000/vectorstore/collections/internal" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"description": "Updated description"}'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings" \
+curl -X POST "http://localhost:8000/vectorstore/collections/internal/embeddings" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -659,7 +664,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings"
     ]
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings" \
+curl -X POST "http://localhost:8000/vectorstore/collections/internal/embeddings" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -682,7 +687,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/internal/embeddings"
     ]
   }'
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/07fc788b-4f54-478f-a821-1c4235a8369e" \
+curl -X PUT "http://localhost:8000/vectorstore/collections/internal/embeddings/07fc788b-4f54-478f-a821-1c4235a8369e" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -690,14 +695,14 @@ curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/0
   }'
 
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
+curl -X PUT "http://localhost:8000/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "embedding": [0.5, 0.5, 0.5]
   }'
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
+curl -X PUT "http://localhost:8000/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -708,7 +713,7 @@ curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/4
     }
   }'
 
-curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
+curl -X PUT "http://localhost:8000/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -720,9 +725,9 @@ curl -X PUT "http://localhost:4142/vectorstore/collections/internal/embeddings/4
     }
   }'
 
-curl -X DELETE "http://localhost:4142/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" -H "Authorization: Bearer $TOKEN"
+curl -X DELETE "http://localhost:8000/vectorstore/collections/internal/embeddings/44618c99-fd7a-4fe3-8056-309f40d8bbc4" -H "Authorization: Bearer $TOKEN"
 
-curl -X POST "http://localhost:4142/embeddings/bulk" \
+curl -X POST "http://localhost:8000/embeddings/bulk" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
@@ -731,7 +736,7 @@ curl -X POST "http://localhost:4142/embeddings/bulk" \
     "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
-curl -X POST "http://localhost:4142/embeddings/bulk?no_embeddings_info=true" \
+curl -X POST "http://localhost:8000/embeddings/bulk?no_embeddings_info=true" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
@@ -740,7 +745,7 @@ curl -X POST "http://localhost:4142/embeddings/bulk?no_embeddings_info=true" \
     "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d200vector/embeddings/bulk" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d200vector/embeddings/bulk" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '[
@@ -749,7 +754,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d200vector/embedding
     "2edd2b42-f072-4b43-a5e9-47d1a31866e5"
   ]'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d3halfvec/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -759,7 +764,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
     "distance_metric": "l2_distance"
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d3halfvec/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -771,7 +776,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
     "max_value": 10
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d3halfvec/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -784,7 +789,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
   }'
 
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d3halfvec/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -793,7 +798,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search" \
     "filters": null
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search?no_embeddings_info=true" \
+curl -X POST "http://localhost:8000/vectorstore/collections/d3halfvec/search?no_embeddings_info=true" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -801,7 +806,7 @@ curl -X POST "http://localhost:4142/vectorstore/collections/d3halfvec/search?no_
     "top_k": 2
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/search" \
+curl -X POST "http://localhost:8000/vectorstore/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -810,7 +815,7 @@ curl -X POST "http://localhost:4142/vectorstore/search" \
     "filters": null
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/search?vector_type=halfvec" \
+curl -X POST "http://localhost:8000/vectorstore/search?vector_type=halfvec" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -819,7 +824,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?vector_type=halfvec" \
     "filters": null
   }'
 
-curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vector" \
+curl -X POST "http://localhost:8000/vectorstore/search?collections=public,d3vector" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

@@ -11,12 +11,14 @@ from gen3authz.client.arborist.errors import ArboristError
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_500_INTERNAL_SERVER_ERROR
 
+from common.telemetry import traced
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
 
 get_bearer_token = HTTPBearer(auto_error=False)
 
 
+@traced
 async def authorize_request(
     authz_access_method: str,
     authz_resources: list[str] | None = None,
@@ -87,6 +89,7 @@ async def authorize_request(
         raise HTTPException(status_code=HTTP_403_FORBIDDEN)
 
 
+@traced
 async def get_user_id(token: HTTPAuthorizationCredentials | None = None, request: Request | None = None) -> int | Any:
     """
     Retrieves the user ID from the provided token/request
@@ -126,6 +129,7 @@ async def get_user_id(token: HTTPAuthorizationCredentials | None = None, request
     return user_id
 
 
+@traced
 async def get_user_authz_mapping(
     token: HTTPAuthorizationCredentials | None = None, request: Request | None = None
 ) -> Mapping:
@@ -145,6 +149,10 @@ async def get_user_authz_mapping(
         Mapping: The authorization mapping returned by the Gen3 Policy Engine client,
         or an empty mapping if DEBUG_SKIP_AUTH is enabled and no token is
         provided
+
+    Raises:
+        HTTPException: 401 if the token is absent or cannot be validated, 500 if the
+            policy engine cannot be reached.
     """
     if config.DEBUG_SKIP_AUTH and not token:
         logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, RETURNING no authz mapping")
@@ -194,6 +202,7 @@ async def get_user_authz_mapping(
     return authz_mapping
 
 
+@traced
 async def _get_token_claims(
     token: HTTPAuthorizationCredentials | str | None = None,
     request: Request | None = None,
@@ -282,6 +291,10 @@ def _get_arborist_client(request: Request | None) -> ArboristClient:
 
     Returns:
         ArboristClient: The Arborist client instance from the application state
+
+    Raises:
+        Exception: If no request was provided, leaving no application state to read the
+            client from.
     """
     if not request:
         raise Exception("Expected a request, got None. Cannot determine Arborist Client from app state from request.")
@@ -293,6 +306,9 @@ def get_authz_resource_path_from_collection_name(collection_name: str) -> str:
     """
     Build the Arborist resource path for a vector collection.
     base is hard coded to "/vectorstore/collections"
+
+    Returns:
+        str: The Arborist resource path for the collection.
     """
     base = "/vectorstore/collections"
     if collection_name == "":
@@ -321,6 +337,9 @@ def get_allowed_authz_from_mapping(
          ],
          ...
       }
+
+    Returns:
+        list[str]: Resource paths the user holds `method` on for `service`.
     """
     service = service or config.AUTHZ_SERVICE_NAME
     allowed: list[str] = []
@@ -341,6 +360,9 @@ def get_allowed_authz_from_mapping(
 def _get_crud_action_from_request(request: Request) -> str:
     """
     Return 'read', 'create', 'update', or 'delete' based on the HTTP verb.
+
+    Returns:
+        str: The CRUD action the request's HTTP verb maps to.
     """
     method = request.method.upper()
     action = "unknown"
@@ -357,6 +379,7 @@ def _get_crud_action_from_request(request: Request) -> str:
     return action
 
 
+@traced
 async def parse_and_auth_request(request: Request, collection_name: str):
     """
     Authorize the request with arborist to ensure the request can be madefrom gen3_embeddings.auth import parse_and_auth_request
@@ -381,6 +404,7 @@ async def parse_and_auth_request(request: Request, collection_name: str):
     )
 
 
+@traced
 async def get_allowed_authz_for_request(request: Request) -> list[str]:
     """
     Compute the allowed authz resource tags for this request, based on
@@ -388,11 +412,15 @@ async def get_allowed_authz_for_request(request: Request) -> list[str]:
 
     This is used by the route layer to supply allowed_authz into the
     data access layer (DAL) for RLS.
+
+    Returns:
+        list[str]: Authz resource paths the caller may act on for this request's method.
     """
     method = _get_crud_action_from_request(request)
     return await get_allowed_authz_for_request_with_method(request=request, method=method)
 
 
+@traced
 async def get_allowed_authz_for_request_with_method(request: Request, method: str) -> list[str]:
     """
     Return the resource paths this caller may act on with a specific access method.
