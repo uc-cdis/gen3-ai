@@ -1,5 +1,7 @@
-import pytest
+"""Tests that the `test_database` fixture yields a migrated database and an app user that RLS applies to."""
+
 import asyncpg
+import pytest
 
 
 @pytest.mark.asyncio

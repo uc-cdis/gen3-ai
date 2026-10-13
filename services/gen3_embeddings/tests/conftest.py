@@ -1,3 +1,11 @@
+"""
+Shared fixtures for the gen3_embeddings test suite.
+
+Provides a throwaway Postgres database and non-superuser app role, migrated with dbmate, an app
+and TestClient wired to that database, and fakes for authz resolution so tests can grant
+access to specific collections, paths, or actions.
+"""
+
 import asyncio
 import os
 import secrets

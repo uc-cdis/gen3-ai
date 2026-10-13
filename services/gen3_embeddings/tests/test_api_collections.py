@@ -1,3 +1,6 @@
+"""Tests for the collection endpoints: create, get, list, update, and delete, and how authz filters each."""
+
+
 def test_list_collections_empty(client, allow_authz):
     """An authorized user with no collections yet gets an empty list on page 1."""
     allow_authz("alpha", "beta")

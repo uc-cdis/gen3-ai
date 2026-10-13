@@ -10,7 +10,6 @@ cannot hold are the same row.
 import asyncio
 
 import asyncpg
-import pytest
 
 from gen3_embeddings.database import hashing
 from gen3_embeddings.models.schemas import VectorType

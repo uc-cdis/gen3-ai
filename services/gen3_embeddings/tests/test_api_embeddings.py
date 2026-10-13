@@ -1,3 +1,5 @@
+"""Tests for the per-collection embedding endpoints: create, get, list, update, upsert, and delete."""
+
 import pytest
 
 from gen3_embeddings.database.dal import writes as writes_module
@@ -197,7 +199,8 @@ def test_upsert_dimension_mismatch_reports_the_request_index_and_writes_nothing(
 
 @pytest.mark.parametrize("chunks", [["alpha", "beta", "gamma"], ["1", "2", "3"]])
 def test_create_embeddings_rejects_text_chunks(client, allow_authz, chunks):
-    """Text chunks validate against the Vector | TextChunks union but are not embeddable yet.
+    """
+    Text chunks validate against the Vector | TextChunks union but are not embeddable yet.
 
     The numeric-string case matters: pydantic's smart union sends it down the TextChunks arm,
     so it must be refused rather than coerced into a vector.

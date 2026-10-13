@@ -39,10 +39,12 @@ class FakeArboristClient:
     """
 
     def __init__(self, verdict: bool | dict[str, bool]):
+        """Answer every call with `verdict`, or look each method up in it when it is a mapping."""
         self.verdict = verdict
         self.calls: list[dict] = []
 
     async def auth_request(self, token, service, methods, resources):
+        """Record the call and return the verdict, granting only if every requested method is allowed."""
         self.calls.append({"token": token, "service": service, "methods": methods, "resources": resources})
         if isinstance(self.verdict, dict):
             return all(self.verdict.get(method, False) for method in methods)

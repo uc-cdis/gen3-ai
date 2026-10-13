@@ -1,3 +1,6 @@
+"""Tests for the unauthenticated service health endpoints, `/_version/` and `/_status/`."""
+
+
 def test_version(client):
     """GET /_version/ returns 200 with a non-empty version string."""
     response = client.get("/_version/")
