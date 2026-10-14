@@ -52,19 +52,6 @@ def get_embeddings_table_and_cast(vector_type: VectorType) -> tuple[str, str]:
     raise ValueError(f"Unsupported vector type: {vector_type}")
 
 
-# pgvector's ordering operators. `inner_product` maps to `<#>`, which is the *negative*
-# inner product, so every one of these is "smaller is closer" and every search orders
-# ascending. `cosine_similarity` shares `<=>` with `cosine_distance` and differs only in
-# how the value is reported, which is the whole point of separating value from order below.
-_METRIC_OPERATORS: dict[DistanceMetric, str] = {
-    DistanceMetric.l2_distance: "<->",
-    DistanceMetric.inner_product: "<#>",
-    DistanceMetric.cosine_distance: "<=>",
-    DistanceMetric.l1_distance: "<+>",
-    DistanceMetric.cosine_similarity: "<=>",
-}
-
-
 @dataclass(frozen=True)
 class MetricSql:
     """The four SQL fragments a metric contributes to a search."""
@@ -77,132 +64,6 @@ class MetricSql:
     hamming: str
     # Direction to re-sort the reported value in, once ordering is no longer the index's job.
     value_order: str
-
-
-def _metric_sql(
-    distance_metric: DistanceMetric,
-    vector_type: VectorType,
-    dimensions: int,
-    vector_placeholder: str,
-) -> MetricSql:
-    """
-    Build the metric expressions shared by every shape of search query.
-
-    The ordering expression is kept separate from the reported value. `cosine_similarity`
-    reports `1 - distance`, and ordering by that arithmetic wrapper is not something an index
-    can serve; ordering by the bare distance ascending produces the identical ranking and is
-    index-eligible. `min_value`/`max_value` still compare against the reported value, so the
-    two expressions cannot be collapsed into one.
-
-    Args:
-        distance_metric (DistanceMetric): Metric to rank by.
-        vector_type (VectorType): Storage type of the collection being searched.
-        dimensions (int): Dimensionality the collection declares, used in the cast.
-        vector_placeholder (str): Bare placeholder for the query vector, e.g. "$2".
-
-    Returns:
-        MetricSql: The ordering, value, Hamming, and re-sort direction fragments.
-
-    Raises:
-        ValueError: If the metric has no pgvector operator.
-    """
-    try:
-        operator = _METRIC_OPERATORS[distance_metric]
-    except KeyError:
-        raise ValueError(f"Unsupported distance metric: {distance_metric}") from None
-
-    # `vector_type` may arrive as the plain string rather than the enum -- it is a StrEnum so
-    # callers compare it either way, and the cross-collection search passes through whatever
-    # it was given. Coerce before reaching for `.value`.
-    typed = f"{VectorType(vector_type).value}({dimensions})"
-    order = f"embedding::{typed} {operator} {vector_placeholder}::{typed}"
-
-    # Only the indexed expression (left operand) is explicitly cast to `bit(n)`.
-    # The query operand relies on `binary_quantize()` to produce a compatible bit
-    # string length, so no explicit `::bit(n)` cast is applied on the right.
-    hamming = f"binary_quantize(embedding)::bit({dimensions}) <~> binary_quantize({vector_placeholder}::{typed})"
-
-    is_similarity = distance_metric == DistanceMetric.cosine_similarity
-    return MetricSql(
-        order=order,
-        value=f"1 - ({order})" if is_similarity else order,
-        hamming=hamming,
-        # cosine_similarity reports `1 - distance`, whose values descend as the distance
-        # ascends, so re-sorting on the reported value has to flip direction for it.
-        value_order="DESC" if is_similarity else "ASC",
-    )
-
-
-def _metadata_filter_clauses(
-    filters: dict[str, str] | None,
-    param_index: int,
-) -> tuple[list[str], list[Any], int]:
-    """
-    Build the metadata equality clauses, which stay inside the candidate query.
-
-    Args:
-        filters (dict[str, str] | None): Metadata equality filters.
-        param_index (int): Number of the next free placeholder.
-
-    Returns:
-        tuple[list[str], list[Any], int]: Clauses, their parameters, and the next free
-        placeholder number.
-    """
-    clauses: list[str] = []
-    params: list[Any] = []
-    for key, value in (filters or {}).items():
-        clauses.append(f"metadata->>(${param_index}::text) = ${param_index + 1}::text")
-        params.extend((key, value))
-        param_index += 2
-    return clauses, params, param_index
-
-
-def _threshold_clauses(
-    min_value: float | None,
-    max_value: float | None,
-    param_index: int,
-) -> tuple[list[str], list[Any], int]:
-    """
-    Build the `min_value`/`max_value` clauses, which go *outside* the candidate query.
-
-    A filter on the ordered expression sits below the LIMIT, and the executor cannot end an
-    ordered index scan early while rows are still being filtered out: it walks the whole index
-    instead, reporting the remainder as "Rows Removed by Filter". That is a full-scan cost,
-    so the threshold has to be applied after the limit. The
-    pgvector README prescribes exactly this shape ("use a materialized CTE and place the
-    distance filter outside of it"); the underlying executor behaviour is
-    https://www.postgresql.org/message-id/flat/CAOdR5yGUoMQ6j7M5hNUXrySzaqZVGf_Ne%2B8fwZMRKTFxU1nbJg%40mail.gmail.com
-
-    Every other filter stays inside, where `hnsw.iterative_scan` can keep feeding the scan
-    until `top_k` rows survive them.
-
-    The tradeoff is that the limit applies before the thresholds. For the bound that drops
-    *distant* hits -- `max_value` on a distance metric, `min_value` on cosine_similarity --
-    that changes nothing, because everything it removes sorts after everything it keeps. The
-    opposite bound drops the *nearest* hits, so it eats into the rows already limited to
-    `top_k`, and such a search can return fewer than `top_k` hits even when more would have
-    qualified.
-
-    Args:
-        min_value (float | None): Lower bound on the reported value.
-        max_value (float | None): Upper bound on the reported value.
-        param_index (int): Number of the next free placeholder.
-
-    Returns:
-        tuple[list[str], list[Any], int]: Clauses, their parameters, and the next free
-        placeholder number.
-    """
-    clauses: list[str] = []
-    params: list[Any] = []
-    if min_value is not None:
-        clauses.append(f"value >= ${param_index}")
-        params.append(min_value)
-        param_index += 1
-    if max_value is not None:
-        clauses.append(f"value <= ${param_index}")
-        params.append(max_value)
-        param_index += 1
-    return clauses, params, param_index
 
 
 def build_search_sql(
@@ -463,3 +324,142 @@ def build_multi_collection_search_sql(
     """,
         params,
     )
+
+
+# pgvector's ordering operators. `inner_product` maps to `<#>`, which is the *negative*
+# inner product, so every one of these is "smaller is closer" and every search orders
+# ascending. `cosine_similarity` shares `<=>` with `cosine_distance` and differs only in
+# how the value is reported, which is the whole point of separating value from order below.
+_METRIC_OPERATORS: dict[DistanceMetric, str] = {
+    DistanceMetric.l2_distance: "<->",
+    DistanceMetric.inner_product: "<#>",
+    DistanceMetric.cosine_distance: "<=>",
+    DistanceMetric.l1_distance: "<+>",
+    DistanceMetric.cosine_similarity: "<=>",
+}
+
+
+def _metric_sql(
+    distance_metric: DistanceMetric,
+    vector_type: VectorType,
+    dimensions: int,
+    vector_placeholder: str,
+) -> MetricSql:
+    """
+    Build the metric expressions shared by every shape of search query.
+
+    The ordering expression is kept separate from the reported value. `cosine_similarity`
+    reports `1 - distance`, and ordering by that arithmetic wrapper is not something an index
+    can serve; ordering by the bare distance ascending produces the identical ranking and is
+    index-eligible. `min_value`/`max_value` still compare against the reported value, so the
+    two expressions cannot be collapsed into one.
+
+    Args:
+        distance_metric (DistanceMetric): Metric to rank by.
+        vector_type (VectorType): Storage type of the collection being searched.
+        dimensions (int): Dimensionality the collection declares, used in the cast.
+        vector_placeholder (str): Bare placeholder for the query vector, e.g. "$2".
+
+    Returns:
+        MetricSql: The ordering, value, Hamming, and re-sort direction fragments.
+
+    Raises:
+        ValueError: If the metric has no pgvector operator.
+    """
+    try:
+        operator = _METRIC_OPERATORS[distance_metric]
+    except KeyError:
+        raise ValueError(f"Unsupported distance metric: {distance_metric}") from None
+
+    # `vector_type` may arrive as the plain string rather than the enum -- it is a StrEnum so
+    # callers compare it either way, and the cross-collection search passes through whatever
+    # it was given. Coerce before reaching for `.value`.
+    typed = f"{VectorType(vector_type).value}({dimensions})"
+    order = f"embedding::{typed} {operator} {vector_placeholder}::{typed}"
+
+    # Only the indexed expression (left operand) is explicitly cast to `bit(n)`.
+    # The query operand relies on `binary_quantize()` to produce a compatible bit
+    # string length, so no explicit `::bit(n)` cast is applied on the right.
+    hamming = f"binary_quantize(embedding)::bit({dimensions}) <~> binary_quantize({vector_placeholder}::{typed})"
+
+    is_similarity = distance_metric == DistanceMetric.cosine_similarity
+    return MetricSql(
+        order=order,
+        value=f"1 - ({order})" if is_similarity else order,
+        hamming=hamming,
+        # cosine_similarity reports `1 - distance`, whose values descend as the distance
+        # ascends, so re-sorting on the reported value has to flip direction for it.
+        value_order="DESC" if is_similarity else "ASC",
+    )
+
+
+def _metadata_filter_clauses(
+    filters: dict[str, str] | None,
+    param_index: int,
+) -> tuple[list[str], list[Any], int]:
+    """
+    Build the metadata equality clauses, which stay inside the candidate query.
+
+    Args:
+        filters (dict[str, str] | None): Metadata equality filters.
+        param_index (int): Number of the next free placeholder.
+
+    Returns:
+        tuple[list[str], list[Any], int]: Clauses, their parameters, and the next free
+        placeholder number.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    for key, value in (filters or {}).items():
+        clauses.append(f"metadata->>(${param_index}::text) = ${param_index + 1}::text")
+        params.extend((key, value))
+        param_index += 2
+    return clauses, params, param_index
+
+
+def _threshold_clauses(
+    min_value: float | None,
+    max_value: float | None,
+    param_index: int,
+) -> tuple[list[str], list[Any], int]:
+    """
+    Build the `min_value`/`max_value` clauses, which go *outside* the candidate query.
+
+    A filter on the ordered expression sits below the LIMIT, and the executor cannot end an
+    ordered index scan early while rows are still being filtered out: it walks the whole index
+    instead, reporting the remainder as "Rows Removed by Filter". That is a full-scan cost,
+    so the threshold has to be applied after the limit. The
+    pgvector README prescribes exactly this shape ("use a materialized CTE and place the
+    distance filter outside of it"); the underlying executor behaviour is
+    https://www.postgresql.org/message-id/flat/CAOdR5yGUoMQ6j7M5hNUXrySzaqZVGf_Ne%2B8fwZMRKTFxU1nbJg%40mail.gmail.com
+
+    Every other filter stays inside, where `hnsw.iterative_scan` can keep feeding the scan
+    until `top_k` rows survive them.
+
+    The tradeoff is that the limit applies before the thresholds. For the bound that drops
+    *distant* hits -- `max_value` on a distance metric, `min_value` on cosine_similarity --
+    that changes nothing, because everything it removes sorts after everything it keeps. The
+    opposite bound drops the *nearest* hits, so it eats into the rows already limited to
+    `top_k`, and such a search can return fewer than `top_k` hits even when more would have
+    qualified.
+
+    Args:
+        min_value (float | None): Lower bound on the reported value.
+        max_value (float | None): Upper bound on the reported value.
+        param_index (int): Number of the next free placeholder.
+
+    Returns:
+        tuple[list[str], list[Any], int]: Clauses, their parameters, and the next free
+        placeholder number.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if min_value is not None:
+        clauses.append(f"value >= ${param_index}")
+        params.append(min_value)
+        param_index += 1
+    if max_value is not None:
+        clauses.append(f"value <= ${param_index}")
+        params.append(max_value)
+        param_index += 1
+    return clauses, params, param_index

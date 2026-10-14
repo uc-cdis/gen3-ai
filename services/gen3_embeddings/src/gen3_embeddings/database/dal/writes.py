@@ -29,178 +29,6 @@ from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.schemas import VectorType
 
 
-@dataclass(frozen=True)
-class _BulkWriteBatch:
-    """
-    A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
-
-    Every column travels as one array parameter, unnested in parallel by the INSERT. The
-    vectors are pgvector objects, which its asyncpg codec encodes in binary, so no float is
-    ever formatted as text.
-    """
-
-    # one per unique row; Vector or HalfVector to match the collection's column type
-    vectors: list[Vector | HalfVector]
-    # canonical JSON text, one per unique row; also what the metadata hash was taken over
-    metadata_json: list[str]
-    embedding_hashes: list[UUID]
-    metadata_hashes: list[UUID]
-    # for each index in the caller's original list, which unique row it maps to
-    original_to_unique: list[int]
-    has_duplicates: bool
-
-    @property
-    def row_count(self) -> int:
-        """Number of unique rows the INSERT will write."""
-        return len(self.embedding_hashes)
-
-    @property
-    def row_keys(self) -> list[tuple[UUID, UUID]]:
-        """
-        The (embedding_hash, metadata_hash) pair identifying each unique row, in row order.
-
-        Deduplication is by exactly this pair, so it is unique across the batch and usable to
-        match RETURNING rows back to inputs without relying on the order Postgres emits them.
-        """
-        return list(zip(self.embedding_hashes, self.metadata_hashes))
-
-
-def _prepare_bulk_write(
-    collection: Collection,
-    embeddings: list[list[float]],
-    metadata_list: list[dict] | None,
-) -> _BulkWriteBatch:
-    """
-    Hash a batch of embeddings and drop the duplicates within it.
-
-    Deduplication is on (embedding_hash, metadata_hash); `authz` is a single value for the
-    whole call, so it is constant within a batch and cannot distinguish rows. Because the
-    hashes are taken at storage precision, two inputs that differ only in digits the column
-    cannot store collapse here, which is what the database's unique constraint would consider
-    them anyway.
-
-    Args:
-        collection (Collection): Target collection; supplies dimensions and vector type.
-        embeddings (list[list[float]]): Vectors to write.
-        metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
-
-    Returns:
-        _BulkWriteBatch: The deduplicated batch, ready to bind.
-
-    Raises:
-        MetadataLengthMismatchError: If `metadata_list` is a different length than
-            `embeddings`.
-        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
-            dimensionality.
-        EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
-            vector type.
-        ValueError: If any metadata holds a NaN or Infinity value.
-    """
-    if metadata_list is None:
-        metadata_list = [{} for _ in embeddings]
-    elif len(metadata_list) != len(embeddings):
-        raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
-
-    vector_type = VectorType(collection.vector_type)
-    # one conversion for the whole batch; its rows are the bytes Postgres will store, which
-    # is both what gets hashed and what gets bound
-    array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
-    return _dedupe_rows(array, metadata_list, vector_type)
-
-
-def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], vector_type: VectorType) -> _BulkWriteBatch:
-    """
-    Hash already-converted rows and drop the duplicates among them.
-
-    Args:
-        array (np.ndarray): Storage-precision rows from `hashing.to_storage_array`.
-        metadata_list (list[dict]): Metadata per row, the same length as `array`.
-        vector_type (VectorType): Storage type of the target collection.
-
-    Returns:
-        _BulkWriteBatch: The deduplicated batch, ready to bind.
-
-    Raises:
-        ValueError: If any metadata holds a NaN or Infinity value.
-    """
-    embedding_hashes = hashing.hash_rows(array)
-
-    unique_row_indices: list[int] = []
-    unique_metadata_json: list[str] = []
-    unique_embedding_hashes: list[UUID] = []
-    unique_metadata_hashes: list[UUID] = []
-    # key -> unique row index
-    seen: dict[tuple[UUID, UUID], int] = {}
-    # for each original index i, which unique index j it maps to
-    original_to_unique: list[int] = []
-    has_duplicates = False
-
-    for index, (embedding_hash, metadata) in enumerate(zip(embedding_hashes, metadata_list)):
-        metadata_json = hashing.canonical_metadata_json(metadata)
-        metadata_hash = hashing.hash_metadata_json(metadata_json)
-        key = (embedding_hash, metadata_hash)
-
-        if key in seen:
-            original_to_unique.append(seen[key])
-            has_duplicates = True
-            continue
-
-        unique_index = len(unique_row_indices)
-        seen[key] = unique_index
-        original_to_unique.append(unique_index)
-        unique_row_indices.append(index)
-        unique_metadata_json.append(metadata_json)
-        unique_embedding_hashes.append(embedding_hash)
-        unique_metadata_hashes.append(metadata_hash)
-
-    return _BulkWriteBatch(
-        vectors=hashing.to_pgvector_rows(array, unique_row_indices, vector_type),
-        metadata_json=unique_metadata_json,
-        embedding_hashes=unique_embedding_hashes,
-        metadata_hashes=unique_metadata_hashes,
-        original_to_unique=original_to_unique,
-        has_duplicates=has_duplicates,
-    )
-
-
-def _bulk_write_results(rows: list[asyncpg.Record], batch: _BulkWriteBatch) -> list[Embedding]:
-    """
-    Map the rows a bulk write returned back onto the caller's original input order.
-
-    RETURNING order is not something Postgres promises, so rows are matched by the hash pair
-    they came back with rather than by position. Every unique row has a distinct pair by
-    construction, so the match is exact.
-
-    Args:
-        rows (list[asyncpg.Record]): Rows from the INSERT's RETURNING clause.
-        batch (_BulkWriteBatch): The batch that was written.
-
-    Returns:
-        list[Embedding]: One Embedding per embedding the caller passed in, in that order.
-            Inputs that deduplicated onto the same row share an object.
-
-    Raises:
-        EmbeddingWriteInconsistencyError: If the returned rows do not correspond exactly to
-            the rows requested, which would mean a row was silently dropped or duplicated.
-    """
-    if len(rows) != batch.row_count:
-        raise EmbeddingWriteInconsistencyError("Internal error: mismatch between unique upsert results and inputs.")
-
-    rows_by_key = {(row["embedding_hash_v2"], row["metadata_hash_v2"]): row for row in rows}
-    try:
-        unique_results = [Embedding.from_record(rows_by_key[key]) for key in batch.row_keys]
-    except KeyError as exc:
-        raise EmbeddingWriteInconsistencyError(
-            "Internal error: a written embedding could not be matched back to its input."
-        ) from exc
-
-    if not batch.has_duplicates:
-        # nothing collapsed, so unique order is already the caller's order
-        return unique_results
-
-    return [unique_results[unique_index] for unique_index in batch.original_to_unique]
-
-
 class WriteMixin(DataAccessLayerBase):
     """Inserts, upserts, updates and deletes. RLS policies decide which rows a write may touch."""
 
@@ -821,3 +649,175 @@ class WriteMixin(DataAccessLayerBase):
             return affected_row_count(result) > 0
 
         return await self._with_rls(_query)
+
+
+@dataclass(frozen=True)
+class _BulkWriteBatch:
+    """
+    A deduplicated batch of embeddings, hashed and shaped for the bulk INSERT's parameters.
+
+    Every column travels as one array parameter, unnested in parallel by the INSERT. The
+    vectors are pgvector objects, which its asyncpg codec encodes in binary, so no float is
+    ever formatted as text.
+    """
+
+    # one per unique row; Vector or HalfVector to match the collection's column type
+    vectors: list[Vector | HalfVector]
+    # canonical JSON text, one per unique row; also what the metadata hash was taken over
+    metadata_json: list[str]
+    embedding_hashes: list[UUID]
+    metadata_hashes: list[UUID]
+    # for each index in the caller's original list, which unique row it maps to
+    original_to_unique: list[int]
+    has_duplicates: bool
+
+    @property
+    def row_count(self) -> int:
+        """Number of unique rows the INSERT will write."""
+        return len(self.embedding_hashes)
+
+    @property
+    def row_keys(self) -> list[tuple[UUID, UUID]]:
+        """
+        The (embedding_hash, metadata_hash) pair identifying each unique row, in row order.
+
+        Deduplication is by exactly this pair, so it is unique across the batch and usable to
+        match RETURNING rows back to inputs without relying on the order Postgres emits them.
+        """
+        return list(zip(self.embedding_hashes, self.metadata_hashes))
+
+
+def _prepare_bulk_write(
+    collection: Collection,
+    embeddings: list[list[float]],
+    metadata_list: list[dict] | None,
+) -> _BulkWriteBatch:
+    """
+    Hash a batch of embeddings and drop the duplicates within it.
+
+    Deduplication is on (embedding_hash, metadata_hash); `authz` is a single value for the
+    whole call, so it is constant within a batch and cannot distinguish rows. Because the
+    hashes are taken at storage precision, two inputs that differ only in digits the column
+    cannot store collapse here, which is what the database's unique constraint would consider
+    them anyway.
+
+    Args:
+        collection (Collection): Target collection; supplies dimensions and vector type.
+        embeddings (list[list[float]]): Vectors to write.
+        metadata_list (list[dict] | None): Metadata per vector, or None for all-empty.
+
+    Returns:
+        _BulkWriteBatch: The deduplicated batch, ready to bind.
+
+    Raises:
+        MetadataLengthMismatchError: If `metadata_list` is a different length than
+            `embeddings`.
+        EmbeddingDimensionMismatchError: If a vector's length is not the collection's
+            dimensionality.
+        EmbeddingNotRepresentableError: If a value cannot be stored in the collection's
+            vector type.
+        ValueError: If any metadata holds a NaN or Infinity value.
+    """
+    if metadata_list is None:
+        metadata_list = [{} for _ in embeddings]
+    elif len(metadata_list) != len(embeddings):
+        raise MetadataLengthMismatchError("metadata_list length must match embeddings length")
+
+    vector_type = VectorType(collection.vector_type)
+    # one conversion for the whole batch; its rows are the bytes Postgres will store, which
+    # is both what gets hashed and what gets bound
+    array = hashing.to_storage_array(embeddings, vector_type, collection.dimensions)
+    return _dedupe_rows(array, metadata_list, vector_type)
+
+
+def _dedupe_rows(array: np.ndarray, metadata_list: list[dict], vector_type: VectorType) -> _BulkWriteBatch:
+    """
+    Hash already-converted rows and drop the duplicates among them.
+
+    Args:
+        array (np.ndarray): Storage-precision rows from `hashing.to_storage_array`.
+        metadata_list (list[dict]): Metadata per row, the same length as `array`.
+        vector_type (VectorType): Storage type of the target collection.
+
+    Returns:
+        _BulkWriteBatch: The deduplicated batch, ready to bind.
+
+    Raises:
+        ValueError: If any metadata holds a NaN or Infinity value.
+    """
+    embedding_hashes = hashing.hash_rows(array)
+
+    unique_row_indices: list[int] = []
+    unique_metadata_json: list[str] = []
+    unique_embedding_hashes: list[UUID] = []
+    unique_metadata_hashes: list[UUID] = []
+    # key -> unique row index
+    seen: dict[tuple[UUID, UUID], int] = {}
+    # for each original index i, which unique index j it maps to
+    original_to_unique: list[int] = []
+    has_duplicates = False
+
+    for index, (embedding_hash, metadata) in enumerate(zip(embedding_hashes, metadata_list)):
+        metadata_json = hashing.canonical_metadata_json(metadata)
+        metadata_hash = hashing.hash_metadata_json(metadata_json)
+        key = (embedding_hash, metadata_hash)
+
+        if key in seen:
+            original_to_unique.append(seen[key])
+            has_duplicates = True
+            continue
+
+        unique_index = len(unique_row_indices)
+        seen[key] = unique_index
+        original_to_unique.append(unique_index)
+        unique_row_indices.append(index)
+        unique_metadata_json.append(metadata_json)
+        unique_embedding_hashes.append(embedding_hash)
+        unique_metadata_hashes.append(metadata_hash)
+
+    return _BulkWriteBatch(
+        vectors=hashing.to_pgvector_rows(array, unique_row_indices, vector_type),
+        metadata_json=unique_metadata_json,
+        embedding_hashes=unique_embedding_hashes,
+        metadata_hashes=unique_metadata_hashes,
+        original_to_unique=original_to_unique,
+        has_duplicates=has_duplicates,
+    )
+
+
+def _bulk_write_results(rows: list[asyncpg.Record], batch: _BulkWriteBatch) -> list[Embedding]:
+    """
+    Map the rows a bulk write returned back onto the caller's original input order.
+
+    RETURNING order is not something Postgres promises, so rows are matched by the hash pair
+    they came back with rather than by position. Every unique row has a distinct pair by
+    construction, so the match is exact.
+
+    Args:
+        rows (list[asyncpg.Record]): Rows from the INSERT's RETURNING clause.
+        batch (_BulkWriteBatch): The batch that was written.
+
+    Returns:
+        list[Embedding]: One Embedding per embedding the caller passed in, in that order.
+            Inputs that deduplicated onto the same row share an object.
+
+    Raises:
+        EmbeddingWriteInconsistencyError: If the returned rows do not correspond exactly to
+            the rows requested, which would mean a row was silently dropped or duplicated.
+    """
+    if len(rows) != batch.row_count:
+        raise EmbeddingWriteInconsistencyError("Internal error: mismatch between unique upsert results and inputs.")
+
+    rows_by_key = {(row["embedding_hash_v2"], row["metadata_hash_v2"]): row for row in rows}
+    try:
+        unique_results = [Embedding.from_record(rows_by_key[key]) for key in batch.row_keys]
+    except KeyError as exc:
+        raise EmbeddingWriteInconsistencyError(
+            "Internal error: a written embedding could not be matched back to its input."
+        ) from exc
+
+    if not batch.has_duplicates:
+        # nothing collapsed, so unique order is already the caller's order
+        return unique_results
+
+    return [unique_results[unique_index] for unique_index in batch.original_to_unique]
