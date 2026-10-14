@@ -52,6 +52,7 @@ RUN uv sync --no-dev --all-extras --frozen
 # Final stage: minimal runtime setup
 FROM base
 ARG SERVICE_NAME
+ARG TARGETARCH
 
 # uv installs the service as an editable package, so /venv holds a .pth pointing back at this
 # src tree and both are needed at runtime. /libraries is not: `common` is a built wheel in /venv.

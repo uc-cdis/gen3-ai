@@ -20,6 +20,8 @@ from gen3_inference.inference_protocols.utils.openai_chat_to_openresponses impor
 )
 from gen3_inference.types import OpenResponsesError
 
+"""Inference protocol client for OpenAI Chat API."""
+
 
 class OpenaiChat(InferenceProtocolClient):
     """Talks to an upstream server that speaks the OpenAI Chat Completions protocol."""

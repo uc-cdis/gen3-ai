@@ -140,6 +140,11 @@ async def create_response(
     return response
 
 
+"""
+Get AI Model Info by talking with local and connected Gen3 AI Model Repos
+"""
+
+
 async def get_ai_model_info(body: CreateResponseBody) -> dict:
     """
     Get AI Model Info by talking with local and connected Gen3 AI Model Repos
@@ -255,6 +260,12 @@ async def get_ai_model_info(body: CreateResponseBody) -> dict:
     ai_model_info = {"url": ai_model_url, "metadata": response.json()}
 
     return ai_model_info
+
+
+"""
+Get the client class given a list of all available inference protocol client names for a
+given model. This will select the appropriate one or raise an error.
+"""
 
 
 async def get_inference_protocol_client(all_model_inference_protocol_client_names: list[str], ai_model_url: str | None):

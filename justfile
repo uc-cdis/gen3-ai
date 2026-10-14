@@ -368,6 +368,13 @@ db_setup SERVICE="all": _check_dependencies
         fi
 
         service_name="{{SERVICE}}"
+        # PG* is the canonical Postgres variable set. DB_* is a legacy app-level alias
+        # that may still exist in older service .env files, so prefer PGDATABASE and
+        # warn instead of failing hard if both are present but differ.
+        if [[ -z "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" ]]; then export PGDATABASE="${DB_DATABASE}"; fi
+        if [[ -n "${PGDATABASE:-}" && -n "${DB_DATABASE:-}" && "${PGDATABASE}" != "${DB_DATABASE}" ]]; then
+            echo -e "${YELLOW}** WARNING: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Using PGDATABASE for the setup step. **${RESET}"
+        fi
         set_postgres_defaults
         set_postgres_admin_defaults
         if CREATE_OUT=$(PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${DB_MIGRATION_USER}\";" 2>&1); then
