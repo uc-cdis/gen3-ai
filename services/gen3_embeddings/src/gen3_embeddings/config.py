@@ -16,6 +16,14 @@ logging = common_config.logging
 # name of the top-level package in this service
 logging.name = "gen3_embeddings"
 
+# How the deployment is named in every observability signal: Pyroscope application, OpenTelemetry
+# service.name, and through that the `service` field gen3logging puts on each log line.
+# It has to equal the Kubernetes app label! And it's hyphenated because k8s object names cannot
+# carry an underscore, so it is deliberately not configurable per deployment
+# The package name above is related to Python, so follows Python rules (underscores)
+# a different axis and stays underscored.
+DEPLOYMENT_SERVICE_NAME = "gen3-embeddings"
+
 DEFAULT_PAGE_SIZE = starlette_config("DEFAULT_PAGE_SIZE", default=100)
 MAX_PAGE_SIZE = starlette_config("MAX_PAGE_SIZE", default=1000)
 

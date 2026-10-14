@@ -28,20 +28,6 @@ ENV OTEL_SERVICE_NAME=${SERVICE_NAME} \
     OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.monitoring:4318 \
     OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
-# Copy shared libraries
-COPY --chown=gen3:gen3 /libraries /libraries
-
-# Copy the selected service.  Some services include database migrations while
-# others do not, so copying the service directory keeps this shared Dockerfile
-# compatible with every service.
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME} /services/${SERVICE_NAME}
-
-COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
-
-# Conditionally copy db folder if it exists in build context
-# The wildcard prevents Docker from failing if db folder is missing
-COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/db* /services/${SERVICE_NAME}/db/
-
 WORKDIR /services/${SERVICE_NAME}
 
 # Builder stage installs dependencies
@@ -75,19 +61,9 @@ COPY --from=builder /services/${SERVICE_NAME} /services/${SERVICE_NAME}
 
 COPY --chown=gen3:gen3 /deployments/k8s/services/${SERVICE_NAME}/dockerrun.bash /services/dockerrun.bash
 
-USER root
-RUN mkdir -p /var/log/nginx && chown -R gen3:gen3 /var/log/nginx \
-    && case "${TARGETARCH}" in \
-         amd64|arm64) dbmate_arch="${TARGETARCH}" ;; \
-         *) echo "Unsupported architecture for dbmate: ${TARGETARCH}" >&2; exit 1 ;; \
-       esac \
-    && curl --fail --location --silent --show-error \
-         "https://github.com/amacneil/dbmate/releases/download/v2.29.0/dbmate-linux-${dbmate_arch}" \
-         --output /usr/local/bin/dbmate \
-    && chmod +x /usr/local/bin/dbmate
-
-# Switch to non-root user 'gen3' for the serving process
-USER gen3
+# Conditionally copy db folder if it exists in build context
+# The wildcard prevents Docker from failing if db folder is missing
+COPY --chown=gen3:gen3 /services/${SERVICE_NAME}/db* /services/${SERVICE_NAME}/db/
 
 # The base image already selects the non-root gen3 user for the serving process.
 # So don't mess with USER at all

@@ -567,6 +567,13 @@ PGUSER=embeddings_user
 PGPASSWORD=embeddings_pass
 PGDATABASE=gen3embeddings
 
+# embeddings_user has no CREATEDB and does not own the database (this is required
+# for appropriate application of row-level security). So `just db_setup` and
+# `just db_migrate` need an admin role to run migrations. These default to PGUSER/PGPASSWORD
+# if you don't provide the below.
+DB_MIGRATION_USER=adminuser
+DB_MIGRATION_PASSWORD=adminpass
+
 DEBUG=True
 ARBORIST_URL="http://localhost:4280"
 VERBOSE_INTERNAL_LOGS=True

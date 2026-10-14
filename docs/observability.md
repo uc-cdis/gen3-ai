@@ -1,29 +1,67 @@
 # Observability
 
-Three signals, three separate paths out of a service:
+Four signals, four separate paths out of a service:
 
-| Signal      | How it leaves the service | Where it goes                    |
-| ----------- | ------------------------- | -------------------------------- |
-| **Traces**  | pushed over OTLP          | Alloy (`alloy.monitoring:4318`)  |
-| **Metrics** | scraped from `/metrics`   | Prometheus                       |
-| **Logs**    | JSON on stdout            | whatever collects container logs |
+| Signal       | How it leaves the service          | Where it goes                    |
+| ------------ | ---------------------------------- | -------------------------------- |
+| **Traces**   | pushed over OTLP                   | Alloy (`alloy.monitoring:4318`)  |
+| **Metrics**  | scraped from `/metrics`            | Prometheus                       |
+| **Logs**     | JSON on stdout                     | whatever collects container logs |
+| **Profiles** | pushed over Pyroscope's ingest API | Alloy (`alloy.monitoring:4040`)  |
 
 They are joined by trace ids: `LoggingInstrumentor` puts the active trace and span id on
 every log record, and `gen3logging` renders them as `trace_id` / `span_id`. So a log line
-found in Loki leads to its trace in Tempo, and vice versa.
+found in Loki leads to its trace in Tempo, and vice versa. Profiles carry the same ids as
+Pyroscope labels, so a slow span leads to the flamegraph for that one request.
+
+## Where this lives
+
+The tracing, profiling and request-metrics machinery is
+[`gen3pyutils.observability`](https://github.com/uc-cdis/gen3pyutils/blob/master/gen3pyutils/observability/README.md),
+shared with the rest of Gen3. What this repo keeps is the configuration: `common/telemetry.py`
+and `common/profiling.py` read `common/config.py` and pass those values in, so a service calls
+`configure_tracing(app, name)` and gets the settings the monorepo agrees on. `common.telemetry`
+also re-exports `traced`, `no_trace`, `instrument_class`, `instrument_module` and `get_tracer`
+unchanged, so service code imports them from there and never names the library directly.
 
 ## Configuration
 
-| Variable                       | Default                        | Effect                                                                                               |
-| ------------------------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `ENABLE_OPENTELEMETRY_TRACES`  | `True`                         | Off means no provider, no instrumentation, no spans at all.                                          |
-| `FORCE_DISABLE_CUSTOM_TRACING` | `False`                        | On means no per-function spans. Library instrumentation keeps running, so requests and queries are still traced with less detail. It will reduce some CPU cycles for the tracing, but generally that is on the order of <1ms UNLESS you are instrumenting a function that gets called tens of thousands of times or something, in which case it can add up. This config lets you determine if the tracing is what's slowing stuff down, but the solution is NOT to leave it off - you should not trace that function directly (e.g. fix your tracing setup, don't just remove all tracing). |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`  | `http://alloy.monitoring:4318` | An **empty string** selects the console exporter, which is how to inspect spans locally without a collector. |
-| `OTEL_EXPORTER_OTLP_PROTOCOL`  | `http/protobuf`                | `http/protobuf` pairs with port 4318, `grpc` with 4317. A mismatched pair fails at export time, not at startup. |
-| `ENABLE_METRICS`               | `True`                         | Off means `/metrics` serves nothing useful and the counters are never created.                       |
-| `METRICS_PROVIDER`             | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
-| `PROMETHEUS_MULTIPROC_DIR`     | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. **Must exist**, see below.                          |
-| `GEN3_JSON_LOGS`               | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
+| Variable                                      | Default                        | Effect                                                                                               |
+| --------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `ENABLE_OPENTELEMETRY_TRACES`                 | `True`                         | Off means no provider, no instrumentation, no spans at all.                                          |
+| `FORCE_DISABLE_CUSTOM_TRACING`                | `False`                        | On means no per-function spans. Library instrumentation keeps running, so requests and queries are still traced with less detail. It will reduce some CPU cycles for the tracing, but generally that is on the order of <1ms UNLESS you are instrumenting a function that gets called tens of thousands of times or something, in which case it can add up. This config lets you determine if the tracing is what's slowing stuff down, but the solution is NOT to leave it off - you should not trace that function directly (e.g. fix your tracing setup, don't just remove all tracing). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                 | `http://alloy.monitoring:4318` | An **empty string** selects the console exporter, which is how to inspect spans locally without a collector. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`                 | `http/protobuf`                | `http/protobuf` pairs with port 4318, `grpc` with 4317. A mismatched pair fails at export time, not at startup. |
+| `ENABLE_METRICS`                              | `True`                         | Off means `/metrics` serves nothing useful and the counters are never created.                       |
+| `METRICS_PROVIDER`                            | `prometheus`                   | The only supported value as of now. Anything else with `ENABLE_METRICS=True` fails at startup.       |
+| `PROMETHEUS_MULTIPROC_DIR`                    | `/var/tmp/prometheus_metrics`  | Directory the per-process counter files live in. Created at startup when metrics are on, see below.  |
+| `GEN3_JSON_LOGS`                              | `True`                         | Off gives human-readable lines with the trace ids appended instead of JSON.                          |
+| `ENABLE_CONTINUOUS_PROFILING`                 | `False`                        | Off means no Pyroscope agent and no profiles. Off by default because there is no console fallback: with nothing listening the agent retries pushes for the life of the process. |
+| `PYROSCOPE_SERVER_ADDRESS`                    | `http://alloy.monitoring:4040` | Where profiles are pushed. **Not** an OTLP endpoint, so this cannot be 4317/4318, see below.         |
+| `PYROSCOPE_SAMPLE_RATE`                       | `100`                          | Samples per second per thread.                                                                       |
+| `PYROSCOPE_UPLOAD_INTERVAL`                   | `10`                           | Seconds between pushes.                                                                              |
+| `PROFILE_CPU`                                 | `True`                         | Collect CPU profiles.                                                                                |
+| `PROFILE_MEMORY`                              | `False`                        | Collect allocation profiles. Opt-in: it samples the allocator, which costs more than the CPU profiler on an endpoint that allocates per row. |
+| `PROFILE_ON_CPU_ONLY`                         | `True`                         | `True` measures CPU time, `False` measures wall clock. See [CPU time or wall clock](#cpu-time-or-wall-clock). |
+| `PYROSCOPE_BASIC_AUTH_USERNAME` / `_PASSWORD` | `""`                           | For a Pyroscope that needs credentials, e.g. Grafana Cloud. Empty is right for an in-cluster Alloy.  |
+| `PYROSCOPE_TENANT_ID`                         | `""`                           | For a multi-tenant Pyroscope.                                                                        |
+
+### How a service names itself
+
+Two names b/c of different handling of underscores vs hyphens in different technologies:
+
+| axis                | spelling    | where it comes from                                                                       | examples                                                                                             |
+| ------------------- | ----------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| deployment identity | hyphenated  | `config.DEPLOYMENT_SERVICE_NAME`, passed to `configure_profiling` and `configure_tracing` | Pyroscope application, OTel `service.name`, the `service` field on every log line, the Kubernetes `app` label |
+| package             | underscored | the Python package itself                                                                 | `version("gen3_embeddings")`, `logging.name`, span names like `gen3_embeddings.auth.*`, the image repository, `API_REQUESTS_COUNTER` |
+
+The deployment identity has to equal the Kubernetes `app` label! That label is hyphenated
+because the k8s API server rejects an underscore in an object name (e.g. k8s does not allow `_`).
+
+`API_REQUESTS_COUNTER` is separate for a
+mechanical reason: Prometheus metric names cannot contain a hyphen. *sigh*
+
+So... lots of fun with `-` vs `_` across these technologies. What we basically landed on is: use `-` as much as we can *outside* of Python, keep everything directly inside and related to Python with Pythonic underscores.
 
 ## Traces
 
@@ -162,21 +200,23 @@ the concrete path would mint a new time series per collection. A request that ma
 is recorded as `<unmatched>`, so scanners and typos collapse into one series instead of one
 each.
 
-### `PROMETHEUS_MULTIPROC_DIR` must exist
+### `PROMETHEUS_MULTIPROC_DIR`
 
-`prometheus_client` chooses between its in-memory and its multiprocess value class **once**,
-when it is first imported, based on this variable. Two consequences worth knowing:
+With metrics on, the metrics client creates this directory (and any missing parents) at
+startup and sets the environment variable to it. A path the process cannot create fails
+startup. With metrics off, the directory is never created or read, and
+`/metrics` answers 200 with an empty body so a scraper still sees the target as up.
 
-- If the directory does not exist, the service dies at startup with
-  `ValueError: env PROMETHEUS_MULTIPROC_DIR is not set or not a directory`.
-- Anything that sets the variable *after* import leaves counters in memory, where they are
-  written nowhere and every scrape comes back empty. This is why the test suite sets it in
-  `conftest.py` before importing the app.
+`prometheus_client` chooses between its in-memory and its multiprocess value class when it is
+first imported. The metrics client re-runs that choice after setting the variable, so import
+order does not matter for the counters it creates. A metric constructed anywhere before
+`get_metrics_client` runs keeps the in-memory class: its values are written nowhere and never
+appear in a scrape. Beware!
 
 On startup you should see it confirmed in the logs:
 
 ```
-{"logger": "cdispyutils.metrics", "level": "INFO", "message": "PROMETHEUS_MULTIPROC_DIR is /var/tmp/prometheus_metrics", ...}
+{"logger": "gen3pyutils.metrics", "level": "INFO", "message": "PROMETHEUS_MULTIPROC_DIR is /var/tmp/prometheus_metrics", ...}
 ```
 
 ### Checking metrics work
@@ -212,13 +252,87 @@ Three things to confirm in that output:
 **With a real Prometheus.** See [metrics.md](./metrics.md) for a local Prometheus container,
 a scrape config for all three services, and some starting PromQL.
 
+## Profiles
+
+`common/profiling.py` starts a Pyroscope agent that samples this process continuously and pushes
+CPU and, optionally, allocation profiles. It answers the question traces cannot: a span says a
+request took 400ms, a profile says which Python frames spent it.
+
+`configure_profiling` runs before `configure_tracing` in `get_app()`, and the order is required.
+`configure_tracing` installs the span processor that links the two signals only when it can see a
+running agent, because that processor tags the profiler's thread on every root span and those tags
+go nowhere without one.
+
+### Not an OTLP endpoint
+
+The SDK pushes to `POST <PYROSCOPE_SERVER_ADDRESS>/push.v1.PusherService/Push`, which is
+Pyroscope's own ingest API. Alloy's OTLP ports do not accept it, so pointing
+`PYROSCOPE_SERVER_ADDRESS` at 4318 fails at push time with a 404, not at startup. Alloy needs a
+`pyroscope.receive_http` listener for this traffic, which is why the default is port 4040.
+
+### CPU time or wall clock
+
+`PROFILE_ON_CPU_ONLY` defaults to `True`, which measures CPU time. These services are I/O bound, so
+that hides every millisecond a request spends awaiting the database - which is usually most of its
+latency. That is the right default for "what is burning CPU" and the wrong one for "where did my
+latency go". Set it to `False` for the latter and expect the flamegraph to be dominated by the event
+loop waiting.
+
+The agent samples only the thread holding the GIL. Every request is handled on the one event loop
+thread, so that is the thread doing the work; a service that pushed work into a threadpool would
+need `gil_only=False` to see any of it.
+
+### One agent per process
+
+The SDK holds a single global agent, and a second `configure` only logs `Agent already running`.
+`dockerrun.bash` runs one uvicorn process, so one agent per container.
+
+Adding `--workers` would not leave the children unprofiled. Uvicorn's multiprocess mode uses
+`multiprocessing` with the **spawn** start method, and each child calls `Config.load()` for
+itself, so every child imports the app and runs `configure_profiling` on its own. What breaks
+instead is telling them apart: every agent pushes under the same application name, tagged with
+the same `pod` from `HOSTNAME`, so the workers' flamegraphs merge into one.
+
+The reason for a single process per container is not the profiler, though - it is
+[FastAPI's guidance for a clustered deployment](https://fastapi.tiangolo.com/deployment/docker/#replication-number-of-processes),
+which is one process per container with the orchestrator owning replication. Scale with
+replicas.
+
+### Checking profiles work
+
+Run a Pyroscope and point the service at it:
+
+```bash
+docker run --rm -d --name pyroscope -p 4040:4040 grafana/pyroscope
+
+mkdir -p /var/tmp/prometheus_metrics
+ENABLE_CONTINUOUS_PROFILING=true \
+PYROSCOPE_SERVER_ADDRESS=http://localhost:4040 \
+PROFILE_MEMORY=true \
+OTEL_EXPORTER_OTLP_ENDPOINT= \
+just run gen3_embeddings
+```
+
+Generate some traffic, then check three things:
+
+1. `http://localhost:4040` lists `gen3_embeddings`, with both a CPU (`process_cpu`) and an
+   allocation profile type.
+1. The console spans carry a `pyroscope.profile.id` attribute. If they do not, the span processor
+   was not installed - check that `configure_profiling` runs before `configure_tracing`.
+1. In Pyroscope, filter on `trace_id="<id from a console span>"` and the flamegraph narrows to that
+   one request. That is the join between the two signals working.
+
+Every replica pushes under the same application name, so profiles are tagged with `pod` from the
+`HOSTNAME` environment variable. Without it there is no way to tell one replica's flamegraph from
+another's.
+
 ## Logs
 
 Logs go to stdout as one JSON object per line, carrying `timestamp`, `logger`, `level`,
 `message`, and the correlation fields `trace_id`, `span_id`, `service`:
 
 ```json
-{"timestamp": "2026-08-19T18:04:52.162Z", "logger": "cdispyutils.metrics", "level": "INFO", "message": "...", "trace_id": "ac5e71a8c2806eb002e264b525b1253d", "span_id": "b2f936774956355f", "service": "gen3_embeddings"}
+{"timestamp": "2026-08-19T18:04:52.162Z", "logger": "gen3pyutils.metrics", "level": "INFO", "message": "...", "trace_id": "ac5e71a8c2806eb002e264b525b1253d", "span_id": "b2f936774956355f", "service": "gen3_embeddings"}
 ```
 
 `trace_id` and `span_id` are `null` outside a request, which is expected for lines emitted at

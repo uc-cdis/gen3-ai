@@ -34,11 +34,16 @@ build SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just build {}
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just build {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just build "$service"; done
+            failed=""
+            for service in {{SERVICES}}; do just build "$service" || failed="$failed $service"; done
+            report_failed_targets "just build:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -52,11 +57,16 @@ install SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just install {}
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just install {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just install "$service"; done
+            failed=""
+            for service in {{SERVICES}}; do just install "$service" || failed="$failed $service"; done
+            report_failed_targets "just install:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -76,11 +86,16 @@ lock SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lock {}
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lock {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just lock "$service"; done
+            failed=""
+            for service in {{SERVICES}}; do just lock "$service" || failed="$failed $service"; done
+            report_failed_targets "just lock:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -127,16 +142,8 @@ setup:
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
     else
-        if [[ "${GITHUB_ACTIONS:-}" = "true" ]]; then
-            echo -e "${YELLOW}** WARNING: dbmate not found in CI. Installing... **${RESET}"
-            curl -fsSL "https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64" -o dbmate
-            chmod +x dbmate
-            sudo mv dbmate /usr/local/bin/dbmate
-            echo "dbmate is installed. version: $(dbmate --version)"
-        else
-            echo -e "${RED}** ERROR: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
-            exit 1
-        fi
+        echo -e "${YELLOW}** WARNING: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
+        missing="$missing dbmate"
     fi
 
     print_header "just setup:" "verifying" "pre-commit" "installation..."
@@ -171,11 +178,16 @@ snyk SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just snyk {}
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just snyk {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for svc in {{SERVICES}}; do just snyk "$svc"; done
+            failed=""
+            for svc in {{SERVICES}}; do just snyk "$svc" || failed="$failed $svc"; done
+            report_failed_targets "just snyk:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -221,13 +233,18 @@ test SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test libraries/{}
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test {}
+            STATUS=0
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test libraries/{} || STATUS=1
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just test {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for lib in {{LIBRARIES}}; do just test "libraries/$lib"; done
-            for service in {{SERVICES}}; do just test "$service"; done
+            failed=""
+            for lib in {{LIBRARIES}}; do just test "libraries/$lib" || failed="$failed libraries/$lib"; done
+            for service in {{SERVICES}}; do just test "$service" || failed="$failed $service"; done
+            report_failed_targets "just test:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -244,11 +261,16 @@ db_load SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just _run_dbmate "$service" load; done
+            failed=""
+            for service in {{SERVICES}}; do just _run_dbmate "$service" load || failed="$failed $service"; done
+            report_failed_targets "just db_load:" "$failed"
         fi
     else
         just _run_dbmate "{{SERVICE}}" load
@@ -260,11 +282,16 @@ db_migrate SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just _run_dbmate "$service" migrate; done
+            failed=""
+            for service in {{SERVICES}}; do just _run_dbmate "$service" migrate || failed="$failed $service"; done
+            report_failed_targets "just db_migrate:" "$failed"
         fi
     else
         just _run_dbmate "{{SERVICE}}" migrate
@@ -286,11 +313,16 @@ db_rollback SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just _run_dbmate "$service" down; done
+            failed=""
+            for service in {{SERVICES}}; do just _run_dbmate "$service" down || failed="$failed $service"; done
+            report_failed_targets "just db_rollback:" "$failed"
         fi
     else
         just _run_dbmate "{{SERVICE}}" down
@@ -302,11 +334,16 @@ db_setup SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {}
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just db_setup "$service"; done
+            failed=""
+            for service in {{SERVICES}}; do just db_setup "$service" || failed="$failed $service"; done
+            report_failed_targets "just db_setup:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -339,7 +376,17 @@ db_setup SERVICE="all": _check_dependencies
             echo -e "${YELLOW}** WARNING: PGDATABASE ('${PGDATABASE}') and DB_DATABASE ('${DB_DATABASE}') do not match. Using PGDATABASE for the setup step. **${RESET}"
         fi
         set_postgres_defaults
-        psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${PGUSER}\";" 2>/dev/null || echo "Database exists."
+        set_postgres_admin_defaults
+        if CREATE_OUT=$(PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -d postgres -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${PGDATABASE}\" WITH OWNER \"${DB_MIGRATION_USER}\";" 2>&1); then
+            echo "Created database '${PGDATABASE}' owned by '${DB_MIGRATION_USER}'."
+        elif grep -q "already exists" <<<"$CREATE_OUT"; then
+            # Only "already exists" is benign
+            echo "Database '${PGDATABASE}' exists."
+        else
+            # All other errors
+            echo -e "${RED}** ERROR: could not create database '${PGDATABASE}' as '${DB_MIGRATION_USER}': ${CREATE_OUT} **${RESET}"
+            exit 1
+        fi
     fi
 
 # Generate OpenAPI specification and build API docs (`just openapi true` opens the result)
@@ -348,13 +395,17 @@ openapi OPEN="false":
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
+    # merge_openapi.py only warns about a spec it cannot find, and reuses whatever is
+    # already on disk otherwise, so a generator that fails would silently ship docs
+    # that are missing or stale for that service. Keep generating the rest, then fail.
+    OPENAPI_STATUS=0
     if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-        echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} bash -c 'cd services/{} && [ -f generate_openapi.py ] && uv run python generate_openapi.py || true'
+        echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _generate_openapi {} || OPENAPI_STATUS=1
         just _warn
     else
-        for service in {{SERVICES}}; do
-            (cd "services/$service" && [ -f generate_openapi.py ] && uv run python generate_openapi.py || true)
-        done
+        failed=""
+        for service in {{SERVICES}}; do just _generate_openapi "$service" || failed="$failed $service"; done
+        report_failed_targets "just openapi:" "$failed" || OPENAPI_STATUS=1
     fi
     python scripts/merge_openapi.py
     npx -y @redocly/cli build-docs docs/autogenerated_openapi.json --output docs/api.html
@@ -371,6 +422,7 @@ openapi OPEN="false":
             echo -e "${YELLOW}** WARNING: no 'open'/'xdg-open' found. Open docs/api.html manually. **${RESET}"
         fi
     fi
+    exit "$OPENAPI_STATUS"
 
 # Update versions of tools used in CI
 [group('extra helpers')]
@@ -438,13 +490,18 @@ format SERVICE="all": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just format libraries/{}
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just format {}
+            STATUS=0
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just format libraries/{} || STATUS=1
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just format {} || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for lib in {{LIBRARIES}}; do just format "libraries/$lib"; done
-            for service in {{SERVICES}}; do just format "$service"; done
+            failed=""
+            for lib in {{LIBRARIES}}; do just format "libraries/$lib" || failed="$failed libraries/$lib"; done
+            for service in {{SERVICES}}; do just format "$service" || failed="$failed $service"; done
+            report_failed_targets "just format:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -460,15 +517,19 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
-        if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lint libraries/{} "{{EXTRA_ARG}}"
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lint {} "{{EXTRA_ARG}}"
-        else
-            for lib in {{LIBRARIES}}; do just lint "libraries/$lib" "{{EXTRA_ARG}}"; done
-            for service in {{SERVICES}}; do just lint "$service" "{{EXTRA_ARG}}"; done
-        fi
+        source scripts/.justfile_helpers.bash
         # capture rather than let `set -e` abort: the notices below are most
         # useful precisely when a lint failed, so they must still print
+        LINT_STATUS=0
+        if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lint libraries/{} "{{EXTRA_ARG}}" || LINT_STATUS=1
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just lint {} "{{EXTRA_ARG}}" || LINT_STATUS=1
+        else
+            failed=""
+            for lib in {{LIBRARIES}}; do just lint "libraries/$lib" "{{EXTRA_ARG}}" || failed="$failed libraries/$lib"; done
+            for service in {{SERVICES}}; do just lint "$service" "{{EXTRA_ARG}}" || failed="$failed $service"; done
+            report_failed_targets "just lint:" "$failed" || LINT_STATUS=1
+        fi
         MARKDOWN_STATUS=0
         just markdown_lint || MARKDOWN_STATUS=$?
         # last, so it also cleans up after the fixers above
@@ -477,6 +538,7 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         just _check_uv_modified_files
 
         just PARALLEL="{{PARALLEL}}" _warn
+        if [ "$LINT_STATUS" -ne 0 ]; then exit "$LINT_STATUS"; fi
         exit "$MARKDOWN_STATUS"
     else
         source scripts/.justfile_helpers.bash
@@ -504,13 +566,18 @@ typecheck SERVICE="all" EXTRA_ARG="": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck libraries/{} "{{EXTRA_ARG}}"
-            echo "{{TYPECHECK_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck {} "{{EXTRA_ARG}}"
+            STATUS=0
+            echo "{{LIBRARIES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck libraries/{} "{{EXTRA_ARG}}" || STATUS=1
+            echo "{{TYPECHECK_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just typecheck {} "{{EXTRA_ARG}}" || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for lib in {{LIBRARIES}}; do just typecheck "libraries/$lib" "{{EXTRA_ARG}}"; done
-            for service in {{TYPECHECK_SERVICES}}; do just typecheck "$service" "{{EXTRA_ARG}}"; done
+            failed=""
+            for lib in {{LIBRARIES}}; do just typecheck "libraries/$lib" "{{EXTRA_ARG}}" || failed="$failed libraries/$lib"; done
+            for service in {{TYPECHECK_SERVICES}}; do just typecheck "$service" "{{EXTRA_ARG}}" || failed="$failed $service"; done
+            report_failed_targets "just typecheck:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -529,11 +596,16 @@ sql_lint SERVICE="all" EXTRA_ARG="": _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
+        source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just sql_lint {} "{{EXTRA_ARG}}"
+            STATUS=0
+            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just sql_lint {} "{{EXTRA_ARG}}" || STATUS=1
             just _warn
+            exit "$STATUS"
         else
-            for service in {{SERVICES}}; do just sql_lint "$service" "{{EXTRA_ARG}}"; done
+            failed=""
+            for service in {{SERVICES}}; do just sql_lint "$service" "{{EXTRA_ARG}}" || failed="$failed $service"; done
+            report_failed_targets "just sql_lint:" "$failed"
         fi
     else
         source scripts/.justfile_helpers.bash
@@ -637,6 +709,22 @@ _warn:
 _check_dependencies:
     @./scripts/check_dependencies.bash
 
+_generate_openapi SERVICE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+    DIR="services/{{SERVICE}}"
+
+    # a service with no generator has no spec to contribute, which is not a failure;
+    # a generator that exits non-zero is, and must not be mistaken for the same thing
+    if [ ! -f "$DIR/generate_openapi.py" ]; then
+        print_header "just openapi:" "no generate_openapi.py for" "{{SERVICE}}" "service. Skipping."
+        exit 0
+    fi
+
+    print_header "just openapi:" "generating spec for" "{{SERVICE}}" "service..."
+    uv run --directory "$DIR" python generate_openapi.py
+
 _run_dbmate SERVICE ACTION ARGS="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -660,16 +748,13 @@ _run_dbmate SERVICE ACTION ARGS="":
 
     service_name="{{SERVICE}}"
     set_postgres_defaults
+    set_postgres_admin_defaults
 
     MIGRATIONS_DIR="${DIR}/db/migrations"
     if [ -d "$MIGRATIONS_DIR" ]; then
-        export PGPASSWORD="${PGPASSWORD}"
-        CONN_STR="${PGDRIVER:=postgresql}://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
-
-        if [ "{{SERVICE}}" = "gen3_embeddings" ]; then
-            export DB_APP_USER="${DB_APP_USER:=app_user}"
-            export DB_APP_USER_PASSWORD="${DB_APP_USER_PASSWORD:=app_user_password}"
-        fi
+        # dbmate creates its schema_migrations table and runs DDL, so it connects as the
+        # migration role rather than the role the service uses at runtime.
+        CONN_STR="${PGDRIVER:=postgresql}://${DB_MIGRATION_USER}:${DB_MIGRATION_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
 
         dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait {{ACTION}} {{ARGS}}
         dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait status
