@@ -4,6 +4,41 @@ The state and transaction handling every data access mixin builds on.
 `DataAccessLayerBase` holds the caller's authz context and is the only place that takes a
 connection from the pool. The read, write and search mixins all inherit from it, so every
 query they issue runs through `_with_rls` and its RLS settings.
+
+ROW LEVEL SECURITY
+------------------
+
+Postgres enforces row visibility on every table we own. This module supplies what its
+policies read.
+
+- Before each logical operation, `_with_rls()` opens a transaction and sets the caller's
+  authz context as two PostgreSQL parameters, in the same statement as the per-transaction
+  search settings:
+      SELECT set_config('app.allowed_authz', $1::text[]::text, true),
+             set_config('app.allowed_collection_names', $2::text[]::text, true),
+             ...
+  where `$1` is the caller's allowed authz resources and `$2` is those same grants reduced
+  to collection names
+- Because `set_config(..., true)` uses a local/transaction-scoped setting, each request
+  runs with its own authz context even when using a pooled connection
+- The embeddings tables (e.g., `embeddings_vector`, `embeddings_halfvec`) define RLS
+  policies that consult `current_setting('app.allowed_authz', true)` and compare it to each
+  row's `authz` column
+- `collections` has no `authz` column, because a collection's authz identity IS its name:
+  the resource path is derived from it by convention. So its policy consults
+  `current_setting('app.allowed_collection_names', true)` and compares it to
+  `collection_name`
+
+The authz context lives on the instance, not on each call:
+
+- `allowed_authz` and `allowed_collection_names` are constructor arguments, resolved once
+  per request by `gen3_embeddings.dependencies` from the current user's Arborist authz
+  mapping. This layer hands them to Postgres but never
+  decides what belongs in them; empty means "nothing", which is fail-closed
+- Some methods additionally short-circuit in Python on the same set before issuing a query.
+  Postgres is the enforcement point; those checks only save a round trip, or turn "not
+  authorized" into a specific error rather than an empty result. The two cannot disagree,
+  because both read the same field
 """
 
 from collections.abc import Awaitable, Callable

@@ -1,90 +1,58 @@
 """
-This file houses the database logic.
+The entry point to the database: the connection pool factory and the composed data access layer.
 
 OVERVIEW
 --------
 
 We're using asyncpg alongside FastAPI's dependency injection.
 
-This file contains the logic for database manipulation in a "data access layer"
-(DataAccessLayer / DAL) class, such that other areas of the code have simple
-`.create_*()`, `.list_*()`, `.search_*()` calls which won't require knowledge
-of how to manage connections or interact with the db directly. Connections are
-managed via an asyncpg connection pool and FastAPI's dependency injection
-provides a DAL instance per-request.
+Database manipulation goes through a "data access layer" (DataAccessLayer / DAL) class, so
+other areas of the code make simple `.create_*()`, `.list_*()`, `.search_*()` calls without
+knowing how to manage connections or interact with the db directly. Connections are drawn
+from an asyncpg connection pool, and FastAPI's dependency injection provides a DAL instance
+per request.
 
 Each DAL instance is bound to the caller's authz resources for RLS purposes, but it does
 not resolve or interpret them: `gen3_embeddings.dependencies` resolves authz at the HTTP
-boundary and hands the results in. Nothing in this file talks to anything but the database,
-and nothing here raises HTTP errors - see `database/errors.py`.
+boundary and hands the results in. Nothing in the DAL talks to anything but the database,
+and nothing in it raises HTTP errors - see `database/errors.py`.
 
-DETAILS
--------
+WHAT THIS MODULE OWNS
+---------------------
 
-What do we do in this file?
+- `create_pool()`, a factory for the asyncpg connection pool. This module holds no pool itself
+    - It builds one from the DB URL in config. The app's lifespan handler calls it once at
+      startup and keeps the result on `app.state.db_pool`, mirroring how the Arborist client
+      is held, so the pool's lifetime is the app's rather than the module's
 
-- We provide a factory for an asyncpg connection pool, but hold no pool ourselves
-    - `create_pool()` builds one from the DB URL in config. The app's lifespan handler calls
-      it once at startup and keeps the result on `app.state.db_pool`, mirroring how the
-      Arborist client is held, so the pool's lifetime is the app's rather than the module's
-
-- We define lightweight dataclasses for Collections and Embeddings
-    - These mirror rows from the database and provide `.from_record()` helpers
-      to convert from asyncpg.Record objects
-
-- We define a DataAccessLayer class which isolates all database manipulations
+- `DataAccessLayer`, which isolates all database manipulations
     - All CRUD and search operations go through this interface instead of
       leaking raw SQL into the higher-level web app endpoint code
-    - The class is composed from read, write and search mixins in `database/dal/`,
-      which share one base holding the pool, the authz context and `_with_rls()`
+    - It is composed from the read, write and search mixins in `database/dal/`. They share
+      `DataAccessLayerBase` (`database/dal/base.py`), which holds the pool and the caller's
+      authz context and runs every query through `_with_rls()`. How Row Level Security (RLS)
+      is wired up, and which policies read which setting, is documented there
     - DAL methods use prepared statements where appropriate as a security and
       efficiency measure
-    - Each DAL instance carries a per-request `allowed_authz` list, derived
-      from the current user's Arborist authz mapping
-
-- We are deliberately free of HTTP and authz concerns
-    - DAL methods raise the domain errors in `database/errors.py`; the mapping to status
-      codes lives in `gen3_embeddings.error_handlers`
-    - The FastAPI dependencies that build a DAL live in `gen3_embeddings.dependencies`,
-      because resolving authz requires a network call to the Gen3 policy engine and this
-      layer should only ever talk to the database
-
-- We implement Row Level Security (RLS) integration for every table we own
-    - Before each logical operation, `_with_rls()` sets two per-transaction
-      PostgreSQL parameters:
-          SELECT set_config('app.allowed_authz', $1, true);
-          SELECT set_config('app.allowed_collection_names', $2, true);
-      where `$1` is a text representation of the user's allowed authz resources
-      and `$2` is those same grants reduced to collection names
-    - Because `set_config(..., true)` uses a local/transaction-scoped setting,
-      each request runs with its own authz context even when using a pooled
-      connection
-    - The embeddings tables (e.g., `embeddings_vector`, `embeddings_halfvec`)
-      define RLS policies that consult `current_setting('app.allowed_authz', true)`
-      and compare it to each row's `authz` column
-    - `collections` has no `authz` column, because a collection's authz identity IS
-      its name: the resource path is derived from it by convention. So its policy
-      consults `current_setting('app.allowed_collection_names', true)` and compares
-      it to `collection_name`
-
-- We support multiple vector types as isolated domains
-    - Collections store a `vector_type` (e.g., 'vector', 'halfvec')
-    - Each vector type has its own embeddings table (e.g., `embeddings_vector`,
-      `embeddings_halfvec`)
-    - DAL methods route all embedding CRUD and search operations to the
-      appropriate table based on the collection's `vector_type`
+    - Multiple vector types are isolated domains. Collections store a `vector_type`
+      (e.g., 'vector', 'halfvec'), each vector type has its own embeddings table (e.g.,
+      `embeddings_vector`, `embeddings_halfvec`), and DAL methods route all embedding CRUD
+      and search operations to the table for the collection's `vector_type`
     - Search methods use pgvector operators and functions and expose
       a uniform interface with configurable distance metrics, min/max thresholds,
       and filters on metadata
 
-- We carry the caller's authz context on the DAL instance, not on each call
-    - `allowed_authz` and `allowed_collection_names` are constructor arguments, resolved
-      once per request by `gen3_embeddings.dependencies`. This layer hands them to Postgres
-      but never decides what belongs in them; empty means "nothing", which is fail-closed
-    - Some methods additionally short-circuit in Python on the same set before issuing a
-      query. Postgres is the enforcement point; those checks only save a round trip, or
-      turn "not authorized" into a specific error rather than an empty result. The two
-      cannot disagree, because both read the same field
+WHERE THE REST LIVES
+--------------------
+
+- `database/models.py`: lightweight dataclasses for Collections and Embeddings. They mirror
+  rows from the database and provide `.from_record()` helpers to convert from
+  asyncpg.Record objects
+- `database/errors.py`: the domain errors DAL methods raise. The mapping to status codes
+  lives in `gen3_embeddings.error_handlers`
+- `gen3_embeddings.dependencies`: the FastAPI dependencies that build a DAL. They live
+  outside this package because resolving authz requires a network call to the Gen3 policy
+  engine, and the DAL should only ever talk to the database
 """
 
 import asyncpg

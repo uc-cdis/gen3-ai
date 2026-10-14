@@ -98,9 +98,7 @@ def to_storage_array(
 
     Raises:
         EmbeddingDimensionMismatchError: If any vector's length is not `dimensions`. The
-            route layer already checks this per request; checking again here means a ragged
-            batch fails with this error, naming the offending row, rather than as a generic
-            numpy error from building the array.
+            error names the offending row.
         EmbeddingNotRepresentableError: If a value overflows the storage type (only reachable
             for halfvec, whose float16 range stops at ~65504).
     """
