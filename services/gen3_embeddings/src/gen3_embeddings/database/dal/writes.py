@@ -251,41 +251,8 @@ class WriteMixin(DataAccessLayerBase):
 
         async def _query(conn):
             # execute one concurrent safe query
-            stmt = await conn.prepare(
-                f"""
-                INSERT INTO {table} (
-                    collection_id, embedding, authz, metadata,
-                    embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
-                )
-                SELECT
-                    $1::bigint,
-                    raw.embedding,
-                    $3::text,
-                    raw.metadata::jsonb,
-                    -- legacy md5 columns, written with the sha256 value so their NOT NULL and
-                    -- unique constraint stay satisfied until the contract migration drops
-                    -- them. See db/migrations/20260826120000_sha256_content_hashes.sql.
-                    raw.embedding_hash,
-                    raw.metadata_hash,
-                    raw.embedding_hash,
-                    raw.metadata_hash
-                FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[])
-                    AS raw(embedding, metadata, embedding_hash, metadata_hash)
-                -- the hashes come back so results can be matched to inputs by content rather
-                -- than by an order Postgres does not guarantee
-                RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
-                          embedding_hash_v2, metadata_hash_v2;
-                """
-            )
             try:
-                rows = await stmt.fetch(
-                    collection.id,
-                    batch.vectors,
-                    authz,
-                    batch.metadata_json,
-                    batch.embedding_hashes,
-                    batch.metadata_hashes,
-                )
+                rows = await _insert_bulk_batch(conn, table, cast, collection.id, authz, batch)
             except UniqueViolationError as exc:
                 raise EmbeddingsAlreadyExistError(
                     "One or more embeddings already exist in this collection. "
@@ -404,7 +371,7 @@ class WriteMixin(DataAccessLayerBase):
                         embedding = u.embedding,
                         authz = $3::text,
                         metadata = u.metadata::jsonb,
-                        -- legacy md5 columns, see the note in create_embeddings_bulk
+                        -- legacy md5 columns, see the note in _insert_bulk_batch
                         embedding_hash = u.embedding_hash,
                         metadata_hash = u.metadata_hash,
                         embedding_hash_v2 = u.embedding_hash,
@@ -444,43 +411,23 @@ class WriteMixin(DataAccessLayerBase):
                     raise EmbeddingNotFoundError(f"No embedding with id {shown}{more} in this collection")
 
             if batch.row_count:
-                stmt = await conn.prepare(
-                    f"""
-                    INSERT INTO {table} (
-                        collection_id, embedding, authz, metadata,
-                        embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
-                    )
-                    SELECT
-                        $1::bigint,
-                        raw.embedding,
-                        $3::text,
-                        raw.metadata::jsonb,
-                        -- legacy md5 columns, see the note in create_embeddings_bulk
-                        raw.embedding_hash,
-                        raw.metadata_hash,
-                        raw.embedding_hash,
-                        raw.metadata_hash
-                    FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[])
-                        AS raw(embedding, metadata, embedding_hash, metadata_hash)
-                    -- Conflicts resolve on the v2 index. A new row writes the same value to the
-                    -- legacy columns, so anything that would collide there collides here too and
-                    -- is handled; a collision with a legacy md5 value would need sha256 and md5
-                    -- to agree, which is not a case worth carrying code for.
+                # If RLS denies insert or update, this will raise an error
+                rows = await _insert_bulk_batch(
+                    conn,
+                    table,
+                    cast,
+                    collection.id,
+                    authz,
+                    batch,
+                    # Conflicts resolve on the v2 index. A new row writes the same value to the
+                    # legacy columns, so anything that would collide there collides here too and
+                    # is handled; a collision with a legacy md5 value would need sha256 and md5
+                    # to agree, which is not a case worth carrying code for.
+                    on_conflict="""
                     ON CONFLICT (collection_id, embedding_hash_v2, metadata_hash_v2, authz)
                     DO UPDATE SET
                         updated_at = NOW()
-                    RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
-                              embedding_hash_v2, metadata_hash_v2;
-                    """
-                )
-                # If RLS denies insert or update, this will raise an error
-                rows = await stmt.fetch(
-                    collection.id,
-                    batch.vectors,
-                    authz,
-                    batch.metadata_json,
-                    batch.embedding_hashes,
-                    batch.metadata_hashes,
+                    """,
                 )
                 for position, embedding in zip(by_content, _bulk_write_results(rows, batch)):
                     written[position] = embedding
@@ -821,3 +768,74 @@ def _bulk_write_results(rows: list[asyncpg.Record], batch: _BulkWriteBatch) -> l
         return unique_results
 
     return [unique_results[unique_index] for unique_index in batch.original_to_unique]
+
+
+async def _insert_bulk_batch(
+    conn: asyncpg.Connection,
+    table: str,
+    cast: str,
+    collection_id: int,
+    authz: str,
+    batch: _BulkWriteBatch,
+    on_conflict: str = "",
+) -> list[asyncpg.Record]:
+    """
+    Insert a deduplicated batch in one statement and return the rows it wrote.
+
+    `create_embeddings_bulk` and `upsert_embeddings_bulk` run this same INSERT and differ only
+    in what a conflict does: a create passes no clause, so the unique violation surfaces, and
+    an upsert passes an `ON CONFLICT` clause that resolves onto the existing row.
+
+    Args:
+        conn (asyncpg.Connection): Connection inside the caller's RLS transaction.
+        table (str): Embeddings table for the collection's vector type.
+        cast (str): Vector cast for that table, e.g. `::vector`.
+        collection_id (int): Collection every row is written to.
+        authz (str): Authz resource path assigned to every row.
+        batch (_BulkWriteBatch): The deduplicated rows and their hashes.
+        on_conflict (str): An `ON CONFLICT` clause, or empty to let a conflict raise. Spliced
+            into the SQL as written, so it must come from code, never from a request.
+
+    Returns:
+        list[asyncpg.Record]: One row per unique input, carrying the content hashes
+        `_bulk_write_results` matches inputs on.
+
+    Raises:
+        asyncpg.UniqueViolationError: If a row already exists and `on_conflict` does not
+            resolve it.
+    """
+    stmt = await conn.prepare(
+        f"""
+        INSERT INTO {table} (
+            collection_id, embedding, authz, metadata,
+            embedding_hash, metadata_hash, embedding_hash_v2, metadata_hash_v2
+        )
+        SELECT
+            $1::bigint,
+            raw.embedding,
+            $3::text,
+            raw.metadata::jsonb,
+            -- legacy md5 columns, written with the sha256 value so their NOT NULL and
+            -- unique constraint stay satisfied until the contract migration drops
+            -- them. See db/migrations/20260826120000_sha256_content_hashes.sql.
+            raw.embedding_hash,
+            raw.metadata_hash,
+            raw.embedding_hash,
+            raw.metadata_hash
+        FROM unnest($2{cast}[], $4::text[], $5::uuid[], $6::uuid[])
+            AS raw(embedding, metadata, embedding_hash, metadata_hash)
+        {on_conflict}
+        -- the hashes come back so results can be matched to inputs by content rather
+        -- than by an order Postgres does not guarantee
+        RETURNING collection_id, embedding_id, embedding, authz, metadata, created_at, updated_at,
+                  embedding_hash_v2, metadata_hash_v2;
+        """
+    )
+    return await stmt.fetch(
+        collection_id,
+        batch.vectors,
+        authz,
+        batch.metadata_json,
+        batch.embedding_hashes,
+        batch.metadata_hashes,
+    )

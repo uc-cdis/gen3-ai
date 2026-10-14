@@ -969,10 +969,13 @@ class TestEmbeddings:
         The message says so, because a partially-applied batch would be the alternative reading
         and callers act on it (they retry with PUT).
         """
-        dal, _, _ = make_dal(results=[UniqueViolationError("duplicate key value violates unique constraint")])
+        dal, conn, _ = make_dal(results=[UniqueViolationError("duplicate key value violates unique constraint")])
 
         with pytest.raises(EmbeddingsAlreadyExistError):
             await dal.create_embeddings_bulk(make_collection(), [[1.0, 2.0, 3.0]], DOCS_AUTHZ, None)
+
+        # the shared INSERT only resolves conflicts when an upsert asks it to
+        assert "ON CONFLICT" not in normalized(conn.sql)
 
     @pytest.mark.asyncio
     async def test_an_upsert_conflicts_on_the_v2_index_and_only_touches_the_timestamp(self):
