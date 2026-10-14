@@ -281,6 +281,44 @@ DROP INDEX CONCURRENTLY IF EXISTS embeddings_vector_c42_hnsw_cosine;
 
 ### Deleted collections
 
-Deleting a collection removes its rows but not its index. Add a migration that drops the
-index. Collection ids are not reused, so a stale index is only wasted space, never a wrong
-result.
+Deleting a collection removes its rows but not its indexes, and the service cannot drop them
+itself. Drop each index with a migration **before** deleting the collection. Collection ids
+are not reused, so a leftover index never gives a wrong result, but it still takes up disk
+space and every vacuum of the shared embeddings table has to read it.
+
+The drop is a new migration whose down step rebuilds the index, not a rollback:
+`just db_index_rollback` only undoes the most recent migration.
+
+```sql
+-- migrate:up transaction:false
+DROP INDEX CONCURRENTLY IF EXISTS embeddings_vector_c42_hnsw_cosine;
+
+-- migrate:down transaction:false
+CREATE INDEX CONCURRENTLY IF NOT EXISTS embeddings_vector_c42_hnsw_cosine
+ON embeddings_vector USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
+WHERE collection_id = 42;
+```
+
+If a collection is deleted first, the service logs a warning naming the indexes it left
+behind. To find any that were missed, list the indexes whose collection no longer exists.
+Run this as the admin role, so it can see every collection:
+
+```sql
+SELECT i.relname AS index_name,
+       t.relname AS table_name,
+       p.collection_id,
+       pg_size_pretty(pg_relation_size(i.oid)) AS size
+FROM pg_index x
+JOIN pg_class i ON i.oid = x.indexrelid
+JOIN pg_class t ON t.oid = x.indrelid
+JOIN pg_am am ON am.oid = i.relam
+CROSS JOIN LATERAL (
+    SELECT substring(pg_get_expr(x.indpred, x.indrelid)
+                     FROM '^\(collection_id = (\d+)\)$')::bigint AS collection_id
+) p
+WHERE t.relname IN ('embeddings_vector', 'embeddings_halfvec')
+  AND am.amname IN ('hnsw', 'ivfflat')
+  AND p.collection_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.id = p.collection_id)
+ORDER BY p.collection_id, index_name;
+```

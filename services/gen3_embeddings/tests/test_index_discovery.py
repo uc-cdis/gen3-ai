@@ -19,6 +19,7 @@ from gen3_embeddings.database.index_discovery import (
     _parse,
     choose_index,
     discover_vector_indexes,
+    find_collection_index_names,
 )
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
@@ -187,3 +188,55 @@ class TestDiscoverVectorIndexes:
         assert found[collection_id][0].strategy is IndexStrategy.direct
         # the l2 index is invalid, so an l2 search must not be pointed at it
         assert choose_index(found[collection_id], DistanceMetric.l2_distance, 3) is None
+
+    def test_a_collections_index_names_include_unusable_ones_and_no_other_collections(self, test_database):
+        """
+        Listing what is left to drop covers both tables and keeps the INVALID index discovery skips.
+
+        A build that fails late leaves an INVALID index Postgres still maintains, so hiding it
+        would hide exactly the index most likely to be forgotten.
+        """
+
+        async def _run():
+            conn = await asyncpg.connect(test_database["admin_dsn"])
+            try:
+                ids = []
+                for name in ("idx_find_a", "idx_find_b"):
+                    ids.append(
+                        await conn.fetchval(
+                            "INSERT INTO collections (collection_name, dimensions, vector_type) "
+                            "VALUES ($1, 3, 'vector') RETURNING id",
+                            name,
+                        )
+                    )
+                a, b = ids
+                await conn.execute(
+                    f"CREATE INDEX idx_find_a_cos ON embeddings_vector "
+                    f"USING hnsw ((embedding::vector(3)) vector_cosine_ops) WHERE collection_id = {a}"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_find_a_dead ON embeddings_vector "
+                    f"USING hnsw ((embedding::vector(3)) vector_l2_ops) WHERE collection_id = {a}"
+                )
+                await conn.execute(
+                    "UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'idx_find_a_dead'::regclass"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_find_a_half ON embeddings_halfvec "
+                    f"USING hnsw ((embedding::halfvec(3)) halfvec_l2_ops) WHERE collection_id = {a}"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_find_b_cos ON embeddings_vector "
+                    f"USING hnsw ((embedding::vector(3)) vector_cosine_ops) WHERE collection_id = {b}"
+                )
+            finally:
+                await conn.close()
+
+            # delete_collection runs this as the app role, which owns nothing and bypasses no RLS
+            app_conn = await asyncpg.connect(test_database["app_dsn"])
+            try:
+                return await find_collection_index_names(app_conn, a)
+            finally:
+                await app_conn.close()
+
+        assert asyncio.run(_run()) == ["idx_find_a_cos", "idx_find_a_dead", "idx_find_a_half"]

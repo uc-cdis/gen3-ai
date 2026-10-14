@@ -32,6 +32,7 @@ from pgvector.asyncpg import register_vector
 from gen3_embeddings import config
 from gen3_embeddings.database import db as db_module
 from gen3_embeddings.database import hashing
+from gen3_embeddings.database.dal import writes as writes_module
 from gen3_embeddings.database.dal.base import _rls_denial_or_reraise
 from gen3_embeddings.database.dal.writes import _bulk_write_results, _prepare_bulk_write
 from gen3_embeddings.database.db import DataAccessLayer
@@ -808,17 +809,27 @@ class TestCollections:
         assert conn.params == ["docs", "new"]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("tag, expected", [("DELETE 1", True), ("DELETE 0", False)])
-    async def test_deleting_a_collection_reports_whether_a_row_went(self, tag, expected):
+    @pytest.mark.parametrize("returned, expected", [([{"id": 7}], True), ([], False)])
+    async def test_deleting_a_collection_reports_whether_a_row_went(self, monkeypatch, returned, expected):
         """
-        The command tag's count decides, not its verb.
+        A returned id decides, and only a deleted collection has its indexes looked up.
 
-        "DELETE 0" is what both a nonexistent collection and one hidden by RLS produce, and both
+        No row back is what both a nonexistent collection and one hidden by RLS produce, and both
         have to come back False so the route can answer 404 instead of a cheerful 200.
         """
-        dal, _, _ = make_dal(execute_result=tag)
+        looked_up = []
+
+        async def fake_find_collection_index_names(conn, collection_id):
+            looked_up.append(collection_id)
+            return []
+
+        monkeypatch.setattr(writes_module, "find_collection_index_names", fake_find_collection_index_names)
+        dal, conn, _ = make_dal(results=[returned])
 
         assert await dal.delete_collection("docs") is expected
+        assert "RETURNING id" in normalized(conn.sql)
+        assert conn.params == ["docs"]
+        assert looked_up == ([7] if expected else [])
 
     @pytest.mark.asyncio
     async def test_listing_collections_with_no_grants_skips_the_round_trip(self):

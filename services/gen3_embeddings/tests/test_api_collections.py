@@ -1,5 +1,10 @@
 """Tests for the collection endpoints: create, get, list, update, and delete, and how authz filters each."""
 
+import asyncio
+import logging
+
+import asyncpg
+
 
 def test_list_collections_empty(client, allow_authz):
     """An authorized user with no collections yet gets an empty list on page 1."""
@@ -233,3 +238,82 @@ def test_delete_collection_twice_returns_404_the_second_time(client, allow_authz
 
     assert client.delete("/vectorstore/collections/alpha").status_code == 204
     assert client.delete("/vectorstore/collections/alpha").status_code == 404
+
+
+def _create_index_as_admin(admin_dsn: str, collection_name: str, index_name: str) -> None:
+    """Build a vector index on a collection, as the owner role an operator would use."""
+
+    async def _run():
+        conn = await asyncpg.connect(admin_dsn)
+        try:
+            collection_id = await conn.fetchval(
+                "SELECT id FROM collections WHERE collection_name = $1", collection_name
+            )
+            await conn.execute(
+                f"CREATE INDEX {index_name} ON embeddings_vector "
+                f"USING hnsw ((embedding::vector(3)) vector_cosine_ops) WHERE collection_id = {collection_id}"
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def _drop_index_as_admin(admin_dsn: str, index_name: str) -> None:
+    """Drop an index a test built, so it does not outlive the test in the session database."""
+
+    async def _run():
+        conn = await asyncpg.connect(admin_dsn)
+        try:
+            await conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+        finally:
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def _dal_warnings(caplog) -> list[str]:
+    """Warnings the DAL's write methods logged, leaving out the auth bypass's warning on every request."""
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and r.module == "writes"]
+
+
+def test_delete_collection_warns_about_the_indexes_it_leaves_behind(client, allow_authz, test_database, caplog):
+    """The app role cannot drop an index, so deleting an indexed collection names what an operator must drop."""
+    allow_authz("alpha", "beta")
+    for name in ("alpha", "beta"):
+        create_resp = client.post(
+            "/vectorstore/collections",
+            json={"collection_name": name, "description": "indexed", "dimensions": 3, "vector_type": "vector"},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+
+    admin_dsn = test_database["admin_dsn"]
+    _create_index_as_admin(admin_dsn, "alpha", "idx_delete_warn_alpha")
+    _create_index_as_admin(admin_dsn, "beta", "idx_delete_warn_beta")
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert client.delete("/vectorstore/collections/alpha").status_code == 204
+
+        warnings = _dal_warnings(caplog)
+        assert len(warnings) == 1
+        assert "'alpha'" in warnings[0]
+        assert "idx_delete_warn_alpha" in warnings[0]
+        assert "idx_delete_warn_beta" not in warnings[0]
+    finally:
+        _drop_index_as_admin(admin_dsn, "idx_delete_warn_alpha")
+        _drop_index_as_admin(admin_dsn, "idx_delete_warn_beta")
+
+
+def test_delete_collection_without_an_index_does_not_warn(client, allow_authz, caplog):
+    """Most collections have no index, and deleting one of those has nothing to report."""
+    allow_authz("alpha")
+    create_resp = client.post(
+        "/vectorstore/collections",
+        json={"collection_name": "alpha", "description": "plain", "dimensions": 3, "vector_type": "vector"},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+
+    with caplog.at_level(logging.WARNING):
+        assert client.delete("/vectorstore/collections/alpha").status_code == 204
+
+    assert _dal_warnings(caplog) == []

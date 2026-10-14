@@ -272,7 +272,7 @@ async def delete_collection(
         HTTPException: 404 if collection is not found.
     """
     success = await ctx.dal.delete_collection(collection_name)
-    logging.info(f"Deleted collection: {collection_name}.")
     if not success:
         raise HTTPException(status_code=404, detail="Collection not found")
+    logging.info(f"Deleted collection: {collection_name}.")
     return None

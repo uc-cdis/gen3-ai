@@ -869,9 +869,7 @@ curl -X POST "http://localhost:4142/vectorstore/search?collections=public,d3vect
 ## TODO
 
 - ai model
-- raw test search
 - add .info logs for embedding reads (e.g. any time someone is auth-ed and successfully reads data, we need an info log saying what user read what data - can just be embedding IDs)
-- add support for index
 - dimensions limit? create warnings on limitions on indexing for bigger dimension vectors
 - re-evaluate running the snyk test now that they support uv
 - It would be nice if when searching by metadata you could specify more than 1 value to match, a situation where one needed to match 2 different studies (which were metadata) and wanted to do it in one query

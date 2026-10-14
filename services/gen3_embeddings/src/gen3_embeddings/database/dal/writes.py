@@ -9,6 +9,7 @@ import numpy as np
 from asyncpg.exceptions import UniqueViolationError
 from pgvector import HalfVector, Vector
 
+from gen3_embeddings.config import logging
 from gen3_embeddings.database import hashing
 from gen3_embeddings.database.dal.base import DataAccessLayerBase
 from gen3_embeddings.database.errors import (
@@ -23,6 +24,7 @@ from gen3_embeddings.database.errors import (
     RepeatedEmbeddingIdError,
 )
 from gen3_embeddings.database.helpers import affected_row_count, get_embeddings_table_and_cast
+from gen3_embeddings.database.index_discovery import find_collection_index_names
 from gen3_embeddings.database.models import Collection, Embedding
 from gen3_embeddings.models.schemas import VectorType
 
@@ -329,6 +331,11 @@ class WriteMixin(DataAccessLayerBase):
         of the collection-level grant, and it is why `delete` on a collection is a
         meaningfully broader permission than `delete` on its embeddings.
 
+        The collection's vector indexes outlive it. Dropping one needs the table owner and a
+        `DROP INDEX CONCURRENTLY` outside any transaction, so it is an operator's migration,
+        not something this role can do here. Instead, any index left behind is named in a
+        warning, logged once the delete has committed.
+
         Args:
             collection_name (str): Name of the collection to delete.
 
@@ -343,13 +350,28 @@ class WriteMixin(DataAccessLayerBase):
         """
 
         async def _query(conn):
-            result = await conn.execute(
-                "DELETE FROM collections WHERE collection_name = $1::text",
-                collection_name,
-            )
-            return affected_row_count(result) > 0
+            stmt = await conn.prepare("DELETE FROM collections WHERE collection_name = $1::text RETURNING id")
+            row = await stmt.fetchrow(collection_name)
+            if row is None:
+                return None
+            return row["id"], await find_collection_index_names(conn, row["id"])
 
-        return await self._with_rls(_query)
+        deleted = await self._with_rls(_query)
+        if deleted is None:
+            return False
+
+        collection_id, index_names = deleted
+        if index_names:
+            logging.warning(
+                "Deleted collection %r (id %d), but its vector index(es) remain: %s. They are never "
+                "used again, but they take up space and slow down vacuums of the embeddings table. "
+                'Drop them with an index migration; see "Deleted collections" in '
+                "db/index_migrations/README.md.",
+                collection_name,
+                collection_id,
+                ", ".join(index_names),
+            )
+        return True
 
     async def create_embeddings_bulk(
         self,

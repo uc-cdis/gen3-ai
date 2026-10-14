@@ -82,6 +82,23 @@ DISCOVERY_SQL = """
       AND x.indexprs IS NOT NULL
 """
 
+# Every vector index scoped to one collection, by the same predicate `_PREDICATE` matches.
+# Unlike DISCOVERY_SQL this keeps INVALID indexes and any indexed expression: it answers
+# "what is left to drop", not "what can search use".
+COLLECTION_INDEX_NAMES_SQL = """
+    SELECT i.relname AS index_name
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_class t ON t.oid = x.indrelid
+    JOIN pg_am am ON am.oid = i.relam
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = ANY($1::text[])
+      AND am.amname IN ('hnsw', 'ivfflat')
+      AND pg_get_expr(x.indpred, x.indrelid) = format('(collection_id = %s)', $2::bigint)
+    ORDER BY i.relname
+"""
+
 
 class IndexStrategy(StrEnum):
     """Which SQL shape a collection's index can answer."""
@@ -180,6 +197,27 @@ async def discover_vector_indexes(conn: asyncpg.Connection) -> dict[int, list[Ve
         len(by_collection),
     )
     return by_collection
+
+
+async def find_collection_index_names(conn: asyncpg.Connection, collection_id: int) -> list[str]:
+    """
+    List every vector index scoped to one collection, including ones search cannot use.
+
+    This reads the catalog live rather than the map `discover_vector_indexes` built at startup.
+    That map leaves out INVALID indexes and shapes search does not emit, and misses anything
+    built since. All of those take up space, and any that Postgres still maintains (an INVALID
+    index is, if its build got far enough) is read by vacuum like any other, so a list of what
+    is left to drop has to include them.
+
+    Args:
+        conn (asyncpg.Connection): Any open connection; no special privileges are needed.
+        collection_id (int): The collection whose indexes to list.
+
+    Returns:
+        list[str]: Index names, sorted. Empty if the collection has no vector index.
+    """
+    rows = await conn.fetch(COLLECTION_INDEX_NAMES_SQL, list(TABLES), collection_id)
+    return [row["index_name"] for row in rows]
 
 
 def choose_index(
