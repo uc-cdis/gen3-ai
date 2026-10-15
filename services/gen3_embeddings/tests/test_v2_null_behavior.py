@@ -1,9 +1,9 @@
 """
 What the API does against rows whose v2 content hashes have not been backfilled yet.
 
-The perf database has 30M rows written before 20260826120000 added the sha256 columns, so
-`embedding_hash_v2`/`metadata_hash_v2` are NULL on all of them and the backfill is expensive
-enough to be worth skipping. These tests pin down exactly what that costs.
+Rows that predate the sha256 columns have NULL `embedding_hash_v2`/`metadata_hash_v2` until
+the backfill runs, and on a large database the backfill is expensive enough to be worth
+skipping. These tests pin down exactly what that costs.
 
 A pre-backfill row is simulated rather than assumed: its v2 columns are NULLed and its legacy
 columns are set to an md5-era value, which is precisely the state the backfill exists to fix.
@@ -26,7 +26,7 @@ def _create_collection(client, name, dimensions=3):
 
 
 def _make_pre_backfill(admin_dsn, embedding_id):
-    """Rewind one row to the state rows were in before the sha256 migration."""
+    """Put one row in the pre-backfill state: NULL v2 hashes and a non-sha256 legacy hash."""
 
     async def _run():
         conn = await asyncpg.connect(admin_dsn)
@@ -61,7 +61,7 @@ def _post(client, vector, metadata=None):
 
 @pytest.fixture
 def seeded(client, allow_authz, test_database):
-    """A `docs` collection holding one embedding, fully hashed as the app writes it today."""
+    """A `docs` collection holding one embedding, fully hashed as the app writes it."""
     allow_authz("docs")
     _create_collection(client, "docs")
     response = _post(client, [0.1, 0.2, 0.3], {"a": 1})
@@ -79,8 +79,8 @@ def test_a_pre_backfill_row_does_not_reject_a_duplicate(client, seeded, test_dat
     This is what skipping the backfill costs: the same content lands twice.
 
     The v2 unique index is NULLS DISTINCT, so a NULL v2 row collides with nothing, and the
-    legacy index cannot catch it either -- the app now writes the sha256 value into the legacy
-    columns, which will never equal the md5 an old row holds there.
+    legacy index cannot catch it either -- the app writes the sha256 value into the legacy
+    columns, which never equals the md5 a pre-backfill row holds there.
     """
     _make_pre_backfill(test_database["admin_dsn"], seeded)
 

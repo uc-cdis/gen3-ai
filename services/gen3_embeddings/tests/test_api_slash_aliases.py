@@ -2,10 +2,10 @@
 Tests that each endpoint behaves identically with and without a trailing slash.
 
 Every route is registered twice, once at `/path` and once at the undocumented `/path/`.
-When those were two separate decorators, the alias silently lost `response_model`,
-`response_model_exclude_none` and `status_code`, so `/path/` returned fields the response
-model excludes and DELETE aliases answered 200 instead of 204. `dual_path` derives the
-alias from the same kwargs; these tests pin the behavior that guarantees.
+`dual_path` derives the alias from the same kwargs as the canonical route, so both share
+`response_model`, `response_model_exclude_none` and `status_code`. These tests pin that: an
+alias that drifted would return fields the response model excludes, or answer a DELETE with
+200 instead of 204.
 """
 
 import pytest
@@ -78,7 +78,7 @@ def test_only_the_canonical_path_is_documented():
 
 
 def test_list_collections_response_is_identical_with_and_without_slash(client, allow_authz):
-    """End-to-end: the reported bug, where `/collections/` leaked null fields `/collections` omits."""
+    """End-to-end: `/collections/` omits the same null fields `/collections` does."""
     allow_authz("alpha")
     create = client.post(
         "/vectorstore/collections",

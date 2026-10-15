@@ -178,7 +178,7 @@ def test_dal_sets_both_rls_settings_together():
     # _with_rls is the only place that takes a connection, so no query can run without them
     acquires = [node for tree in trees.values() for node in ast.walk(tree) if _is_pool_acquire(node)]
     acquires_in_with_rls = [node for node in ast.walk(with_rls) if _is_pool_acquire(node)]
-    assert acquires_in_with_rls, "_with_rls no longer takes the connection"
+    assert acquires_in_with_rls, "_with_rls does not take the connection"
     assert len(acquires) == len(acquires_in_with_rls), (
         "a query outside _with_rls runs with no RLS context, so it sees nothing (or, worse, "
         "everything if a policy is ever removed)"
@@ -208,10 +208,9 @@ def test_dal_methods_do_not_take_authz_arguments():
     """
     The caller's authz arrives once, in the constructor, not per call.
 
-    When it was a parameter on each collection method, a call site could pass a set resolved
-    for a different action than the one the DAL was constructed for, and nothing would
-    notice. One field per instance means the RLS context and the Python short-circuits
-    cannot disagree.
+    One field per instance means the RLS context and the Python short-circuits cannot
+    disagree, and no call site can pass a set resolved for a different action than the one
+    the DAL was constructed for.
     """
     # DataAccessLayer itself is empty; its methods come from the classes in database/dal/
     classes = [
@@ -249,7 +248,7 @@ def test_dal_does_not_interpret_authz_paths():
 def test_authz_path_interpretation_lives_in_the_auth_layer():
     """
     The helper behavior is covered in detail by test_collection_name_normalization.py; this only
-    pins that the extraction happened and did not leave the DAL depending on it.
+    pins that the helper lives in `auth` and works without the DAL.
     """
     assert get_allowed_collection_names_from_authz(["/vectorstore/collections/docs"]) == {"docs"}
     assert get_allowed_collection_names_from_authz([]) == set()

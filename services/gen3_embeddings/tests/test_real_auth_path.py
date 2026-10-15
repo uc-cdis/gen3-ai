@@ -8,8 +8,7 @@ unexercised, and a gate nothing tests is a gate that can silently stop closing.
 
 Getting in means turning the bypass off: `common.auth` reads `common.config.DEBUG_SKIP_AUTH` as
 an attribute at call time, so patching it on that module object reaches the running check.
-Patching `gen3_embeddings.config` does NOT, which is exactly the gap that let CI answer 401 to
-everything while the suite passed locally.
+Patching `gen3_embeddings.config` does NOT reach it.
 
 Sending a bearer token does not get you there, even though `common.config` says `DEBUG_SKIP_AUTH`
 only applies "when a token is not provided". The bypass tests the `token` *argument*, which the

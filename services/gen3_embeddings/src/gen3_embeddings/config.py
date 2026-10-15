@@ -117,7 +117,7 @@ HNSW_EF_SEARCH = starlette_config("HNSW_EF_SEARCH", cast=int, default=100)
 
 # Without this, an HNSW scan returns `ef_search` candidates once and the RLS and metadata
 # filters cut them down, so a search silently returns fewer hits than `top_k`. Requires
-# pgvector >= 0.8. Set to "off" to restore the pre-0.8 behaviour.
+# pgvector >= 0.8. Set to "off" to disable iterative scans.
 HNSW_ITERATIVE_SCAN = starlette_config("HNSW_ITERATIVE_SCAN", default="relaxed_order")
 
 # A query that outlives the gunicorn worker timeout (90s) gets its worker killed while

@@ -103,13 +103,9 @@ WITH CHECK (
 
 -- ==== 2. FORCE row level security ====
 -- `ENABLE ROW LEVEL SECURITY` alone does NOT apply to the table OWNER; owners bypass their
--- own policies silently. Today the app user and the migration user are separate (migrations
--- run as the admin/superuser, the service connects as DB_APP_USER), so RLS does apply. But
--- if a deployment ever has the service connect as the role that owns these tables, every
--- policy above would be silently skipped and all rows would be visible.
---
--- The service's startup check (main.py) already refuses to run as SUPERUSER or with
--- BYPASSRLS, but it does not check table ownership, so this closes that remaining gap.
+-- own policies silently. Migrations run as the admin/superuser and the service connects as
+-- DB_APP_USER, so the service is not normally the owner. FORCE keeps every policy above in
+-- effect even if a deployment has the service connect as the role that owns these tables.
 --
 -- NOTE: superusers still bypass RLS even when it is FORCED, so superuser-run migrations and
 -- maintenance are unaffected. A future DATA migration run as a non-superuser owner would be

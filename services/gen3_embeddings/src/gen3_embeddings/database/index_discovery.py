@@ -16,8 +16,8 @@ index, and the app then emits binary-quantized SQL against no such index, which 
 scan of the whole collection rather than a millisecond lookup.
 
 Requires no privileges beyond connecting: Postgres grants SELECT on these catalogs to PUBLIC,
-and `pg_get_expr` performs no table-level check. Verified against a role holding nothing but
-LOGIN and USAGE on the schema.
+and `pg_get_expr` performs no table-level check. A role holding nothing but LOGIN and USAGE on
+the schema is sufficient.
 """
 
 import re

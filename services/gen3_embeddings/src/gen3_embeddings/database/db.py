@@ -106,6 +106,6 @@ class DataAccessLayer(ReadMixin, WriteMixin, SearchMixin):
     The methods live in mixins split by what they do to the data: `ReadMixin`
     (`database/dal/reads.py`), `WriteMixin` (`database/dal/writes.py`) and `SearchMixin`
     (`database/dal/search.py`). All three inherit the constructor, the caller's authz context
-    and `_with_rls` from `DataAccessLayerBase` (`database/dal/base.py`), so there is still
-    exactly one place a connection is taken from the pool.
+    and `_with_rls` from `DataAccessLayerBase` (`database/dal/base.py`), so `_with_rls` is the
+    only place a connection is taken from the pool.
     """

@@ -425,7 +425,7 @@
           "Embeddings"
         ],
         "summary": "Create embeddings in collection",
-        "description": "Creates one or more embeddings in a collection. Every vector must match the collection's dimensions. Use `PUT` on this path instead if you want existing embeddings to be replaced rather than rejected.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, those paths are applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need `create` permission on the collection path and on the resulting embedding paths.\n\nIDs are assigned by the service. An `embedding_id` set on an item is ignored here; use `PUT` if you need to write to a specific existing embedding.",
+        "description": "Creates one or more embeddings in a collection. Every vector must match the collection's dimensions. Use `PUT` on this path instead if you want existing embeddings to be replaced rather than rejected.\n\nAuthorization is resolved per request:\n\n- If `authz` is set on the request body, that path is applied to all embeddings in the request.\n- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is used.\n- You need `create` permission on the collection path and on the resulting embedding paths.\n\nIDs are assigned by the service. An `embedding_id` set on an item is ignored here; use `PUT` if you need to write to a specific existing embedding.",
         "operationId": "create_embeddings_in_collection_vectorstore_collections__collection_name__embeddings_post",
         "parameters": [
           {

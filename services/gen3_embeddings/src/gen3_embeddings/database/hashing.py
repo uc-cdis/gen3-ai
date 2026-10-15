@@ -19,7 +19,7 @@ PUT conflicts on to turn an insert into an update. Two properties matter.
    full-precision JSON text would let those in as separate rows holding the same vector --
    most visibly on halfvec collections, where float16 has ~3 decimal digits.
 
-Hashing here (rather than as `md5(...)` inside the INSERT) also means the vector never has
+Hashing in Python rather than in SQL inside the INSERT also means the vector never has
 to be serialized to text for the database to hash it, so the write path can bind vectors in
 pgvector's binary format. docs/binary_architecture.md describes the whole path, from JSON to
 the stored row.

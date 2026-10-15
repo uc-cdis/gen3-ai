@@ -150,7 +150,7 @@ class TestDiscoverVectorIndexes:
 
     def test_discovery_finds_a_real_index_and_ignores_an_invalid_one(self, test_database):
         """
-        End to end against Postgres, including the invalid-index case seen in practice.
+        End to end against Postgres, including an INVALID index left by a failed concurrent build.
 
         A failed `CREATE INDEX CONCURRENTLY` leaves an INVALID index behind that Postgres will
         never use. Reporting one as usable would have search emit an expression nothing can serve.

@@ -47,7 +47,7 @@ TextChunks = Annotated[
 """Raw text to be embedded. Not implemented yet, but still bounded."""
 
 CollectionNameField = Annotated[str, Field(min_length=1, max_length=MAX_COLLECTION_NAME_LENGTH)]
-"""A collection name in a request body. Path parameters are bounded in `models.helpers`."""
+"""A collection name in a request body. Path parameters are bounded in `params`."""
 
 DescriptionField = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
 """Free text stored on a collection."""

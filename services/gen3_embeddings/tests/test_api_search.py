@@ -78,13 +78,13 @@ def test_search_across_collections(client, allow_authz):
 @pytest.mark.parametrize("path", ["/vectorstore/collections/docs/search", "/vectorstore/search"])
 def test_search_omits_unset_fields_from_the_collections_it_reports(client, allow_authz, path):
     """
-    Search must drop nulls like every other endpoint, and like its own `embedding` block already does.
+    Search must drop nulls like every other endpoint, and like its own `embedding` block does.
 
     `counts` is not a search parameter, so `available_embeddings_count` is never populated here.
-    Without `response_model_exclude_none` it was serialized as an explicit `null`, which reads as
-    "this collection has no count" rather than "you did not ask for one" -- and it contradicted the
-    same response's `embedding`, which is dumped with `exclude_none=True` and so drops its own
-    unset fields.
+    Without `response_model_exclude_none` it would be serialized as an explicit `null`, which
+    reads as "this collection has no count" rather than "you did not ask for one" -- and would
+    contradict the same response's `embedding`, which is dumped with `exclude_none=True` and so
+    drops its own unset fields.
     """
     allow_authz("docs")
     client.post(

@@ -28,11 +28,9 @@ def dual_path(router: APIRouter, method: str, path: str, **kwargs: Any) -> Calla
     automatic redirect is not usable here because clients would have to follow a 307 and
     re-send their Authorization header. So both spellings are registered as real routes.
 
-    Registering them as two separate decorators is what this replaces: the alias only ever
-    received `include_in_schema=False`, silently dropping `response_model`,
-    `response_model_exclude_none` and `status_code`. That made `/path/` return fields the
-    documented response model excludes, and made DELETE aliases answer 200 instead of 204.
-    Deriving the alias from the same kwargs means the two cannot diverge.
+    The alias is derived from the same kwargs as the documented route, so both spellings
+    share `response_model`, `response_model_exclude_none`, `status_code` and every other
+    argument that affects behavior, and cannot diverge.
 
     Args:
         router (APIRouter): Router to register on.

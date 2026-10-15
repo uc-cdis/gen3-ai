@@ -151,7 +151,7 @@ async def get_embeddings_bulk_from_collection(
         ctx (AuthzContext): Authorization context for this request.
 
     Returns:
-        EmbeddingResponse containing the embeddings found in the specified collection.
+        EmbeddingResponseBinary containing the embeddings found in the specified collection.
 
     Raises:
         HTTPException: 403 if the caller may not read this collection; 404 if it does not

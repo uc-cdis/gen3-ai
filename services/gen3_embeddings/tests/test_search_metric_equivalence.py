@@ -69,7 +69,7 @@ def test_cosine_distance_reports_exact_values_smallest_first(client, docs):
 
 def test_the_two_metrics_agree_on_order_and_are_inverses(client, docs):
     """
-    The property the rewrite depends on, checked end to end.
+    The property the bare-distance ordering depends on, checked end to end.
 
     If the ordering direction were ever flipped these two would disagree, and the similarity
     search would be returning the least similar rows.
@@ -89,8 +89,8 @@ def test_min_value_on_cosine_similarity_keeps_the_most_similar(client, docs):
     """
     `min_value` means "at least this similar", not "at least this far".
 
-    This is the threshold that now sits outside the materialized CTE and compares against the
-    reported value rather than the raw distance. Comparing against the distance instead would
+    The threshold sits outside the materialized CTE and compares against the reported value
+    rather than the raw distance. Comparing against the distance instead would
     invert it and keep exactly the rows this asserts are gone.
     """
     hits = _search(client, distance_metric="cosine_similarity", min_value=0.5)

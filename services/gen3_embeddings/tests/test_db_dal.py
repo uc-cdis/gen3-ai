@@ -947,7 +947,7 @@ class TestEmbeddings:
     @pytest.mark.asyncio
     async def test_a_bulk_write_dual_writes_the_legacy_hash_columns(self):
         """
-        The pre-sha256 md5 columns get the new value too.
+        The legacy md5 columns get the sha256 value too.
 
         They are still NOT NULL and still carry a unique constraint until the contract migration
         drops them, so a write that skipped them would fail outright. Writing the same value means

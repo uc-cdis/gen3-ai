@@ -163,7 +163,7 @@ class ReadMixin(DataAccessLayerBase):
         limit: int,
     ) -> list[Embedding]:
         """
-        List embeddings in a collection, oldest first.
+        List embeddings in a collection, ordered by `embedding_id`.
 
         Args:
             collection (Collection): Collection to read from.
@@ -171,8 +171,7 @@ class ReadMixin(DataAccessLayerBase):
             limit (int): Maximum number of rows to return.
 
         Returns:
-            list[Embedding]: Embeddings visible to this caller under RLS. Ordering is by
-            `created_at`, which is not unique, so rows can shift between pages.
+            list[Embedding]: Embeddings visible to this caller under RLS.
 
         Raises:
             asyncpg.InsufficientPrivilegeError: If the database role is missing a GRANT the

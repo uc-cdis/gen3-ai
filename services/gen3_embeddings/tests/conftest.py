@@ -27,10 +27,9 @@ load_dotenv(Path(__file__).parent / ".env")
 # environment when the module is first imported -- so patching a service-level config object
 # later, as the `app` fixture does, cannot reach it.
 #
-# Local runs picked the value up from a git-ignored `.env`. CI has no such file, so it
-# authenticated for real and answered 401 to every request that named a collection. Setting it
-# here, above any import that pulls in `common.config`, makes the suite self-contained instead
-# of dependent on untracked files. `setdefault` leaves a deliberate override in place.
+# It is set here, above any import that pulls in `common.config`, so the suite does not depend
+# on a git-ignored `.env` that CI does not have. `setdefault` leaves a deliberate override in
+# place.
 os.environ.setdefault("DEBUG_SKIP_AUTH", "True")
 
 

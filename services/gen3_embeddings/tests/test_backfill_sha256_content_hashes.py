@@ -36,7 +36,7 @@ backfill = _load_backfill_module()
 
 async def _seed_legacy_rows(admin_dsn: str, table: str, vector_type: str, vectors: list[str]) -> None:
     """
-    Insert rows the way the pre-sha256 code did: md5 hashes in v1, nothing in v2.
+    Insert legacy-shaped rows: md5 hashes in v1, nothing in v2.
 
     Seeded over the admin DSN because these tables FORCE row level security and the rows need
     to exist regardless of any authz setting.
@@ -94,7 +94,7 @@ def test_backfill_writes_the_hashes_the_app_would_write(test_database, table, ve
     A backfilled row ends up with the hash a fresh write of the same content would produce.
 
     That agreement is the point of the whole exercise: without it the new unique index cannot
-    see an old row and a new row as the same embedding.
+    see a backfilled row and a freshly written row as the same embedding.
     """
     admin_dsn = test_database["admin_dsn"]
     vectors = ["[1,2,3]", "[4,5,6]"]
@@ -164,8 +164,8 @@ def test_pre_existing_duplicates_are_reported_not_hidden(test_database):
     """
     Rows the md5 hashes treat as distinct, but which are actually one embedding, are reported.
 
-    On a halfvec collection 1.0 and 1.0001 store identically, so md5 over the JSON text wrote
-    two rows for what is one embedding. Only one of them can hold the shared hash; the other
+    On a halfvec collection 1.0 and 1.0001 store identically, so md5 over the JSON text
+    treats them as two rows for what is one embedding. Only one of them can hold the shared hash; the other
     is left NULL and named in the summary so a human decides which to keep. Nothing is deleted.
     """
     admin_dsn = test_database["admin_dsn"]

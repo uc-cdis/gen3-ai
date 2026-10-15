@@ -405,7 +405,7 @@ async def list_embeddings_in_collection(
         "dimensions. Use `PUT` on this path instead if you want existing embeddings to be "
         "replaced rather than rejected.\n\n"
         "Authorization is resolved per request:\n\n"
-        "- If `authz` is set on the request body, those paths are applied to all embeddings in the "
+        "- If `authz` is set on the request body, that path is applied to all embeddings in the "
         "request.\n"
         "- Otherwise the collection's own path, `/vectorstore/collections/{collection_name}`, is "
         "used.\n"
@@ -437,7 +437,7 @@ async def create_embeddings_in_collection(
 
     This minimal implementation only accepts raw numeric vectors.
 
-    - If `body.authz` is provided (list of authz paths), use those authz paths for all embeddings.
+    - If `body.authz` is provided, use that authz path for all embeddings.
     - If not provided, default authz is `/vectorstore/collections/{collection_name}`.
     - Check `create` on:
         - the collection authz path, and

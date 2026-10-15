@@ -39,8 +39,8 @@ def order_by(sql: str) -> str:
 @pytest.mark.parametrize(
     "command_tag, expected",
     [
-        # the case that made `tag.startswith("DELETE")` wrong: a statement that matched
-        # nothing still reports its verb
+        # a statement that matched nothing still reports its verb, so the verb alone says
+        # nothing about the count
         ("DELETE 0", 0),
         ("DELETE 1", 1),
         ("DELETE 42", 42),
@@ -97,8 +97,8 @@ class TestBuildSearchSql:
         The reported value is the similarity while the ordering stays indexable.
 
         Ordering by `1 - (embedding <=> $2) DESC` would rank identically but wraps the operator
-        in arithmetic, and an index cannot serve that. The
-        projection still has to report the similarity, so value and order must differ here.
+        in arithmetic, and an index cannot serve that. The projection still has to report the
+        similarity, so value and order must differ here.
         """
         sql = search_sql(distance_metric=DistanceMetric.cosine_similarity)
 
@@ -112,7 +112,7 @@ class TestBuildSearchSql:
 
         Postgres cannot end an ordered index scan early while rows are still being filtered out,
         so a threshold sitting in the same WHERE as the ORDER BY makes the scan walk the entire
-        index -- the exact cost this rewrite removes. MATERIALIZED is what stops the planner
+        index. MATERIALIZED is what stops the planner
         inlining the CTE and collapsing the two back together.
         """
         sql = search_sql(distance_metric=DistanceMetric.cosine_distance, max_value=0.2)
@@ -251,9 +251,9 @@ class TestBuildMultiCollectionSearchSql:
         """
         One arm per collection, because one arm is all a per-collection partial index can serve.
 
-        This is the whole point of the rewrite: `collection_id = ANY($1::bigint[])` implies
-        nothing about any single collection, so Postgres cannot prove the `WHERE collection_id =
-        n` predicate of any partial index and scans the table instead.
+        A single `collection_id = ANY($1::bigint[])` predicate implies nothing about any single
+        collection, so Postgres could not prove the `WHERE collection_id = n` predicate of any
+        partial index and would scan the table instead.
         """
         sql = multi_sql(targets=[CollectionSearchTarget(1), CollectionSearchTarget(2), CollectionSearchTarget(3)])
 

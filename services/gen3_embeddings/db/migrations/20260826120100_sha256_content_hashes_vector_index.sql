@@ -6,7 +6,8 @@
 -- dbmate hands a migration body to Postgres as a single query, a multi-statement query runs
 -- in an implicit transaction block, and CREATE INDEX CONCURRENTLY refuses to run in one. So
 -- this migration is exactly ONE statement -- no SET, no second index. Adding anything else
--- here brings back "CREATE INDEX CONCURRENTLY cannot run inside a transaction block".
+-- here makes the migration fail with "CREATE INDEX CONCURRENTLY cannot run inside a
+-- transaction block".
 --
 -- This is the constraint that makes (collection_id, embedding_hash_v2, metadata_hash_v2,
 -- authz) unique, i.e. the thing that makes a repeated POST a 409 and gives PUT something to

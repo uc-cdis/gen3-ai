@@ -33,8 +33,7 @@
 -- WHAT THIS MIGRATION DOES
 -- ===========================================================================
 -- Brings `collections` under row-level security, so authorization for collections is
--- enforced by Postgres like it already is for `embeddings_vector`/`embeddings_halfvec`,
--- rather than by a Python set-membership filter in the data access layer.
+-- enforced by Postgres like it already is for `embeddings_vector`/`embeddings_halfvec`.
 --
 -- `collections` has no `authz` column, and deliberately does not get one. A collection's
 -- authz identity IS its name: the service derives the resource path

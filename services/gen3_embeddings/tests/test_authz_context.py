@@ -77,8 +77,8 @@ def test_declared_actions_match_what_each_route_does():
     """
     The declared action per endpoint, pinned as a table.
 
-    This is the artifact the refactor exists to produce: the authorization for every
-    endpoint, readable in one place. A deliberate change should update this table.
+    The authorization for every endpoint, readable in one place. A deliberate change should
+    update this table.
     """
     declared = {
         (tuple(sorted(route.methods)), route.path): _authz_declarations(route)[0]
@@ -98,7 +98,7 @@ def test_declared_actions_match_what_each_route_does():
         (("GET",), "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}"): "read",
         (("PUT",), "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}"): "update",
         (("DELETE",), "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}"): "delete",
-        # POST, but reads. These are the ones the verb got wrong.
+        # POST, but reads: the verb does not imply the action here
         (("POST",), "/embeddings/bulk"): "read",
         (("POST",), "/vectorstore/collections/{collection_name}/embeddings/bulk"): "read",
         (("POST",), "/vectorstore/collections/{collection_name}/search"): "read",
@@ -174,8 +174,8 @@ class TestPerActionGrants:
         """
         A caller granted only `read` can search, even though search is a POST.
 
-        Under verb-derived authorization this ran as `create`, so a read-only caller got an empty
-        result from an endpoint they were entitled to use.
+        Deriving the action from the verb would run this as `create`, giving a read-only caller an
+        empty result from an endpoint they are entitled to use.
         """
         allow_authz_per_action(read=("docs",), create=(), update=(), delete=())
 

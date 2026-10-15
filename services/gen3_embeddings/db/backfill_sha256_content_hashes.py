@@ -2,10 +2,10 @@
 Data migration: populate `embedding_hash_v2` / `metadata_hash_v2` for existing rows.
 
 Companion to db/migrations/20260826120000_sha256_content_hashes.sql, which adds the columns
-and their unique index but cannot fill them. The old hashes were md5 over the JSON text the
-app happened to send (`json.dumps` of float64s, e.g. `[0.1, 0.2]`); Postgres cannot reproduce
-that text from a stored float4 vector (`[0.1,0.2]`), so the new hash has to be computed
-outside the database, from the same code path the app now uses.
+and their unique index but cannot fill them. The legacy hashes are md5 over the JSON text the
+app sent (`json.dumps` of float64s, e.g. `[0.1, 0.2]`); Postgres cannot reproduce that text
+from a stored float4 vector (`[0.1,0.2]`), so the v2 hash is computed outside the database,
+with the same code the app writes it with.
 
 Run it after deploying the app code that writes the v2 columns:
 
@@ -27,9 +27,9 @@ Properties:
   any point.
 - Non-destructive. The legacy md5 columns are never written; the app keeps them satisfied on
   its own until the contract migration drops them.
-- Honest about collisions. Rows whose content is genuinely identical (which the md5 hashes
-  failed to notice, most likely on a halfvec collection where two vectors differ only below
-  float16 precision) cannot both take the same v2 hash. The batch's UPDATE would fail, so
+- Honest about collisions. Rows whose content is genuinely identical (possible because the
+  legacy md5 hashes do not treat them as equal, most likely on a halfvec collection where two
+  vectors differ only below float16 precision) cannot both take the same v2 hash. The batch's UPDATE would fail, so
   those rows are retried one at a time, left NULL, and printed at the end for a human to
   resolve. Nothing is deleted.
 
@@ -204,7 +204,7 @@ async def main(dsn: str, dry_run: bool) -> int:
             exit_code = 1
             print(
                 f"  {len(result['collisions'])} row(s) left with NULL hashes because another row holds identical\n"
-                f"  content (same stored vector, metadata, and authz). The md5 hashes did not catch these.\n"
+                f"  content (same stored vector, metadata, and authz).\n"
                 f"  Decide which to keep, delete the others, and re-run. (collection_id, embedding_id):"
             )
             for collection_id, embedding_id in result["collisions"]:
