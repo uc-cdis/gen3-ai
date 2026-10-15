@@ -97,5 +97,5 @@ def test_a_request_without_a_lifespan_is_an_error_not_a_new_pool():
     """
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
 
-    with pytest.raises(Exception, match="lifespan did not run"):
+    with pytest.raises(RuntimeError, match="lifespan did not run"):
         db_pool_from_request(request)

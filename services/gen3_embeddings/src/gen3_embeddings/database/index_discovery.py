@@ -74,7 +74,7 @@ DISCOVERY_SQL = """
     JOIN pg_namespace n ON n.oid = t.relnamespace
     WHERE n.nspname = 'public'
       AND t.relname = ANY($1::text[])
-      AND am.amname IN ('hnsw', 'ivfflat')
+      AND am.amname = 'hnsw'
       -- a failed CREATE INDEX CONCURRENTLY leaves an INVALID index behind, which Postgres
       -- will not use; treating one as usable would mean emitting SQL nothing can serve
       AND x.indisvalid
@@ -94,7 +94,7 @@ COLLECTION_INDEX_NAMES_SQL = """
     JOIN pg_namespace n ON n.oid = t.relnamespace
     WHERE n.nspname = 'public'
       AND t.relname = ANY($1::text[])
-      AND am.amname IN ('hnsw', 'ivfflat')
+      AND am.amname = 'hnsw'
       AND pg_get_expr(x.indpred, x.indrelid) = format('(collection_id = %s)', $2::bigint)
     ORDER BY i.relname
 """
@@ -138,7 +138,7 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
     predicate = _PREDICATE.match((row["predicate"] or "").strip())
     dimensions = _DIMENSIONS.search((row["expression"] or "").strip())
     if not predicate or not dimensions:
-        logging.debug(
+        logging.warning(
             "Ignoring vector index %s: predicate %r / expression %r is not a shape search emits",
             row["index_name"],
             row["predicate"],
@@ -154,7 +154,7 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
         metric = _OPCLASS_METRIC[opclass]
         vector_type = _OPCLASS_VECTOR_TYPE[opclass.split("_", 1)[0]]
     else:
-        logging.debug("Ignoring vector index %s: unsupported opclass %s", row["index_name"], opclass)
+        logging.warning("Ignoring vector index %s: unsupported opclass %s", row["index_name"], opclass)
         return None
 
     return VectorIndex(

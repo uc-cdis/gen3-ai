@@ -98,11 +98,11 @@ def db_pool_from_request(request: Request) -> asyncpg.Pool:
         asyncpg.Pool: The pool from `app.state`.
 
     Raises:
-        Exception: If the app has no pool, meaning the lifespan handler did not run.
+        RuntimeError: If the app has no pool, meaning the lifespan handler did not run.
     """
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
-        raise Exception("No database pool on app state. The application lifespan did not run.")
+        raise RuntimeError("No database pool on app state. The application lifespan did not run.")
 
     return pool
 

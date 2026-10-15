@@ -46,7 +46,7 @@ async def test_raises_when_rls_is_disabled(test_database, monkeypatch, table):
     await _set_rls(test_database["admin_dsn"], table, enabled=False, forced=True)
     conn = await asyncpg.connect(test_database["app_dsn"])
     try:
-        with pytest.raises(Exception, match="row-level security is DISABLED"):
+        with pytest.raises(RuntimeError, match="row-level security is DISABLED"):
             await check_rls_is_enabled(conn)
     finally:
         await conn.close()
@@ -62,7 +62,7 @@ async def test_raises_when_rls_is_not_forced(test_database, monkeypatch, table):
     await _set_rls(test_database["admin_dsn"], table, enabled=True, forced=False)
     conn = await asyncpg.connect(test_database["app_dsn"])
     try:
-        with pytest.raises(Exception, match="row-level security is not FORCED"):
+        with pytest.raises(RuntimeError, match="row-level security is not FORCED"):
             await check_rls_is_enabled(conn)
     finally:
         await conn.close()
@@ -79,7 +79,7 @@ async def test_reports_every_problem_at_once(test_database, monkeypatch):
 
     conn = await asyncpg.connect(test_database["app_dsn"])
     try:
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             await check_rls_is_enabled(conn)
 
         message = str(exc_info.value)

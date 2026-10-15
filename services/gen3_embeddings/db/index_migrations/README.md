@@ -85,7 +85,7 @@ JOIN pg_class t ON t.oid = x.indrelid
 JOIN pg_am am ON am.oid = i.relam
 JOIN pg_opclass opc ON opc.oid = x.indclass[0]
 WHERE t.relname IN ('embeddings_vector', 'embeddings_halfvec')
-  AND am.amname IN ('hnsw', 'ivfflat')
+  AND am.amname = 'hnsw'
 ORDER BY collection_id, index_name;
 ```
 
@@ -114,7 +114,8 @@ results are still correct. The rules:
    | `halfvec`                | `embeddings_halfvec` | `(embedding::halfvec(<dims>))`            | `halfvec_cosine_ops`, `halfvec_l2_ops`, `halfvec_ip_ops`, `halfvec_l1_ops`       |
    | either                   | same as above        | `(binary_quantize(embedding)::bit(<dims>))` | `bit_hamming_ops` (binary index)                                               |
 
-   `<dims>` is the collection's `dimensions`. The access method is `hnsw` or `ivfflat`.
+   `<dims>` is the collection's `dimensions`. The access method must be `hnsw`: for now, only
+   HNSW indexes are supported, not IVFFlat.
 
 ### Which operator class
 
@@ -317,7 +318,7 @@ CROSS JOIN LATERAL (
                      FROM '^\(collection_id = (\d+)\)$')::bigint AS collection_id
 ) p
 WHERE t.relname IN ('embeddings_vector', 'embeddings_halfvec')
-  AND am.amname IN ('hnsw', 'ivfflat')
+  AND am.amname = 'hnsw'
   AND p.collection_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.id = p.collection_id)
 ORDER BY p.collection_id, index_name;

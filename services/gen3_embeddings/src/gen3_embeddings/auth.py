@@ -82,10 +82,12 @@ def _arborist_client_from_request(request: Request | None):
         ArboristClient: The client from `app.state`.
 
     Raises:
-        Exception: If there is no request to read the app state from.
+        RuntimeError: If there is no request to read the app state from.
     """
     if not request:
-        raise Exception("Expected a request, got None. Cannot determine Arborist Client from app state from request.")
+        raise RuntimeError(
+            "Expected a request, got None. Cannot determine Arborist Client from app state from request."
+        )
 
     return request.app.state.arborist_client
 

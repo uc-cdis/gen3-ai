@@ -90,7 +90,7 @@ def build_search_sql(
 
     The `embedding` columns are declared without a dimension (`VECTOR`, not `VECTOR(n)`),
     because one table holds every collection and collections differ in dimensionality.
-    pgvector cannot build HNSW or IVFFlat on a dimensionless column, so the only indexable
+    pgvector cannot build an HNSW index on a dimensionless column, so the only indexable
     form is a partial expression index per collection:
 
         CREATE INDEX ... USING hnsw ((embedding::vector(256)) vector_cosine_ops)

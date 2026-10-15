@@ -93,8 +93,9 @@ async def lifespan(app: FastAPI):
         app (FastAPI): The application being started.
 
     Raises:
-        Exception: If the database is unreachable, the database role can bypass row-level
-            security, or the policy engine is unhealthy.
+        RuntimeError: If the database role can bypass row-level security, row-level security
+            is not in effect, or the policy engine is unhealthy. An unreachable database
+            raises the driver's own error instead.
     """
     # Startup logic. The pool is created here and only here, so every request path reads the
     # one on the app state instead of racing to build its own.
@@ -132,7 +133,7 @@ async def check_arborist_is_healthy(app):
         app (FastAPI): the fastapi app with arborist client
 
     Raises:
-        Exception: If arborist is not healthy.
+        RuntimeError: If arborist is not healthy.
     """
     logging.debug("Startup policy engine (Arborist) connection test initiating...")
     arborist_client = app.state.arborist_client
@@ -141,7 +142,7 @@ async def check_arborist_is_healthy(app):
             "Startup policy engine (Arborist) connection test FAILED. Unable to connect to the policy engine."
         )
         logging.debug("Arborist is unhealthy")
-        raise Exception("Arborist unhealthy, aborting...")
+        raise RuntimeError("Arborist unhealthy, aborting...")
     logging.debug("Startup policy engine (Arborist) connection test PASSED.")
 
 
@@ -169,7 +170,7 @@ async def check_rls_is_enabled(conn):
         conn: An open asyncpg connection.
 
     Raises:
-        Exception: If a protected table is missing, has RLS disabled, or does not have RLS
+        RuntimeError: If a protected table is missing, has RLS disabled, or does not have RLS
             forced, unless DEBUG_SKIP_AUTH is True, in which case it is a warning.
     """
     rows = await conn.fetch(
@@ -209,7 +210,7 @@ async def check_rls_is_enabled(conn):
         return
 
     logging.error(f"Row-level security check failed: {detail}")
-    raise Exception(f"REQUIRED row-level security is not in effect ({detail}). Aborting...")
+    raise RuntimeError(f"REQUIRED row-level security is not in effect ({detail}). Aborting...")
 
 
 async def check_db_connection(pool):
@@ -226,9 +227,9 @@ async def check_db_connection(pool):
         pool: The pool created for this app, whose lifetime the caller owns.
 
     Raises:
-        Exception: If the database cannot be reached, the DB user is SUPERUSER or has BYPASSRLS,
-            or row-level security is not in effect. The role and RLS checks are skipped when
-            DEBUG_SKIP_AUTH is True.
+        RuntimeError: If the DB user is SUPERUSER or has BYPASSRLS, or row-level security is
+            not in effect. The role and RLS checks are skipped when DEBUG_SKIP_AUTH is True. A
+            database that cannot be reached raises the driver's own error instead.
     """
     try:
         logging.debug("Startup database connection test initiating. Attempting a simple query...")
@@ -273,13 +274,13 @@ async def check_db_connection(pool):
                 # Normal enforcement when DEBUG_SKIP_AUTH is False.
                 if usesuper:
                     logging.error(f"DB user '{usename}' is SUPERUSER. This is unsafe for RLS.")
-                    raise Exception(
+                    raise RuntimeError(
                         "Configured DB user is SUPERUSER, which bypasses REQUIRED row-level security. Aborting..."
                     )
 
                 if usebypassrls:
                     logging.error(f"DB user '{usename}' has BYPASSRLS. This is unsafe for RLS.")
-                    raise Exception(
+                    raise RuntimeError(
                         "Configured DB user has BYPASSRLS, which bypasses REQUIRED row-level security. Aborting..."
                     )
 
