@@ -161,7 +161,7 @@ def convert_chat_completion_stream_to_sse(
         Yield each chat completion chunk as SSE events following Open Responses spec
 
         Yields:
-            bytes: SSE-encoded Open Responses event lines, ending with `data: [DONE]`.
+            bytes: Server-sent event chunks.
         """
         usage_info = None
         sequence_number = 0
@@ -259,7 +259,7 @@ def chat_completion_to_openresponses_response(
 
     Args:
         chat_response (ChatCompletion): Non-streaming chat completion response.
-        metadata (dict[str, Any] | None): Metadata to set on the Open Responses response.
+        metadata (dict[str, Any] | None): Metadata to carry onto the converted response.
 
     Returns:
         ResponseResource: Open Responses response format
@@ -286,7 +286,7 @@ def _openai_chat_completion_to_openresponses(
           compatible.
 
     Returns:
-        ResponseResource: The Open Responses equivalent of `openai_chat`.
+        ResponseResource: The converted response.
     """
 
     return ResponseResource(

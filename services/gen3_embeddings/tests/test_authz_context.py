@@ -49,6 +49,12 @@ def _authz_declarations(route: APIRoute) -> list[str]:
     return [dep.action for dep in _authz_dependencies(route)]
 
 
+def _methods(route: APIRoute) -> set[str]:
+    """The route's HTTP methods, which APIRoute always sets even though Starlette allows None."""
+    assert route.methods is not None
+    return route.methods
+
+
 def _data_routes() -> list[APIRoute]:
     """Every data endpoint, including the undocumented trailing-slash aliases."""
     return [route for router in DATA_ROUTERS for route in router.routes if isinstance(route, APIRoute)]
@@ -66,7 +72,7 @@ def test_every_route_declares_exactly_one_authz_action():
     assert len(routes) >= 30
 
     wrong = {
-        f"{sorted(route.methods)} {route.path}": _authz_declarations(route)
+        f"{sorted(_methods(route))} {route.path}": _authz_declarations(route)
         for route in routes
         if len(_authz_declarations(route)) != 1
     }
@@ -81,7 +87,7 @@ def test_declared_actions_match_what_each_route_does():
     update this table.
     """
     declared = {
-        (tuple(sorted(route.methods)), route.path): _authz_declarations(route)[0]
+        (tuple(sorted(_methods(route))), route.path): _authz_declarations(route)[0]
         for route in _data_routes()
         if route.include_in_schema
     }
@@ -115,7 +121,7 @@ def test_upsert_route_also_requires_create():
     route = next(
         route
         for route in _data_routes()
-        if route.path == "/vectorstore/collections/{collection_name}/embeddings" and "PUT" in route.methods
+        if route.path == "/vectorstore/collections/{collection_name}/embeddings" and "PUT" in _methods(route)
     )
     (dep,) = _authz_dependencies(route)
     assert dep.action == "update"
@@ -126,7 +132,7 @@ def test_alias_routes_declare_the_same_action():
     """A trailing-slash alias that lost its authz declaration would be an open endpoint."""
     by_key: dict[tuple, set[str]] = {}
     for route in _data_routes():
-        key = (tuple(sorted(route.methods)), route.path.rstrip("/") or "/")
+        key = (tuple(sorted(_methods(route))), route.path.rstrip("/") or "/")
         by_key.setdefault(key, set()).update(_authz_declarations(route))
 
     inconsistent = {key: actions for key, actions in by_key.items() if len(actions) != 1}

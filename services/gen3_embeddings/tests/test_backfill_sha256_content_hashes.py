@@ -26,6 +26,7 @@ def _load_backfill_module():
     """Import the backfill script, which lives in db/ rather than in the package."""
     path = Path(__file__).resolve().parents[1] / "db" / "backfill_sha256_content_hashes.py"
     spec = importlib.util.spec_from_file_location("backfill_sha256_content_hashes", path)
+    assert spec is not None and spec.loader is not None, f"cannot load {path}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

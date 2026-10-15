@@ -9,6 +9,7 @@ alias that drifted would return fields the response model excludes, or answer a 
 """
 
 import pytest
+from fastapi.routing import APIRoute
 
 from gen3_embeddings.routes.collections import collections_router
 from gen3_embeddings.routes.embeddings import embeddings_router
@@ -28,9 +29,11 @@ BEHAVIORAL_ATTRS = ("response_model", "response_model_exclude_none", "status_cod
 
 def _alias_pairs():
     """Group routes by method and slash-insensitive path, keeping only the registered pairs."""
-    grouped: dict[tuple[str, str], list] = {}
+    grouped: dict[tuple[str, str], list[APIRoute]] = {}
     for router in ALL_ROUTERS:
         for route in router.routes:
+            assert isinstance(route, APIRoute), f"not an endpoint: {route}"
+            assert route.methods is not None
             for method in route.methods:
                 grouped.setdefault((method, route.path.rstrip("/") or "/"), []).append(route)
     return {key: routes for key, routes in grouped.items() if len(routes) > 1}

@@ -1,6 +1,7 @@
 """Tests for the database helper functions."""
 
 import re
+from typing import Any, cast
 
 import pytest
 
@@ -15,7 +16,7 @@ from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 def search_sql(**overrides) -> str:
     """Build a search statement with the boilerplate arguments filled in."""
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "table": "embeddings_vector",
         "distance_metric": DistanceMetric.cosine_distance,
         "collection_id_param": "$1::bigint",
@@ -33,7 +34,9 @@ def search_sql(**overrides) -> str:
 
 def order_by(sql: str) -> str:
     """Return the ORDER BY clause, which is the only part an index can serve."""
-    return re.search(r"ORDER BY (.*?) LIMIT", sql).group(1)
+    match = re.search(r"ORDER BY (.*?) LIMIT", sql)
+    assert match is not None, f"no ORDER BY ... LIMIT in: {sql}"
+    return match.group(1)
 
 
 @pytest.mark.parametrize(
@@ -228,7 +231,7 @@ class TestBuildSearchSql:
 
 def multi_sql(**overrides) -> str:
     """Build a cross-collection search statement with the boilerplate arguments filled in."""
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "table": "embeddings_vector",
         "distance_metric": DistanceMetric.cosine_distance,
         "targets": [CollectionSearchTarget(1), CollectionSearchTarget(2)],
@@ -282,8 +285,10 @@ class TestBuildMultiCollectionSearchSql:
         They come from `collections.id` and cannot normally be anything else, but `int()` is what
         makes that a guarantee rather than an assumption.
         """
+        # cast because the wrong type is the point: this is the value the annotation cannot stop
+        malicious_id = cast(int, "1; DROP TABLE embeddings_vector")
         with pytest.raises(ValueError):
-            multi_sql(targets=[CollectionSearchTarget("1; DROP TABLE embeddings_vector")])
+            multi_sql(targets=[CollectionSearchTarget(malicious_id)])
 
     def test_arms_carry_the_index_shape_their_own_collection_has(self):
         """

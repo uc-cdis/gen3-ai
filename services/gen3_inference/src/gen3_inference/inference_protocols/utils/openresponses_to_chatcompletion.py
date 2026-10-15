@@ -13,7 +13,7 @@ from openresponses_types import (
 
 
 def _usage_to_dict(usage: Usage) -> dict[str, int]:
-    """Return the Chat-Completions usage dict for an OpenResponses Usage object."""
+    """Return the OpenResponses Usage object as the Chat-Completions usage dict."""
     return {
         "prompt_tokens": usage.input_tokens,
         "completion_tokens": usage.output_tokens,
@@ -31,7 +31,7 @@ def _convert_output_items(
     calls are present they are collapsed into a single tool_calls array.
 
     Returns:
-        dict[str, Any]: A single Chat-Completions assistant message.
+        dict[str, Any]: The converted output items.
     """
     assistant_content_parts: list[str] = []
     function_call: dict[str, Any] | None = None

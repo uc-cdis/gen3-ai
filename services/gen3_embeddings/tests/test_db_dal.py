@@ -21,6 +21,7 @@ out of the pool.
 """
 
 import re
+from typing import cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -218,7 +219,7 @@ def make_dal(
     conn = FakeConnection(results=results, execute_result=execute_result)
     pool = FakePool(conn)
     dal = DataAccessLayer(
-        pool,
+        cast(asyncpg.Pool, pool),
         allowed_authz=list(allowed_authz),
         allowed_collection_names=set(allowed_collection_names),
         vector_indexes=vector_indexes,
@@ -357,7 +358,8 @@ class TestRlsDenialOrReraise:
         a deployment fault.
         """
         exc = InsufficientPrivilegeError(RLS_VIOLATION_MESSAGE)
-        assert exc.message is None
+        # asyncpg's metaclass adds the field attributes at runtime, so ty cannot see them
+        assert exc.message is None  # ty: ignore[unresolved-attribute]
         assert isinstance(_rls_denial_or_reraise(exc), RowLevelSecurityDeniedError)
 
 
@@ -559,7 +561,7 @@ class TestWithRls:
 
         This is the default a caller gets by forgetting an argument, so it has to be the safe one.
         """
-        dal = DataAccessLayer(FakePool(FakeConnection()))
+        dal = DataAccessLayer(cast(asyncpg.Pool, FakePool(FakeConnection())))
 
         assert dal.allowed_authz == []
         assert dal.allowed_collection_names == set()

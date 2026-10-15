@@ -20,6 +20,6 @@ async def redirect_to_docs():
     Redirects to the API docs if they hit the base endpoint.
 
     Returns:
-        RedirectResponse: A redirect to `/docs`.
+        RedirectResponse: A redirect to /docs.
     """
     return RedirectResponse(url="/docs")

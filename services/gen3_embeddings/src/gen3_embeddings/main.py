@@ -5,11 +5,21 @@ FastAPI app creation, general entrypoint into the service.
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from gen3authz.client.arborist.async_client import ArboristClient
+from gen3pyutils.observability.constants import UNKNOWN_LABEL_VALUE
 
+from common.auth import get_user_id
+from common.logging_setup import configure_logging
+from common.metrics import add_request_metrics_middleware, get_metrics_client
+from common.profiling import configure_profiling
+from common.telemetry import configure_tracing, instrument_class
 from gen3_embeddings import config
 from gen3_embeddings.config import logging
+from gen3_embeddings.database.dal.base import DataAccessLayerBase
+from gen3_embeddings.database.dal.reads import ReadMixin
+from gen3_embeddings.database.dal.search import SearchMixin
+from gen3_embeddings.database.dal.writes import WriteMixin
 from gen3_embeddings.database.db import create_pool
 from gen3_embeddings.database.index_discovery import discover_vector_indexes
 from gen3_embeddings.error_handlers import register_error_handlers
@@ -72,6 +82,8 @@ OPENAPI_TAGS = [
         "description": "Service version and health. Intended for operators rather than API clients.",
     },
 ]
+API_REQUESTS_COUNTER = "gen3_embeddings_api_requests"
+API_REQUESTS_COUNTER_DESCRIPTION = "API requests for Gen3 Embeddings."
 
 route_aggregator = APIRouter()
 route_aggregator.include_router(embeddings_router)
@@ -318,10 +330,61 @@ def get_app() -> FastAPI:
     # parse is itself the expensive step: a 1 GiB JSON array costs a 1 GiB read plus the
     # memory of the resulting list before any validator sees it.
     app.add_middleware(RequestSizeLimitMiddleware, max_body_bytes=config.MAX_REQUEST_BODY_BYTES)
+    configure_logging()
+
+    # Before configure_tracing, which only links spans to profiles if the agent is already up.
+    # One agent per process, and dockerrun.bash runs a single uvicorn process per container, so
+    # one agent per container. Adding `--workers` would not leave the children unprofiled -
+    # uvicorn spawns them and each imports the app, so each starts its own agent - but they would
+    # all push under the same application name and the same `pod` tag, merging their flamegraphs.
+    configure_profiling(config.DEPLOYMENT_SERVICE_NAME)
+    configure_tracing(app, config.DEPLOYMENT_SERVICE_NAME)
+
+    # A span per data-access call, which sits between the request span and the asyncpg spans
+    # and is the layer the library instrumentation cannot see. Kept to work done once per
+    # request: the helpers in models/helpers.py run per row inside bulk loops, where a span
+    # would cost more than the work it measures. common.auth carries its own @traced decorators,
+    # because its callers bind its functions by name at import and never look them up here.
+    #
+    # `instrument_class` only wraps the methods a class defines itself, and DataAccessLayer
+    # defines none: they live on its base and mixins, so each of those is instrumented.
+    for dal_class in (DataAccessLayerBase, ReadMixin, WriteMixin, SearchMixin):
+        instrument_class(dal_class)
+
+    # Mounts /metrics on the app as a side effect, so it has to run before the app serves traffic.
+    app.state.metrics = get_metrics_client(app)
+
+    add_request_metrics_middleware(
+        app,
+        app.state.metrics,
+        counter_name=API_REQUESTS_COUNTER,
+        counter_description=API_REQUESTS_COUNTER_DESCRIPTION,
+        excluded_paths=config.ENDPOINTS_WITHOUT_METRICS,
+        extra_label_names=("user_id",),
+        extra_labels=_user_id_label,
+    )
 
     app.include_router(route_aggregator)
 
     return app
+
+
+async def _user_id_label(request: Request) -> dict[str, str]:
+    """
+    Return the user to attribute one counted request to.
+
+    Args:
+        request (Request): The request that was served.
+
+    Returns:
+        dict[str, str]: The `user_id` label. UNKNOWN_LABEL_VALUE for a request that carried no
+            usable token, so an unauthenticated request is still counted.
+    """
+    try:
+        return {"user_id": await get_user_id(request=request)}
+    except HTTPException as exc:
+        logging.debug(f"Could not retrieve user_id. Error: '{exc}'. Setting user_id to 'Unknown' for metrics")
+        return {"user_id": UNKNOWN_LABEL_VALUE}
 
 
 app_instance = get_app()

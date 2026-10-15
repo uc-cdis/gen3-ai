@@ -7,8 +7,10 @@ leaked when startup fails, and every other test in this suite would still pass.
 """
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from gen3_embeddings import main as main_module
@@ -95,7 +97,7 @@ def test_a_request_without_a_lifespan_is_an_error_not_a_new_pool():
     traffic against a database whose row-level security was never verified, because that
     verification only happens on the startup path.
     """
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))
 
     with pytest.raises(RuntimeError, match="lifespan did not run"):
         db_pool_from_request(request)

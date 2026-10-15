@@ -10,7 +10,7 @@ def get_app():
     WIP
 
     Returns:
-        FastAPI: The service's app.
+        FastAPI: The application, with no routes mounted yet.
     """
     app = FastAPI(
         title="Gen3 AI Model Repository Service",

@@ -45,8 +45,8 @@ class OpenaiChat(InferenceProtocolClient):
             JSONResponse: The formatted chat completion response
 
         Raises:
-            HTTPException: 404 if the upstream server does not have the model, 503 if the upstream
-                request fails for any other reason.
+            HTTPException: 404 if the model rejects the request, 503 if the inference server
+                cannot be reached.
         """
         host = str(urlparse(self.base_url).hostname) or ""
         if host not in HOST_TO_CREDS:
@@ -139,7 +139,7 @@ def _get_messages(body: CreateResponseBody) -> list[dict]:
           around text-based user messages.
 
     Returns:
-        list[dict]: Chat messages, each a dict with `role` and `content`.
+        list[dict]: The chat messages to send to the model.
     """
     body_input = body.input or []
     if isinstance(body_input, str):

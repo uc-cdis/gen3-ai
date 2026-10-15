@@ -69,6 +69,7 @@ class TestParse:
             row(opclass="bit_hamming_ops", expression="(binary_quantize(embedding))::bit(1536)"),
         )
 
+        assert found is not None
         assert found.strategy is IndexStrategy.binary
         assert found.dimensions == 1536
         assert found.metric is None
@@ -78,6 +79,7 @@ class TestParse:
         """The cast search emits has to match, and halfvec and vector are different casts."""
         found = _parse("embeddings_halfvec", row(opclass="halfvec_l2_ops", expression="(embedding)::halfvec(768)"))
 
+        assert found is not None
         assert (found.vector_type, found.metric, found.dimensions) == (
             VectorType.halfvec,
             DistanceMetric.l2_distance,

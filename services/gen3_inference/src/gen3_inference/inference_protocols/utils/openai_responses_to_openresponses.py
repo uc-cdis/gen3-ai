@@ -95,7 +95,7 @@ def openai_streaming_response_to_openresponses(
         Yield each event as an Open Responses Event
 
         Yields:
-            bytes: SSE-encoded event lines, ending with `data: [DONE]`.
+            bytes: Server-sent event chunks.
         """
         for event in openai_response_stream:
             payload = event.model_dump()
@@ -124,7 +124,7 @@ def openai_response_to_openresponses(
     Convert an OpenAI Python-Client `Response` into an Open Responses `ResponseResource`.
 
     Returns:
-        ResponseResource: The Open Responses equivalent of `openai_response`.
+        ResponseResource: The converted response.
     """
     metadata = metadata or {}
     return ResponseResource(

@@ -30,9 +30,8 @@ CONFIGURATION
 `AuthzConfig` carries the three things that legitimately differ between services:
 
 - `service_name`: the Arborist "service" the checks are scoped to.
-- `audience`: expected token audience. `None` derives it from the request as
-  `https://{host}/user`, which is what the Gen3 AuthN/Z service issues. A service that
-  needs a fixed audience passes it explicitly.
+- `audience`: expected token audience. Defaults to `"gen3"`, which is what the Gen3 AuthN/Z
+  service issues.
 - `arborist_resolver`: how to get an ArboristClient. `None` uses the module-level singleton.
   Services that build a client at startup pass a resolver reading it off `app.state`, so the
   client's configured base URL and connection pool are actually used.
@@ -55,9 +54,13 @@ from starlette.status import (
 
 from common import config
 from common.config import logging
+from common.telemetry import traced
 
 get_bearer_token = HTTPBearer(auto_error=False)
 arborist = ArboristClient()
+
+# This is what the Gen3 AuthN/Z service adds as the audience to represent Gen3 services
+GEN3_TOKEN_AUDIENCE = "gen3"
 
 # The logical CRUD action each HTTP verb corresponds to. This is the single definition of
 # that mapping; a route that reads but is declared POST (because its query does not fit in a
@@ -101,14 +104,13 @@ class AuthzConfig:
 
     Attributes:
         service_name (str): Arborist service name these checks are scoped to.
-        audience (str | None): Expected token audience, or None to derive
-            `https://{request host}/user` from the request.
+        audience (str): Expected token audience.
         arborist_resolver (ArboristResolver | None): Returns the ArboristClient to use, or
             None to use this module's singleton.
     """
 
     service_name: str
-    audience: str | None = None
+    audience: str = GEN3_TOKEN_AUDIENCE
     arborist_resolver: ArboristResolver | None = None
 
     def arborist_client(self, request: Request | None) -> ArboristClient:
@@ -125,28 +127,6 @@ class AuthzConfig:
             return arborist
         return self.arborist_resolver(request)
 
-    def expected_audience(self, request: Request | None) -> str | None:
-        """
-        Resolve the token audience to validate against.
-
-        Args:
-            request (Request | None): Used to derive the audience when none is configured.
-
-        Returns:
-            str | None: The configured audience, the request-derived Gen3 audience, or None
-            if neither is available.
-        """
-        if self.audience is not None:
-            return self.audience
-        if request:
-            # This is what the Gen3 AuthN/Z service adds as the audience to represent Gen3
-            # services
-            return f"https://{request.base_url.netloc}/user"
-        logging.warning(
-            "Unable to determine expected audience b/c request context was not provided... setting audience to `None`."
-        )
-        return None
-
 
 def _cache_get(request: Request | None, key: str) -> Any:
     """Return the per-request cached value, or None when there is no request to cache on."""
@@ -161,6 +141,7 @@ def _cache_set(request: Request | None, key: str, value: Any) -> None:
         setattr(request.state, f"{_CACHE_PREFIX}{key}", value)
 
 
+@traced
 async def authorize_request(
     authz_resources: list[str],
     authz_service_name: str | None = None,
@@ -248,6 +229,7 @@ async def authorize_request(
         raise HTTPException(status_code=HTTP_403_FORBIDDEN)
 
 
+@traced
 async def get_user_id(
     token: HTTPAuthorizationCredentials | None = None,
     request: Request | None = None,
@@ -325,6 +307,7 @@ async def get_username(
     return username
 
 
+@traced
 async def get_user_authz_mapping(
     token: HTTPAuthorizationCredentials | None = None,
     request: Request | None = None,
@@ -437,6 +420,7 @@ def get_allowed_authz_from_mapping(
     return allowed
 
 
+@traced
 async def get_allowed_authz_for_request(
     request: Request,
     method: str,
@@ -477,6 +461,7 @@ async def get_allowed_authz_for_request(
     return allowed_authz
 
 
+@traced
 async def _get_token_claims(
     token: HTTPAuthorizationCredentials | None = None,
     request: Request | None = None,
@@ -507,7 +492,7 @@ async def _get_token_claims(
     if not token:
         raise HTTPException(status_code=HTTP_401_UNAUTHENTICATED)
 
-    audience = authz_config.expected_audience(request) if authz_config else AuthzConfig("").expected_audience(request)
+    audience = authz_config.audience if authz_config else GEN3_TOKEN_AUDIENCE
 
     try:
         # NOTE: token can be None if no Authorization header was provided, we expect

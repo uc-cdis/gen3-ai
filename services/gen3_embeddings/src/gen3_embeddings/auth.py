@@ -5,8 +5,8 @@ The generic authorization machinery -- token handling, policy-engine calls, auth
 retrieval, per-request caching, the HTTP-verb-to-CRUD mapping -- lives in `common.auth`.
 What is specific to this service, and therefore lives here, is only:
 
-- `AUTHZ`: the `AuthzConfig` binding this service's Arborist service name, token audience,
-  and ArboristClient to those generic functions.
+- `AUTHZ`: the `AuthzConfig` binding this service's Arborist service name and ArboristClient
+  to those generic functions.
 - the COLLECTION resource-path convention, in both directions: name to path, and a caller's
   granted paths back to collection names.
 
@@ -63,10 +63,6 @@ from gen3_embeddings.models.helpers import normalize_collection_name
 # module docstring.
 AUTHZ_RESOURCE_BASE = "/vectorstore/collections"
 
-# Audience this service expects in an access token. Pinned rather than derived from the
-# request host, which is what `common.auth` does by default.
-AUTHZ_TOKEN_AUDIENCE = "gen3"
-
 
 def _arborist_client_from_request(request: Request | None):
     """
@@ -94,7 +90,6 @@ def _arborist_client_from_request(request: Request | None):
 
 AUTHZ = AuthzConfig(
     service_name=config.AUTHZ_SERVICE_NAME,
-    audience=AUTHZ_TOKEN_AUDIENCE,
     arborist_resolver=_arborist_client_from_request,
 )
 
