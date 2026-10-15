@@ -204,22 +204,30 @@ class TestValidateMetadata:
         with pytest.raises(ValueError, match="bytes when serialized"):
             validate_metadata(metadata)
 
-    def test_nan_is_refused(self):
+    @pytest.mark.parametrize(
+        "metadata",
+        [{"score": float("nan")}, {"a": {"b": [1.0, float("nan")]}}],
+        ids=["top_level", "nested_in_list"],
+    )
+    def test_nan_is_refused(self, metadata):
         """
         NaN is refused wherever it sits, rather than reaching Postgres.
 
         The stdlib JSON parser accepts a bare `NaN` token, so it arrives here as a float, and
         the jsonb cast would reject it as a 500.
         """
-        for metadata in ({"score": float("nan")}, {"a": {"b": [1.0, float("nan")]}}):
-            with pytest.raises(ValueError, match="NaN or Infinity"):
-                validate_metadata(metadata)
+        with pytest.raises(ValueError, match="NaN or Infinity"):
+            validate_metadata(metadata)
 
-    def test_infinity_is_refused(self):
+    @pytest.mark.parametrize(
+        "metadata",
+        [{"score": float("inf")}, {"a": [float("-inf")]}],
+        ids=["positive_top_level", "negative_nested_in_list"],
+    )
+    def test_infinity_is_refused(self, metadata):
         """Infinity, either sign, is refused for the same reason as NaN."""
-        for metadata in ({"score": float("inf")}, {"a": [float("-inf")]}):
-            with pytest.raises(ValueError, match="NaN or Infinity"):
-                validate_metadata(metadata)
+        with pytest.raises(ValueError, match="NaN or Infinity"):
+            validate_metadata(metadata)
 
     def test_depth_is_checked_before_size(self):
         """
@@ -248,11 +256,11 @@ class TestSchemaFieldLimits:
         with pytest.raises(ValidationError, match="too_long"):
             UpdateEmbeddingBody(embedding=[0.0] * (MAX_VECTOR_DIMENSIONS + 1))
 
-    def test_non_finite_vector_components_are_refused(self):
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_vector_components_are_refused(self, bad):
         """pgvector rejects NaN and infinity, so they are refused at the edge instead."""
-        for bad in (float("nan"), float("inf"), float("-inf")):
-            with pytest.raises(ValidationError):
-                UpdateEmbeddingBody(embedding=[bad, 0.0, 0.0])
+        with pytest.raises(ValidationError):
+            UpdateEmbeddingBody(embedding=[bad, 0.0, 0.0])
 
     def test_more_embeddings_than_the_per_request_maximum_is_refused(self):
         """Item count multiplies against the per-vector bound, so it is bounded too."""
@@ -402,15 +410,15 @@ class TestRouteLimits:
         assert "NaN or Infinity" in resp.text
         assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
 
-    def test_infinity_metadata_on_create_is_a_client_error(self, client, allow_authz):
+    @pytest.mark.parametrize("token", ["Infinity", "-Infinity"])
+    def test_infinity_metadata_on_create_is_a_client_error(self, client, allow_authz, token):
         """`Infinity` and `-Infinity` are refused the same way."""
         allow_authz("docs")
         make_collection(client)
 
-        for token in ("Infinity", "-Infinity"):
-            resp = self.post_raw_metadata(client, f'{{"a": {{"b": [{token}]}}}}')
-            assert resp.status_code == 422, (token, resp.text)
-            assert "NaN or Infinity" in resp.text
+        resp = self.post_raw_metadata(client, f'{{"a": {{"b": [{token}]}}}}')
+        assert resp.status_code == 422, resp.text
+        assert "NaN or Infinity" in resp.text
         assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
 
     def test_non_finite_vector_on_create_is_a_client_error(self, client, allow_authz):
@@ -443,16 +451,17 @@ class TestRouteLimits:
         )
         assert resp.status_code == 422, resp.text
 
-    def test_page_beyond_the_maximum_is_refused(self, client, allow_authz):
+    @pytest.mark.parametrize("path", ["/vectorstore/collections", "/vectorstore/collections/docs/embeddings"])
+    def test_page_beyond_the_maximum_is_refused(self, client, allow_authz, path):
         """Bounds the OFFSET handed to Postgres, and the depth of scan we will serve."""
         allow_authz("docs")
         make_collection(client)
 
-        for path in ("/vectorstore/collections", "/vectorstore/collections/docs/embeddings"):
-            resp = client.get(path, params={"page": MAX_PAGE + 1})
-            assert resp.status_code == 422, f"{path}: {resp.text}"
+        resp = client.get(path, params={"page": MAX_PAGE + 1})
+        assert resp.status_code == 422, resp.text
 
-    def test_page_size_is_bounded_above_but_not_below(self, client, allow_authz):
+    @pytest.mark.parametrize("path", ["/vectorstore/collections", "/vectorstore/collections/docs/embeddings"])
+    def test_page_size_is_bounded_above_but_not_below(self, client, allow_authz, path):
         """
         Both list endpoints cap `page_size` and both accept a small one.
 
@@ -462,24 +471,23 @@ class TestRouteLimits:
         allow_authz("docs")
         make_collection(client)
 
-        for path in ("/vectorstore/collections", "/vectorstore/collections/docs/embeddings"):
-            too_big = client.get(path, params={"page_size": MAX_PAGE_SIZE + 1})
-            assert too_big.status_code == 422, f"{path}: {too_big.text}"
+        too_big = client.get(path, params={"page_size": MAX_PAGE_SIZE + 1})
+        assert too_big.status_code == 422, too_big.text
 
-            smallest = client.get(path, params={"page_size": 1})
-            assert smallest.status_code == 200, f"{path}: {smallest.text}"
-            assert smallest.json()["page_size"] == 1
+        smallest = client.get(path, params={"page_size": 1})
+        assert smallest.status_code == 200, smallest.text
+        assert smallest.json()["page_size"] == 1
 
-    def test_too_many_bulk_uuids_is_refused(self, client, allow_authz):
+    @pytest.mark.parametrize("path", ["/embeddings/bulk", "/vectorstore/collections/docs/embeddings/bulk"])
+    def test_too_many_bulk_uuids_is_refused(self, client, allow_authz, path):
         """The request is small, but each UUID that resolves returns a full vector."""
         allow_authz("docs")
         make_collection(client)
 
         uuids = [f"00000000-0000-0000-0000-{i:012d}" for i in range(MAX_EMBEDDING_UUIDS_PER_REQUEST + 1)]
 
-        for path in ("/embeddings/bulk", "/vectorstore/collections/docs/embeddings/bulk"):
-            resp = client.post(path, json=uuids)
-            assert resp.status_code == 422, f"{path}: {resp.text}"
+        resp = client.post(path, json=uuids)
+        assert resp.status_code == 422, resp.text
 
     def test_empty_bulk_uuid_list_is_refused(self, client, allow_authz):
         """A bulk read with nothing to read is a client mistake, not an empty result."""

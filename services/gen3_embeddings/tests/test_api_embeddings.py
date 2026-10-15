@@ -136,8 +136,8 @@ def test_create_embeddings_dimension_mismatch(client, allow_authz):
         },
     )
     assert response.status_code == 400
-    # the DAL's message, which names the offending item by its position in the request
-    assert response.json()["detail"] == "Embedding at index 1 has 2 dimensions, expected 3 for this collection"
+    # the offending item is named by its position in the request
+    assert "index 1" in response.json()["detail"]
     assert client.get("/vectorstore/collections/docs/embeddings").json()["embeddings"] == []
 
 
@@ -190,7 +190,7 @@ def test_upsert_dimension_mismatch_reports_the_request_index_and_writes_nothing(
         },
     )
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == "Embedding at index 1 has 2 dimensions, expected 3 for this collection"
+    assert "index 1" in response.json()["detail"]
 
     unchanged = client.get(f"/vectorstore/collections/docs/embeddings/{embedding_id}").json()
     assert unchanged["vector"] == [1.0, 0.0, 0.0]

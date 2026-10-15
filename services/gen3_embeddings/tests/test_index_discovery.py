@@ -9,10 +9,18 @@ catalog holds something this module was not written to understand.
 """
 
 import asyncio
+import json
 
 import asyncpg
 import pytest
+from pgvector.asyncpg import register_vector
 
+from gen3_embeddings.database.db import DataAccessLayer
+from gen3_embeddings.database.helpers import (
+    CollectionSearchTarget,
+    build_multi_collection_search_sql,
+    build_search_sql,
+)
 from gen3_embeddings.database.index_discovery import (
     IndexStrategy,
     VectorIndex,
@@ -240,3 +248,162 @@ class TestDiscoverVectorIndexes:
                 await app_conn.close()
 
         assert asyncio.run(_run()) == ["idx_find_a_cos", "idx_find_a_dead", "idx_find_a_half"]
+
+
+# The two index shapes the index migration README documents, with the width and collection
+# left to fill in. Search has to match these as an operator would write them, not as our own
+# SQL builder would.
+README_INDEX_DDL = {
+    IndexStrategy.direct: (
+        "CREATE INDEX {name} ON embeddings_vector "
+        "USING hnsw ((embedding::vector({dimensions})) vector_cosine_ops) "
+        "WHERE collection_id = {collection_id}"
+    ),
+    IndexStrategy.binary: (
+        "CREATE INDEX {name} ON embeddings_vector "
+        "USING hnsw ((binary_quantize(embedding)::bit({dimensions})) bit_hamming_ops) "
+        "WHERE collection_id = {collection_id}"
+    ),
+}
+
+PLAN_DIMENSIONS = 3
+PLAN_QUERY = [1.0, 0.0, 0.0]
+PLAN_TOP_K = 5
+# The API's default metric, and the one whose reported value is not what the index orders by.
+PLAN_METRIC = DistanceMetric.cosine_similarity
+
+
+def plan_index_names(node: dict) -> set[str]:
+    """Every index a plan node or any node beneath it reads, CTEs and subqueries included."""
+    names = {node["Index Name"]} if "Index Name" in node else set()
+    for child in node.get("Plans", []):
+        names |= plan_index_names(child)
+    return names
+
+
+async def explain_search(test_database, strategy: IndexStrategy, shape: str) -> tuple[set[str], set[str]]:
+    """
+    Index one collection per arm the README's way, then EXPLAIN the search the service would run.
+
+    Discovery, `choose_index` and the rescore limit all come from the service's own code, so a
+    README index that discovery misreads fails here the same way it would in production.
+
+    Args:
+        test_database: The session database fixture.
+        strategy (IndexStrategy): Which README index to build.
+        shape (str): "single" for `build_search_sql`, "multi" for a two-arm
+            `build_multi_collection_search_sql`.
+
+    Returns:
+        tuple[set[str], set[str]]: The indexes built, and the indexes the plan reads.
+    """
+    admin = await asyncpg.connect(test_database["admin_dsn"])
+    try:
+        built: dict[int, str] = {}
+        for arm in range(1 if shape == "single" else 2):
+            collection_id = await admin.fetchval(
+                "INSERT INTO collections (collection_name, dimensions, vector_type) "
+                "VALUES ($1, $2, 'vector') RETURNING id",
+                f"plan_{strategy.value}_{shape}_{arm}",
+                PLAN_DIMENSIONS,
+            )
+            name = f"idx_plan_c{collection_id}_{strategy.value}"
+            await admin.execute(
+                README_INDEX_DDL[strategy].format(name=name, dimensions=PLAN_DIMENSIONS, collection_id=collection_id)
+            )
+            built[collection_id] = name
+    finally:
+        await admin.close()
+
+    pool = await asyncpg.create_pool(test_database["app_dsn"], min_size=1, max_size=1, init=register_vector)
+    try:
+        async with pool.acquire() as conn:
+            found = await discover_vector_indexes(conn)
+        dal = DataAccessLayer(pool, allowed_authz=["/plan"], vector_indexes=found)
+
+        # the same arguments `search_embeddings_in_collection` and
+        # `search_embeddings_across_collections` pass
+        targets = [
+            CollectionSearchTarget(
+                collection_id, dal._binary_rescore_limit(collection_id, PLAN_METRIC, PLAN_DIMENSIONS, PLAN_TOP_K)
+            )
+            for collection_id in built
+        ]
+        if shape == "single":
+            sql, extra = build_search_sql(
+                table="embeddings_vector",
+                distance_metric=PLAN_METRIC,
+                collection_id_param="$1::bigint",
+                vector_placeholder="$2",
+                top_k_param="$3::int",
+                filters=None,
+                min_value=None,
+                max_value=None,
+                vector_type=VectorType.vector,
+                dimensions=PLAN_DIMENSIONS,
+                binary_rescore_limit=targets[0].binary_rescore_limit,
+            )
+            params = [targets[0].collection_id, PLAN_QUERY, PLAN_TOP_K, *extra]
+        else:
+            sql, extra = build_multi_collection_search_sql(
+                table="embeddings_vector",
+                distance_metric=PLAN_METRIC,
+                targets=targets,
+                vector_placeholder="$1",
+                top_k_param="$2::int",
+                filters=None,
+                min_value=None,
+                max_value=None,
+                vector_type=VectorType.vector,
+                dimensions=PLAN_DIMENSIONS,
+            )
+            params = [PLAN_QUERY, PLAN_TOP_K, *extra]
+
+        # a binary target is the only kind with a rescore limit, so this is the strategy chosen
+        chosen = {IndexStrategy.binary if t.binary_rescore_limit else IndexStrategy.direct for t in targets}
+        assert chosen == {strategy}, f"discovery chose {chosen} for a README {strategy.value} index"
+
+        async def _explain(conn):
+            await conn.execute("SET LOCAL enable_seqscan = off")
+            await conn.execute("SET LOCAL enable_sort = off")
+            return await conn.fetchval(f"EXPLAIN (FORMAT JSON) {sql}", *params)
+
+        rescore_limits = [t.binary_rescore_limit for t in targets if t.binary_rescore_limit is not None]
+        plan = await dal._with_rls(_explain, ef_search=max(rescore_limits, default=None))
+    finally:
+        await pool.close()
+
+    return set(built.values()), plan_index_names(json.loads(plan)[0]["Plan"])
+
+
+class TestSearchSqlUsesTheIndex:
+    """
+    The emitted search SQL, judged by whether Postgres actually reads the index for it.
+
+    A query that stops matching its index is still valid SQL, so nothing errors: the plan just
+    becomes a scan. Only the planner can report that, which is why these EXPLAIN the statement
+    with its real parameters bound, under the same transaction settings `_with_rls` applies,
+    against an index built the way the README tells operators to build one.
+
+    On a table this small the planner prefers not to touch the vector index whether or not
+    the query matches it, so two settings take its alternatives away. `enable_seqscan` rules
+    out the scan; `enable_sort` rules out the next cheapest plan, which narrows to one
+    collection on the `(collection_id, content hash)` btree and sorts what it finds. That
+    leaves an ordered vector index scan as the only plan left, so the index shows up in the
+    plan exactly when the query can use it: drop the cast or change its width and the btree
+    plan comes back.
+    """
+
+    @pytest.mark.parametrize("shape", ["single", "multi"])
+    def test_a_direct_cosine_index_serves_the_search(self, test_database, shape):
+        """The ordering expression has to be the index's own cast and operator, with no wrapper."""
+        built, read = asyncio.run(explain_search(test_database, IndexStrategy.direct, shape))
+
+        assert built <= read, f"plan reads {read or 'no index'}, expected {built}"
+
+    @pytest.mark.parametrize("shape", ["single", "multi"])
+    def test_a_binary_index_serves_the_candidate_stage(self, test_database, shape):
+        """The Hamming ordering has to match `binary_quantize(embedding)::bit(n)` as the README builds it."""
+        built, read = asyncio.run(explain_search(test_database, IndexStrategy.binary, shape))
+
+        assert built <= read, f"plan reads {read or 'no index'}, expected {built}"

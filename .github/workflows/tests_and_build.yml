@@ -28,7 +28,7 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/pre_commit.yaml@master
     with:
       UV_VERSION: '0.13.1'
-      JUST_VERSION: '1.58.0'
+      JUST_VERSION: '1.59.0'
       # must be a real release TAG, not 'latest': the reusable workflow interpolates this
       # into .../releases/download/<TAG>/dbmate-linux-amd64, and there is no 'latest' tag
       DBMATE_VERSION: 'v2.35.0'
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.13.1'
-      JUST_VERSION: '1.58.0'
+      JUST_VERSION: '1.59.0'
       PYTHON_VERSION: '3.13'
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UV_VERSION: '0.13.1'
-      JUST_VERSION: '1.58.0'
+      JUST_VERSION: '1.59.0'
       PYTHON_VERSION: '3.13'
       PGHOST: 'localhost'
       PGPORT: 5432

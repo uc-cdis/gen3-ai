@@ -247,7 +247,8 @@ def multi_sql(**overrides) -> str:
 class TestBuildMultiCollectionSearchSql:
     """The cross-collection search statement, one UNION ALL arm per collection."""
 
-    def test_each_collection_becomes_its_own_arm(self):
+    @pytest.mark.parametrize("collection_id", [1, 2, 3])
+    def test_each_collection_becomes_its_own_arm(self, collection_id):
         """
         One arm per collection, because one arm is all a per-collection partial index can serve.
 
@@ -259,8 +260,7 @@ class TestBuildMultiCollectionSearchSql:
 
         assert sql.count("UNION ALL") == 2
         assert "ANY(" not in sql
-        for collection_id in (1, 2, 3):
-            assert f"WHERE collection_id = {collection_id} " in sql
+        assert f"WHERE collection_id = {collection_id} " in sql
 
     def test_the_collection_id_is_a_literal_not_a_placeholder(self):
         """

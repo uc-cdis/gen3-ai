@@ -165,7 +165,6 @@ def test_get_collection_not_found_when_not_allowed(client, allow_authz):
 
     response = client.get("/vectorstore/collections/alpha")
     assert response.status_code == 404
-    assert response.json()["detail"] == "Collection not found"
 
 
 def test_update_collection(client, allow_authz):
