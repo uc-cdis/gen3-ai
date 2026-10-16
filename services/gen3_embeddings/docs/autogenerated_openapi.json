@@ -4,7 +4,7 @@
     "title": "Gen3 Embeddings Service",
     "summary": "Store, read, and search vector embeddings, scoped to what the caller is authorized to see.",
     "description": "\nAn authorization-scoped vector store for Gen3.\n\nEmbeddings are grouped into **collections**. A collection fixes two things at creation that\ncannot be changed afterwards: the number of `dimensions` every vector in it must have, and the\n`vector_type` those vectors are stored at (`vector` for float32, `halfvec` for float16). Write\nembeddings with `POST`, replace them with `PUT`, and find the nearest ones with search.\n\nEvery request is authorized against a resource path. A collection's own path is\n`/vectorstore/collections/{collection_name}`, but embeddings may be stored under any path you\nhold the action on -- pass `authz` on write to choose one. Reads return only what your grants\ncover, so an empty result and \"not authorized\" are deliberately indistinguishable.\n\nVectors are returned as JSON float arrays by default. For large vectors, the bulk read\nendpoints return them base64-encoded instead, which is substantially cheaper to transfer.\n\nOnly pre-computed vectors are accepted today. Fields that take raw text are present in the\nschemas so text input can be added without a breaking change, but supplying text returns a 400.\n",
-    "version": "0.1.2"
+    "version": "1.0.0"
   },
   "paths": {
     "/vectorstore/collections/{collection_name}/embeddings/{embedding_uuid}": {
