@@ -66,7 +66,7 @@ So... lots of fun with `-` vs `_` across these technologies. What we basically l
 ## Traces
 
 `common/telemetry.py` is the only place a tracer provider is installed. Library
-instrumentation is automatic: incoming requests (FastAPI), outbound HTTP (httpx and
+instrumentation is automatic: incoming requests (FastAPI), outbound HTTP (httpx, httpx2 and
 requests), database queries (asyncpg), and log correlation. On top of that, a service can
 emit a span per call for its own functions - see
 [Tracing your own functions](#tracing-your-own-functions).

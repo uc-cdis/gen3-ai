@@ -119,7 +119,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT = starlette_config(
 # pair fails at export time, not at startup.
 OTEL_EXPORTER_OTLP_PROTOCOL = starlette_config("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf", cast=str)
 # Kill switch for the per-function spans that common/telemetry.py's `traced` and `instrument_*`
-# helpers add. Turning this on leaves the library instrumentation (FastAPI, asyncpg, httpx,
+# helpers add. Turning this on leaves the library instrumentation (FastAPI, asyncpg, httpx, httpx2,
 # requests, logging) running, so requests and queries are still traced with less detail.
 FORCE_DISABLE_CUSTOM_TRACING = starlette_config("FORCE_DISABLE_CUSTOM_TRACING", cast=bool, default=False)
 
