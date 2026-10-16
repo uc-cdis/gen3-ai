@@ -89,7 +89,7 @@ PGDATABASE={service}
 on schema `public`, so they connect as `DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead.
 Those default to `PGUSER`/`PGPASSWORD`.
 
-### Gen3 Embeddings Quickstart
+### Gen3 Embeddings DB Config
 
 `gen3_embeddings` needs them different postgres users: its tables use row level security, and it refuses to
 start as a role that can bypass it. Its `PGUSER` is a restricted role that `just db_load` and
@@ -106,8 +106,9 @@ DB_MIGRATION_USER=postgres
 DB_MIGRATION_PASSWORD=postgres
 ```
 
-You can also configure a **global config** which overrides common configuration
-in a `.env` in the root of the repo `cloned-gen3-ai-repo/.env`:
+### General Quickstart Continued
+
+You can also configure a **global config** which overrides common configuration in a `.env` in the root of the repo `cloned-gen3-ai-repo/.env`:
 
 ```bash
 # Common global config for *all* services in monorepo
