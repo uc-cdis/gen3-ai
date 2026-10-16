@@ -110,7 +110,7 @@ Set as environment variables, or in `services/gen3_embeddings/.env`. Defaults ar
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PGHOST`, `PGPORT`, `PGDATABASE` | `localhost`, `5432`, `gen3embeddings` | Database location. |
+| `PGHOST`, `PGPORT`, `PGDATABASE` | `localhost`, `5432`, `gen3_embeddings` | Database location. |
 | `PGUSER`, `PGPASSWORD` | `postgres`, none | The service role. |
 | `DB_CONNECTION_STRING` | built from the `PG*` variables | Overrides them all. |
 | `DB_MIGRATION_USER`, `DB_MIGRATION_PASSWORD` | `PGUSER`, `PGPASSWORD` | The migration role. Read by the `just db_*` recipes only. |

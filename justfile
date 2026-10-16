@@ -427,9 +427,9 @@ db_app_user SERVICE="gen3_embeddings": _check_dependencies
 
     service_name="{{SERVICE}}"
     set_postgres_defaults
-    if [[ -z ${DB_MIGRATION_USER:-} || ${DB_MIGRATION_USER} == "${PGUSER}" ]]; then
-        # PGUSER is the admin login, so use it to create a separate role for the service
-        DB_MIGRATION_USER="${PGUSER}"
+    if [[ -z ${DB_MIGRATION_USER:-} || ${DB_MIGRATION_USER} == "${PGUSER}" || -n ${PGUSER_DEFAULTED:-} ]]; then
+        # PGUSER is the admin login, or nobody chose one, so create a separate role for the service
+        DB_MIGRATION_USER="${DB_MIGRATION_USER:-${PGUSER}}"
         DB_MIGRATION_PASSWORD="${DB_MIGRATION_PASSWORD:-${PGPASSWORD:-}}"
         APP_USER="{{SERVICE}}_app"
         # The role name doubles as its password, so a rerun, which leaves an existing role

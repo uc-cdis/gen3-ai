@@ -108,7 +108,7 @@ PGUSER = starlette_config("PGUSER", default="postgres")
 PGPASSWORD = starlette_config("PGPASSWORD", cast=Secret, default=None)
 PGHOST = starlette_config("PGHOST", default="localhost")
 PGPORT = starlette_config("PGPORT", cast=int, default="5432")
-PGDATABASE = starlette_config("PGDATABASE", default="gen3embeddings")
+PGDATABASE = starlette_config("PGDATABASE", default="gen3_embeddings")
 
 PGPOOL_MIN_SIZE = starlette_config("PGPOOL_MIN_SIZE", cast=int, default="1")
 PGPOOL_MAX_SIZE = starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5")

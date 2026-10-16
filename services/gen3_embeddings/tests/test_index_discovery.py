@@ -466,14 +466,14 @@ class TestSearchSqlUsesTheIndex:
     """
 
     @pytest.mark.parametrize("shape", ["single", "multi"])
-    def test_a_direct_cosine_index_serves_the_search(self, test_database, shape):
+    def test_a_direct_cosine_index_serves_the_search(self, test_database, reset_db, shape):
         """The ordering expression has to be the index's own cast and operator, with no wrapper."""
         built, read = asyncio.run(explain_search(test_database, IndexStrategy.direct, shape))
 
         assert built <= read, f"plan reads {read or 'no index'}, expected {built}"
 
     @pytest.mark.parametrize("shape", ["single", "multi"])
-    def test_a_binary_index_serves_the_candidate_stage(self, test_database, shape):
+    def test_a_binary_index_serves_the_candidate_stage(self, test_database, reset_db, shape):
         """The Hamming ordering has to match `binary_quantize(embedding)::bit(n)` as the README builds it."""
         built, read = asyncio.run(explain_search(test_database, IndexStrategy.binary, shape))
 
