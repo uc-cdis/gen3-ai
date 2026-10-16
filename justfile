@@ -15,6 +15,11 @@ PARALLEL := "true"
 # TODO / FIXME: add it back here once it passes.
 TYPECHECK_SERVICES := "gen3_embeddings gen3_ai_model_repo"
 
+# Services with a database, which `just db_setup`, `db_load`, `db_migrate` and `db_rollback`
+# cover when no SERVICE is given. gen3_inference has none, and gen3_ai_model_repo has none yet
+# (it has no db/ folder), so running them for it would only create an empty database.
+DB_SERVICES := "gen3_embeddings"
+
 # Pinned to match avto-dev/markdown-lint@v1.5.0, which CI uses.
 MARKDOWNLINT_VERSION := "0.26.0"
 
@@ -264,12 +269,12 @@ db_load SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" load || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" load || failed="$failed $service"; done
             report_failed_targets "just db_load:" "$failed"
         fi
     else
@@ -285,12 +290,12 @@ db_migrate SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" migrate || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" migrate || failed="$failed $service"; done
             report_failed_targets "just db_migrate:" "$failed"
         fi
     else
@@ -316,12 +321,12 @@ db_rollback SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" down || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" down || failed="$failed $service"; done
             report_failed_targets "just db_rollback:" "$failed"
         fi
     else
@@ -360,12 +365,12 @@ db_setup SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {} || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {} || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just db_setup "$service" || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just db_setup "$service" || failed="$failed $service"; done
             report_failed_targets "just db_setup:" "$failed"
         fi
     else

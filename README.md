@@ -127,7 +127,7 @@ set as an env var.
 Once you have the above `.env`'s, you can:
 
 ```bash
-just s db_setup gen3_embeddings && just s db_load gen3_embeddings && just s db_seed gen3_embeddings
+just s db_setup && just s db_load && just s db_seed
 just install
 just test
 ```
