@@ -405,6 +405,62 @@ db_setup SERVICE="all": _check_dependencies
         fi
     fi
 
+# Create the restricted PGUSER role the service runs as and grant it access (db_load and db_migrate run this)
+[group('database')]
+db_app_user SERVICE="gen3_embeddings": _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+    DIR="services/{{SERVICE}}"
+    SQL_FILE="$DIR/db/app_user.sql"
+    if [ ! -f "$SQL_FILE" ]; then
+        echo -e "${RED}** ERROR: '$SQL_FILE' not found. {{SERVICE}} does not define an app user. **${RESET}"
+        exit 1
+    fi
+
+    print_header "just db_app_user:" "creating app user for" "{{SERVICE}}" "service..."
+    if [ -f "$DIR/.env" ]; then
+        set -a
+        source "$DIR/.env"
+        set +a
+    fi
+
+    service_name="{{SERVICE}}"
+    set_postgres_defaults
+    set_postgres_admin_defaults
+    if [[ -z ${PGPASSWORD:-} ]]; then
+        echo -e "${RED}** ERROR: PGPASSWORD is not set. It is the password '${PGUSER}' is created with. **${RESET}"
+        exit 1
+    fi
+
+    # PGPASSWORD is the app role's password; psql authenticates as the migration role
+    APP_PASSWORD="$PGPASSWORD"
+    PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -X -q -v ON_ERROR_STOP=1 \
+        -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -d "${PGDATABASE}" \
+        -v app_user="${PGUSER}" -v app_password="${APP_PASSWORD}" \
+        -f "$SQL_FILE"
+    echo -e "${GREEN}Role '${PGUSER}' is ready for '${PGDATABASE}'.${RESET}"
+
+# Load test collections and embeddings through the service's own data access layer, as PGUSER
+[group('database')]
+db_seed SERVICE="gen3_embeddings" *ARGS: _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+    DIR="services/{{SERVICE}}"
+    if [ ! -f "$DIR/db/seed.py" ]; then
+        echo -e "${RED}** ERROR: '$DIR/db/seed.py' not found. {{SERVICE}} has no seed data. **${RESET}"
+        exit 1
+    fi
+
+    print_header "just db_seed:" "seeding" "{{SERVICE}}" "service..."
+    if [ -f "$DIR/.env" ]; then
+        set -a
+        source "$DIR/.env"
+        set +a
+    fi
+    uv run --directory "$DIR" python db/seed.py {{ARGS}}
+
 # Generate OpenAPI specification and build API docs (`just openapi true` opens the result)
 [group('extra helpers')]
 openapi OPEN="false":
@@ -789,6 +845,11 @@ _run_dbmate SERVICE ACTION ARGS="" KIND="schema":
             dbmate -u "$CONN_STR" "${DBMATE_FLAGS[@]}" --wait status
         fi
         echo -e "${GREEN}dbmate {{ACTION}} finished.${RESET}"
+
+        # the grants name the tables, so this has to wait until the schema exists
+        if [[ "{{KIND}}" = "schema" && ( "{{ACTION}}" = "load" || "{{ACTION}}" = "migrate" ) && -f "${DIR}/db/app_user.sql" ]]; then
+            just db_app_user "{{SERVICE}}"
+        fi
     elif [ "{{KIND}}" = "index" ]; then
         echo -e "${RED}** ERROR: index migrations directory '$MIGRATIONS_DIR' does not exist **${RESET}"
         exit 1

@@ -45,7 +45,7 @@ See the [API documentation](https://uc-cdis.github.io/gen3-ai/api.html) or the [
   - Single Dockerfile with arg `SERVICE` for building different services for a containerized orchestration environment like Kubernetes
 * `justfile`
   - Simplified setup, building, running
-  - `just setup`, `just db_setup`, `just db_load`, `just install`, `just test`, `just lint`, `just run gen3_embeddings`, `just build`
+  - `just setup`, `just db_setup`, `just db_load`, `just db_seed`, `just install`, `just test`, `just lint`, `just run gen3_embeddings`, `just build`
   - For all commands and descriptions, simply run `just` in this repo
 
 Services (and libraries) have folder structure:
@@ -84,13 +84,22 @@ PGPASSWORD=postgres
 PGDATABASE={service}
 ```
 
-`PGUSER` is the role the service itself connects as. `just db_setup` and `just db_migrate`
-run migrations, which needs `CREATEDB` and `CREATE` on schema `public`, so they use
-`DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead. Those default to `PGUSER`/`PGPASSWORD`
-and only need to be set when the service runs as a restricted role - `gen3_embeddings`
-does, because its tables use row level security and it refuses to start as a superuser:
+`PGUSER` is the role the service itself connects as. `just db_setup`, `just db_load` and
+`just db_migrate` create the database and run migrations, which needs `CREATEDB` and `CREATE`
+on schema `public`, so they connect as `DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead.
+Those default to `PGUSER`/`PGPASSWORD`.
+
+`gen3_embeddings` needs them to differ: its tables use row level security, and it refuses to
+start as a role that can bypass it. Its `PGUSER` is a restricted role that `just db_load` and
+`just db_migrate` create with `PGPASSWORD` (see `just db_app_user`), so any name and password
+will do:
 
 ```bash
+PGHOST=localhost
+PGPORT=5432
+PGUSER=gen3_embeddings_app
+PGPASSWORD=gen3_embeddings_app
+PGDATABASE=gen3_embeddings
 DB_MIGRATION_USER=postgres
 DB_MIGRATION_PASSWORD=postgres
 ```
@@ -116,11 +125,12 @@ set as an env var.
 Once you have the above `.env`'s, you can:
 
 ```bash
-just db_setup
-just db_load
+just db_setup && just db_load && just db_seed gen3_embeddings
 just install
 just test
 ```
+
+`just db_seed gen3_embeddings` loads test collections and embeddings for local development.
 
 > TIP: `just {{command}}` commands run in parallel for the services by default, which can make the output hard to debug.
 > if you want a colorized and more readable output (at the expense of speed), you can force sequential

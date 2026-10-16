@@ -40,6 +40,10 @@ os.environ.setdefault("DEBUG_SKIP_AUTH", "True")
 # reading and writing whichever directory their shell points at.
 os.environ["PROMETHEUS_MULTIPROC_DIR"] = tempfile.mkdtemp(prefix="gen3-embeddings-metrics-")
 
+# The metrics tests need metrics on, whatever a local .env says. Assigned, because an
+# environment variable takes precedence over the .env file.
+os.environ["ENABLE_METRICS"] = "true"
+
 # Building the app installs a span exporter by default. Left on, every test pays for repeated retries
 # against a collector that is not there.
 os.environ["ENABLE_OPENTELEMETRY_TRACES"] = "false"
@@ -86,6 +90,16 @@ def _pg_port() -> str:
     return os.environ.get("TEST_PGPORT") or os.environ.get("PGPORT") or "5432"
 
 
+def _admin_user() -> str:
+    """Resolve the Postgres admin user for tests, preferring TEST_PGADMIN_USER, then PGUSER, then postgres."""
+    return os.environ.get("TEST_PGADMIN_USER") or os.environ.get("PGUSER") or "postgres"
+
+
+def _admin_password() -> str:
+    """Resolve the admin user's password, preferring TEST_PGADMIN_PASSWORD, then PGPASSWORD, then postgres."""
+    return os.environ.get("TEST_PGADMIN_PASSWORD") or os.environ.get("PGPASSWORD") or "postgres"
+
+
 def _admin_dsn(db_name: str = "postgres") -> str:
     """
     Build a DSN for connecting to `db_name` as the Postgres admin user.
@@ -93,9 +107,7 @@ def _admin_dsn(db_name: str = "postgres") -> str:
     The admin user must be a superuser: the test setup creates databases and roles, and
     the migrations create the `vector` extension.
     """
-    user = os.environ.get("TEST_PGADMIN_USER") or os.environ.get("PGUSER") or "postgres"
-    password = os.environ.get("TEST_PGADMIN_PASSWORD") or os.environ.get("PGPASSWORD") or "postgres"
-    return f"postgresql://{user}:{password}@{_pg_host()}:{_pg_port()}/{db_name}"
+    return f"postgresql://{_admin_user()}:{_admin_password()}@{_pg_host()}:{_pg_port()}/{db_name}"
 
 
 def _app_dsn(user: str, password: str, db_name: str) -> str:
@@ -129,39 +141,9 @@ async def test_database():
 
     admin_conn = await asyncpg.connect(_admin_dsn("postgres"))
     try:
-        # create database if not exist
-        exists = await admin_conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1",
-            db_name,
-        )
-        if not exists:
-            await admin_conn.execute(f"CREATE DATABASE {_quote_ident(db_name)}")
-
-        user_exists = await admin_conn.fetchval(
-            "SELECT 1 FROM pg_user WHERE usename = $1",
-            app_user,
-        )
-        if not user_exists:
-            await admin_conn.execute(f"CREATE USER {_quote_ident(app_user)} WITH PASSWORD '{app_password}'")
-
-        await admin_conn.execute(
-            f"GRANT ALL PRIVILEGES ON DATABASE {_quote_ident(db_name)} TO {_quote_ident(app_user)}"
-        )
-        await admin_conn.execute(f"ALTER ROLE {_quote_ident(app_user)} WITH LOGIN")
+        await admin_conn.execute(f"CREATE DATABASE {_quote_ident(db_name)}")
     finally:
         await admin_conn.close()
-
-    admin_db_conn = await asyncpg.connect(_admin_dsn(db_name))
-    try:
-        # mimic Helm create service user behavior
-        await admin_db_conn.execute(f"ALTER SCHEMA public OWNER TO {_quote_ident(app_user)}")
-        await admin_db_conn.execute(f"GRANT ALL ON SCHEMA public TO {_quote_ident(app_user)}")
-        await admin_db_conn.execute(f"GRANT ALL ON ALL TABLES IN SCHEMA public TO {_quote_ident(app_user)}")
-        await admin_db_conn.execute(
-            f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {_quote_ident(app_user)}"
-        )
-    finally:
-        await admin_db_conn.close()
 
     root_dir = Path(__file__).resolve().parents[1]
     migrations_dir = root_dir / "db/migrations"
@@ -175,6 +157,36 @@ async def test_database():
         check=True,
         cwd=root_dir,
         env=dbmate_env,
+    )
+
+    # The same role and grants `just db_app_user` gives a real deployment, so the suite runs
+    # with no more privilege than the service does.
+    psql_env = os.environ.copy()
+    psql_env["PGPASSWORD"] = _admin_password()
+    subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-q",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-h",
+            _pg_host(),
+            "-p",
+            _pg_port(),
+            "-U",
+            _admin_user(),
+            "-d",
+            db_name,
+            "-v",
+            f"app_user={app_user}",
+            "-v",
+            f"app_password={app_password}",
+            "-f",
+            str(root_dir / "db/app_user.sql"),
+        ],
+        check=True,
+        env=psql_env,
     )
 
     yield {
@@ -208,8 +220,12 @@ async def test_database():
 
 @pytest_asyncio.fixture
 async def reset_db(test_database):
-    """Truncate all tables between tests so each test starts from an empty database."""
-    conn = await asyncpg.connect(test_database["app_dsn"])
+    """
+    Truncate all tables between tests so each test starts from an empty database.
+
+    As the admin, because the app role has no TRUNCATE.
+    """
+    conn = await asyncpg.connect(test_database["admin_dsn"])
     try:
         await conn.execute("TRUNCATE TABLE embeddings_vector, embeddings_halfvec, collections CASCADE")
     finally:
