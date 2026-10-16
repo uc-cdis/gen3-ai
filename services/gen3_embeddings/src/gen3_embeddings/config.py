@@ -120,6 +120,10 @@ PGPOOL_MAX_SIZE = starlette_config("PGPOOL_MAX_SIZE", cast=int, default="5")
 # of 40 is tuned for an unfiltered search, and every search here is filtered by RLS.
 HNSW_EF_SEARCH = starlette_config("HNSW_EF_SEARCH", cast=int, default=100)
 
+# The largest `hnsw.ef_search` pgvector accepts. Setting anything above it is an error, so every
+# value this service sets is clamped to it. Fixed by pgvector, not configurable.
+HNSW_MAX_EF_SEARCH = 1_000
+
 # Without this, an HNSW scan returns `ef_search` candidates once and the RLS and metadata
 # filters cut them down, so a search silently returns fewer hits than `top_k`. Requires
 # pgvector >= 0.8. Set to "off" to disable iterative scans.
@@ -135,6 +139,10 @@ DB_STATEMENT_TIMEOUT_MS = starlette_config("DB_STATEMENT_TIMEOUT_MS", cast=int, 
 # distance, then re-rank them by the exact metric. These bound that candidate pool. Too few and
 # the true nearest neighbours were never in it for the re-rank to find; too many and every
 # query detoasts that many full vectors.
+#
+# A pool larger than HNSW_MAX_EF_SEARCH is filled by an iterative scan. With
+# HNSW_ITERATIVE_SCAN=off, the index returns at most HNSW_MAX_EF_SEARCH candidates, so the pool is
+# that large at most.
 BINARY_RESCORE_MULTIPLIER = starlette_config("BINARY_RESCORE_MULTIPLIER", cast=int, default=20)
 BINARY_RESCORE_MIN = starlette_config("BINARY_RESCORE_MIN", cast=int, default=100)
 BINARY_RESCORE_MAX = starlette_config("BINARY_RESCORE_MAX", cast=int, default=2_000)

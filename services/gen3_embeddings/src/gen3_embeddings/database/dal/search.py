@@ -208,6 +208,7 @@ class SearchMixin(DataAccessLayerBase):
             return rows
 
         # One setting covers every arm, so it has to clear the widest pool any of them asks
-        # for; a smaller value would silently truncate that arm's candidates.
+        # for; with iterative scans off, a smaller value would silently truncate that arm's
+        # candidates.
         rescore_limits = [t.binary_rescore_limit for t in targets if t.binary_rescore_limit is not None]
         return await self._with_rls(_query, ef_search=max(rescore_limits, default=None))

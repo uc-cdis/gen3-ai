@@ -158,10 +158,11 @@ class DataAccessLayerBase:
         Args:
             fn: Coroutine function taking an open connection as its first argument.
             *args: Passed through to `fn`.
-            ef_search: Raise `hnsw.ef_search` to at least this for the transaction, and do not
-                pass it on to `fn`. Searches that rescore a pool of binary-quantized candidates
-                set it to the pool size, since an HNSW scan never returns more candidates than
-                `ef_search` and would otherwise truncate the pool without saying so.
+            ef_search: Raise `hnsw.ef_search` to at least this for the transaction, up to
+                `HNSW_MAX_EF_SEARCH`, and do not pass it on to `fn`. Searches that rescore a
+                pool of binary-quantized candidates set it to the pool size. A pool wider than
+                the cap is still filled when iterative scans are on, which keep scanning past
+                `ef_search` until the LIMIT is met.
             **kwargs: Passed through to `fn`.
 
         Returns:
@@ -187,10 +188,11 @@ class DataAccessLayerBase:
                     """,
                     self.allowed_authz,
                     list(self.allowed_collection_names),
-                    # An HNSW scan will not return more than `ef_search` candidates, so a
-                    # binary rescore pool wider than it is silently truncated: ask for 200 and
-                    # get 40. Raise it to cover the pool whenever one is in play.
-                    str(max(config.HNSW_EF_SEARCH, ef_search or 0)),
+                    # With iterative scans off, an HNSW scan returns at most `ef_search`
+                    # candidates, so a binary rescore pool wider than it is silently truncated:
+                    # ask for 200 and get 40. Raise it to cover the pool whenever one is in play,
+                    # but never past what pgvector accepts, or the whole transaction fails.
+                    str(min(max(config.HNSW_EF_SEARCH, ef_search or 0), config.HNSW_MAX_EF_SEARCH)),
                     config.HNSW_ITERATIVE_SCAN,
                     f"{config.DB_STATEMENT_TIMEOUT_MS}ms",
                 )

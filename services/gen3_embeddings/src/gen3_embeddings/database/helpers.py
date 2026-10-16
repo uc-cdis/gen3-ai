@@ -116,8 +116,8 @@ def build_search_sql(
         dimensions (int): Dimensionality the collection declares, used in the cast.
         binary_rescore_limit (int | None): How many candidates to pull from a binary-quantized
             index before re-ranking them exactly. None emits the direct form instead. Must be
-            >= `top_k`, and the caller must raise `hnsw.ef_search` to at least this value or
-            the index returns fewer candidates than asked for, silently.
+            >= `top_k`. With iterative scans off, the caller must raise `hnsw.ef_search` to at
+            least this value or the index returns fewer candidates than asked for, silently.
 
     Returns:
         tuple[str, list[Any]]: The SQL, and the parameters that follow the first three.

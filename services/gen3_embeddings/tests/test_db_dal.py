@@ -1507,7 +1507,7 @@ class TestSearch:
     @pytest.mark.asyncio
     async def test_ef_search_is_raised_to_cover_the_rescore_pool(self):
         """
-        An HNSW scan returns at most `ef_search` candidates, so the pool must not exceed it.
+        With iterative scans off, an HNSW scan returns at most `ef_search` candidates.
 
         Leaving `ef_search` at its configured default would cap a 200-candidate rescore at 40 with
         nothing reported -- the caller still gets rows, just drawn from a fifth of the intended
@@ -1529,6 +1529,42 @@ class TestSearch:
         expected = max(10 * config.BINARY_RESCORE_MULTIPLIER, config.BINARY_RESCORE_MIN)
         assert int(ef_search) == expected
         assert f"LIMIT {expected}" in normalized(conn.sql)
+
+    @pytest.mark.asyncio
+    async def test_ef_search_stops_at_the_pgvector_maximum_but_the_pool_does_not(self):
+        """
+        At MAX_TOP_K the pool is wider than any `ef_search` pgvector accepts.
+
+        Setting the pool size itself would fail the transaction, so `ef_search` stops at the
+        maximum while the candidate LIMIT keeps the full pool, which an iterative scan fills.
+        test_binary_rescore_pool.py checks the same search against a real index.
+        """
+        dal, conn, _ = make_dal(results=[[embedding_row()]], vector_indexes=_binary_index())
+
+        await dal.search_embeddings_in_collection(
+            make_collection(id=1),
+            [1.0, 0.0, 0.0],
+            top_k=config.MAX_TOP_K,
+            min_value=None,
+            max_value=None,
+            distance_metric=DistanceMetric.cosine_similarity,
+            filters=None,
+        )
+
+        _authz, _names, ef_search, _iterative, _timeout = conn.rls_context
+        assert int(ef_search) == config.HNSW_MAX_EF_SEARCH
+        assert f"LIMIT {config.BINARY_RESCORE_MAX}" in normalized(conn.sql)
+
+    @pytest.mark.asyncio
+    async def test_a_configured_ef_search_above_the_pgvector_maximum_is_capped(self, monkeypatch):
+        """An HNSW_EF_SEARCH pgvector would reject is sent as the maximum instead of failing every query."""
+        monkeypatch.setattr(config, "HNSW_EF_SEARCH", config.HNSW_MAX_EF_SEARCH + 1)
+        dal, conn, _ = make_dal(results=[[collection_row()]])
+
+        await dal.get_collection_by_name("docs")
+
+        _authz, _names, ef_search, _iterative, _timeout = conn.rls_context
+        assert int(ef_search) == config.HNSW_MAX_EF_SEARCH
 
     @pytest.mark.asyncio
     async def test_the_rescore_pool_is_clamped_at_both_ends(self):
