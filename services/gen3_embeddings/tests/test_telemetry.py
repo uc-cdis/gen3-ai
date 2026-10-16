@@ -15,8 +15,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from common import config, telemetry
 from gen3_embeddings.database.db import DataAccessLayer
 from gen3_embeddings.main import get_app
+from gen3_embeddings.models.schemas import DistanceMetric
 
 TRACED_ROUTE = "/vectorstore/collections/a-specific-collection"
+# A method the route does not serve, so routing answers 405 without reaching the database pool,
+# which only exists once the lifespan has run.
+UNSERVED_METHOD = "PUT"
 # Set by the Pyroscope span processor, and what Grafana reads to offer a profile for a span.
 PROFILE_ID_ATTRIBUTE = "pyroscope.profile.id"
 
@@ -111,21 +115,20 @@ def names(spans: InMemorySpanExporter) -> list[str]:
 
 def test_served_request_produces_a_span(traced_app: TestClient, spans: InMemorySpanExporter) -> None:
     """A request through the traced app records a span for the request itself."""
-    traced_app.patch(TRACED_ROUTE)
+    traced_app.request(UNSERVED_METHOD, TRACED_ROUTE)
 
     assert names(spans)
 
 
 def test_data_access_layer_calls_are_traced(traced_app: TestClient, spans: InMemorySpanExporter) -> None:
     """Building the app leaves the data access layer emitting a span per call."""
-    # The one data access call reachable without a database: it reads allowed_authz and
-    # never touches the pool.
-    layer = DataAccessLayer(pool=cast(Pool, None), allowed_authz=[TRACED_ROUTE])
-    layer._get_allowed_collection_names_from_allowed_authz()
+    # A data access call reachable without a database: it reads the discovered indexes and
+    # config, and never touches the pool. It is defined on a mixin, which is where the span
+    # name comes from.
+    layer = DataAccessLayer(pool=cast(Pool, None))
+    layer._binary_rescore_limit(1, "embeddings_vector", DistanceMetric.cosine_distance, 3, 5)
 
-    assert "gen3_embeddings.database.db.DataAccessLayer._get_allowed_collection_names_from_allowed_authz" in names(
-        spans
-    )
+    assert "gen3_embeddings.database.dal.search.SearchMixin._binary_rescore_limit" in names(spans)
 
 
 def test_spans_link_to_profiles_only_when_profiling_is_active(
@@ -139,7 +142,7 @@ def test_spans_link_to_profiles_only_when_profiling_is_active(
 
     unprofiled = TestClient(get_app())
     exporter.clear()
-    unprofiled.patch(TRACED_ROUTE)
+    unprofiled.request(UNSERVED_METHOD, TRACED_ROUTE)
 
     assert all(PROFILE_ID_ATTRIBUTE not in (span.attributes or {}) for span in exporter.get_finished_spans())
 
@@ -150,7 +153,7 @@ def test_spans_link_to_profiles_only_when_profiling_is_active(
 
     profiled = TestClient(get_app())
     exporter.clear()
-    profiled.patch(TRACED_ROUTE)
+    profiled.request(UNSERVED_METHOD, TRACED_ROUTE)
 
     assert any(PROFILE_ID_ATTRIBUTE in (span.attributes or {}) for span in exporter.get_finished_spans())
 
@@ -166,6 +169,6 @@ def test_kill_switch_leaves_request_tracing_alone(
     client = TestClient(get_app())
     exporter.clear()
 
-    client.patch(TRACED_ROUTE)
+    client.request(UNSERVED_METHOD, TRACED_ROUTE)
 
     assert names(exporter)

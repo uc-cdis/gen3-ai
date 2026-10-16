@@ -113,6 +113,25 @@ jobs:
       PGPORT: 5432
       PGUSER: 'postgres'
 
+    # A pgvector-enabled Postgres (not plain postgres) because the gen3_embeddings
+    # migrations run `CREATE EXTENSION IF NOT EXISTS vector`. The test fixtures also
+    # create/drop databases and roles, so they connect as the postgres superuser.
+    # NOTE: this is a Bitnami image, so it takes POSTGRESQL_* env vars, not POSTGRES_*.
+    services:
+      postgres:
+        image: quay.io/cdis/docker-bitnami-pgvector:16
+        env:
+          # not a credential: trust auth for a throwaway CI container, so there is no
+          # password to commit. detect-secrets flags any key containing "PASSWORD".
+          ALLOW_EMPTY_PASSWORD: 'yes'  # pragma: allowlist secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Check out code
         uses: actions/checkout@v6
