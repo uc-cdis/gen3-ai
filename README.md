@@ -89,7 +89,9 @@ PGDATABASE={service}
 on schema `public`, so they connect as `DB_MIGRATION_USER`/`DB_MIGRATION_PASSWORD` instead.
 Those default to `PGUSER`/`PGPASSWORD`.
 
-`gen3_embeddings` needs them to differ: its tables use row level security, and it refuses to
+### Gen3 Embeddings Quickstart
+
+`gen3_embeddings` needs them different postgres users: its tables use row level security, and it refuses to
 start as a role that can bypass it. Its `PGUSER` is a restricted role that `just db_load` and
 `just db_migrate` create with `PGPASSWORD` (see `just db_app_user`), so any name and password
 will do:
@@ -125,12 +127,10 @@ set as an env var.
 Once you have the above `.env`'s, you can:
 
 ```bash
-just db_setup && just db_load && just db_seed gen3_embeddings
+just s db_setup && just s db_load && just s db_seed
 just install
 just test
 ```
-
-`just db_seed gen3_embeddings` loads test collections and embeddings for local development.
 
 > TIP: `just {{command}}` commands run in parallel for the services by default, which can make the output hard to debug.
 > if you want a colorized and more readable output (at the expense of speed), you can force sequential

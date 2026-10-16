@@ -65,6 +65,10 @@ users:
     policies: [gen3-embeddings-public]
 ```
 
+## Quickstart
+
+See [Quickstart in the root README](../../README.md#quickstart-running-locally)!
+
 ## Database
 
 The service needs PostgreSQL with pgvector 0.8 or later, and two roles:
@@ -82,15 +86,6 @@ idempotent and runs as the migration role:
 
 ```bash
 psql -v ON_ERROR_STOP=1 -v app_user="$PGUSER" -v app_password="$PGPASSWORD" -f db/app_user.sql
-```
-
-From the repository root:
-
-```bash
-just db_setup gen3_embeddings     # create the database, owned by DB_MIGRATION_USER
-just db_load gen3_embeddings      # load db/schema.sql into an empty database
-just db_migrate gen3_embeddings   # or: apply pending migrations from db/migrations
-just db_app_user gen3_embeddings  # create PGUSER and grant it access (db_load and db_migrate run this)
 ```
 
 Schema migrations live in [db/migrations](db/migrations) and follow an expand/contract pattern,
@@ -138,33 +133,24 @@ Start a pgvector-enabled Postgres:
 docker run --name pgvector -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d pgvector/pgvector:pg18-trixie
 ```
 
-Create `services/gen3_embeddings/.env`. `PGUSER` is the service role, which
-`just db_app_user` creates, so pick any name and password for it:
+Create `services/gen3_embeddings/.env` (see [Quickstart in the root README](../../README.md#quickstart-running-locally)).
+
+You can additionally add more config to your .env such as:
 
 ```bash
-PGHOST=localhost
-PGPORT=5432
-PGDATABASE=gen3_embeddings
-PGUSER=gen3_embeddings_app
-PGPASSWORD=gen3_embeddings_app
-DB_MIGRATION_USER=postgres
-DB_MIGRATION_PASSWORD=postgres
-
 ARBORIST_URL=http://localhost:4280
 
 ENABLE_OPENTELEMETRY_TRACES=False
 ENABLE_METRICS=False
 ```
 
-Then, from the repository root, set up the database, load the test collections, and start the
-service:
+Then start the service:
 
 ```bash
-just db_setup gen3_embeddings && just db_load gen3_embeddings && just db_seed gen3_embeddings
 just run gen3_embeddings
 ```
 
-`just db_seed` writes seven test collections (`public`, `internal`, `noaccess`, `d3vector`,
+Note: `just db_seed` from [Gen3 Embeddings Quickstart](../../README.md#gen3-embeddings-quickstart) writes seven test collections (`public`, `internal`, `noaccess`, `d3vector`,
 `d200vector`, `d3halfvec`, `d3000halfvec`) through the service's own data access layer as
 `PGUSER`. Collections that already exist are skipped; `just db_seed gen3_embeddings --reset`
 reloads them. The list and sizes are in [db/seed.py](db/seed.py).
@@ -213,11 +199,7 @@ curl -X POST "$BASE/vectorstore/search?collections=public,d3vector" \
 ## Tests
 
 ```bash
-# from the repo root; this is what CI runs
 just test gen3_embeddings
-
-# or from this directory
-uv run pytest -n auto . -vv
 ```
 
 The tests create and drop their own database and roles, so they connect as a Postgres
@@ -230,8 +212,8 @@ whether the tests passed: the last two lines of the output tell the two apart. T
 running a subset, which would otherwise fail the gate:
 
 ```bash
-uv run pytest tests/test_db_dal.py -q --no-cov
+just test gen3_embeddings tests/test_db_dal.py --no-cov
 
 # a browsable line-by-line report in htmlcov/
-uv run pytest -n auto . --cov-report=html
+just test gen3_embeddings --cov-report=html
 ```

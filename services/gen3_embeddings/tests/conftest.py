@@ -30,9 +30,9 @@ load_dotenv(Path(__file__).parent / ".env")
 # deployment.
 #
 # It is set here, above any import that pulls in `common.config`, so the suite does not depend
-# on a git-ignored `.env` that CI does not have. `setdefault` leaves a deliberate override in
-# place.
-os.environ.setdefault("DEBUG_SKIP_AUTH", "True")
+# on a git-ignored `.env` that CI does not have. DEBUG_SKIP_AUTH=False there would fail every test
+# that fakes authz with a 401.
+os.environ["DEBUG_SKIP_AUTH"] = "True"
 
 # prometheus_client selects its multiprocess value class when it is first imported, so this has
 # to happen before any test module imports the app. Without it the client falls back to

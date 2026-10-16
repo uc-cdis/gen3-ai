@@ -229,7 +229,7 @@ snyk SERVICE="all": _check_dependencies
 
 # Run unit tests for service(s)
 [group('basic')]
-test SERVICE="all": _check_dependencies
+test SERVICE="all" *ARGS: _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
@@ -252,7 +252,7 @@ test SERVICE="all": _check_dependencies
         if [ ! -d "$TARGET" ] && [ -d "services/{{SERVICE}}" ]; then TARGET="services/{{SERVICE}}"; fi
 
         print_header "just test:" "testing" "$TARGET" "..."
-        cd "$TARGET" && uv run pytest --color=yes -n auto . -vv
+        cd "$TARGET" && uv run pytest --color=yes -n auto -vv {{ARGS}}
     fi
 
 # Load empty database with latest version of schema
@@ -427,19 +427,42 @@ db_app_user SERVICE="gen3_embeddings": _check_dependencies
 
     service_name="{{SERVICE}}"
     set_postgres_defaults
-    set_postgres_admin_defaults
-    if [[ -z ${PGPASSWORD:-} ]]; then
-        echo -e "${RED}** ERROR: PGPASSWORD is not set. It is the password '${PGUSER}' is created with. **${RESET}"
-        exit 1
+    if [[ -z ${DB_MIGRATION_USER:-} || ${DB_MIGRATION_USER} == "${PGUSER}" ]]; then
+        # PGUSER is the admin login, so use it to create a separate role for the service
+        DB_MIGRATION_USER="${PGUSER}"
+        DB_MIGRATION_PASSWORD="${DB_MIGRATION_PASSWORD:-${PGPASSWORD:-}}"
+        APP_USER="{{SERVICE}}_app"
+        # The role name doubles as its password, so a rerun, which leaves an existing role
+        # as it is, prints a password that still works
+        APP_PASSWORD="${APP_USER}"
+        NEEDS_ENV_UPDATE=1
+    else
+        set_postgres_admin_defaults
+        if [[ -z ${PGPASSWORD:-} ]]; then
+            echo -e "${RED}** ERROR: PGPASSWORD is not set. It is the password '${PGUSER}' is created with. **${RESET}"
+            exit 1
+        fi
+        APP_USER="${PGUSER}"
+        APP_PASSWORD="${PGPASSWORD}"
+        NEEDS_ENV_UPDATE=
     fi
 
-    # PGPASSWORD is the app role's password; psql authenticates as the migration role
-    APP_PASSWORD="$PGPASSWORD"
+    # psql authenticates as the migration role and creates APP_USER with APP_PASSWORD
     PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -X -q -v ON_ERROR_STOP=1 \
         -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -d "${PGDATABASE}" \
-        -v app_user="${PGUSER}" -v app_password="${APP_PASSWORD}" \
+        -v app_user="${APP_USER}" -v app_password="${APP_PASSWORD}" \
         -f "$SQL_FILE"
-    echo -e "${GREEN}Role '${PGUSER}' is ready for '${PGDATABASE}'.${RESET}"
+    echo -e "${GREEN}Role '${APP_USER}' is ready for '${PGDATABASE}'.${RESET}"
+
+    # Exits nonzero so `just db_load` stops here: the service and `just db_seed` both connect
+    # as PGUSER, which still names the admin login until .env changes
+    if [[ -n ${NEEDS_ENV_UPDATE} ]]; then
+        echo -e "${YELLOW}The service cannot run as '${DB_MIGRATION_USER}'. Set these in $DIR/.env:${RESET}"
+        printf 'PGDATABASE=%s\nPGUSER=%s\nPGPASSWORD=%s\nDB_MIGRATION_USER=%s\nDB_MIGRATION_PASSWORD=%s\n' \
+            "${PGDATABASE}" "${APP_USER}" "${APP_PASSWORD}" "${DB_MIGRATION_USER}" "${DB_MIGRATION_PASSWORD}"
+        echo -e "${YELLOW}then run: just db_seed {{SERVICE}}${RESET}"
+        exit 1
+    fi
 
 # Load test collections and embeddings through the service's own data access layer, as PGUSER
 [group('database')]
