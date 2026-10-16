@@ -2,9 +2,85 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+from gen3_embeddings.config import (
+    MAX_AUTHZ_LENGTH,
+    MAX_COLLECTION_NAME_LENGTH,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_EMBEDDINGS_PER_REQUEST,
+    MAX_SEARCH_FILTER_KEY_LENGTH,
+    MAX_SEARCH_FILTER_VALUE_LENGTH,
+    MAX_SEARCH_FILTERS,
+    MAX_TEXT_CHUNKS,
+    MAX_TEXT_INPUT_LENGTH,
+    MAX_TOP_K,
+    MAX_VECTOR_DIMENSIONS,
+    MIN_VECTOR_DIMENSIONS,
+)
+from gen3_embeddings.limits import validate_metadata
+
+# Bounded aliases below are for the caller-supplied fields whose cost to this service scales with
+# their size. They are declared once here so every request schema that accepts one gets the
+# same ceiling, and so the OpenAPI document advertises the limits instead of leaving callers
+# to discover them by getting a 422.
+#
+# These are a denial-of-service control: see the request limits block in `config` for the
+# reasoning behind each number, and `limits` for the byte ceiling that backs them all up.
+
+VectorComponent = Annotated[float, Field(allow_inf_nan=False)]
+"""One element of a vector. pgvector rejects NaN and infinity, so refuse them at the edge."""
+
+Vector = Annotated[
+    list[VectorComponent],
+    Field(min_length=MIN_VECTOR_DIMENSIONS, max_length=MAX_VECTOR_DIMENSIONS),
+]
+"""A vector of floats, bounded independently of any collection's `dimensions`."""
+
+TextChunks = Annotated[
+    list[Annotated[str, Field(max_length=MAX_TEXT_INPUT_LENGTH)]],
+    Field(max_length=MAX_TEXT_CHUNKS),
+]
+"""Raw text to be embedded. Not implemented yet, but still bounded."""
+
+CollectionNameField = Annotated[str, Field(min_length=1, max_length=MAX_COLLECTION_NAME_LENGTH)]
+"""A collection name in a request body. Path parameters are bounded in `params`."""
+
+DescriptionField = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
+"""Free text stored on a collection."""
+
+AuthzField = Annotated[str, Field(max_length=MAX_AUTHZ_LENGTH)]
+"""
+An authz resource path, checked against the policy engine and stored on the row.
+
+Any resource path the caller holds the relevant action on, not just a collection's own
+`/vectorstore/collections/{name}`. Length is the only constraint the service imposes; the
+policy engine decides whether the path means anything.
+"""
+
+Metadata = Annotated[dict, AfterValidator(validate_metadata)]
+"""Embedding metadata, bounded by serialized size, top-level key count, and nesting depth."""
+
+SearchFilters = Annotated[
+    dict[
+        Annotated[str, Field(max_length=MAX_SEARCH_FILTER_KEY_LENGTH)],
+        Annotated[str, Field(max_length=MAX_SEARCH_FILTER_VALUE_LENGTH)],
+    ],
+    Field(max_length=MAX_SEARCH_FILTERS),
+]
+"""Metadata equality filters. Each one adds a WHERE clause and two parameters to the query."""
+
+Dimensions = Annotated[int, Field(ge=MIN_VECTOR_DIMENSIONS, le=MAX_VECTOR_DIMENSIONS)]
+"""A collection's vector width, which every embedding written to it is checked against."""
+
+TopK = Annotated[int, Field(ge=1, le=MAX_TOP_K)]
+"""Number of search hits to return. Becomes a SQL LIMIT over rows that each hold a vector."""
+
+MetricBound = Annotated[float, Field(allow_inf_nan=False)]
+"""A min/max threshold on a distance metric, compared in SQL."""
 
 
 class VectorPrecision(StrEnum):
@@ -52,168 +128,280 @@ class DistanceMetric(StrEnum):
     cosine_similarity = "cosine_similarity"
 
 
-class CollectionModel(BaseModel):
+class ApiModel(BaseModel):
+    """
+    Base for every API schema.
+
+    A field's attribute docstring becomes its description in the OpenAPI document, so a field
+    only needs `Field()` for constraints, an alias, or examples.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+
+class CollectionModel(ApiModel):
     """
     API schema representing a collection.
     """
 
-    collection_id: int = Field(..., alias="id")
+    collection_id: Annotated[int, Field(alias="id")]
+    """Numeric identifier for the collection."""
+
     collection_name: str
+    """The collection's normalized, lower-cased name."""
+
     description: str | None = None
+    """Free-text description supplied when the collection was created."""
+
     dimensions: int
+    """Number of components in every vector in this collection. Fixed at creation."""
+
     vector_type: VectorType
+    """Storage precision for this collection's vectors: `vector` stores float32, `halfvec` stores float16. Fixed at creation."""
+
     created_at: datetime | None = None
+    """When the collection was created."""
+
     updated_at: datetime | None = None
+    """When the collection's metadata last changed."""
+
     self: str | None = None
+    """URL of this collection."""
+
     available_embeddings_count: int | None = None
+    """How many embeddings in this collection you can read. Only present when the request asked for `counts`."""
 
 
-class PaginatedCollectionsResponse(BaseModel):
+class PaginatedCollectionsResponse(ApiModel):
     """A page of collections the caller is authorized to see."""
 
     collections: list[CollectionModel]
+    """The collections on this page."""
+
     page: int
+    """The page number that was returned, counting from 1."""
+
     page_size: int
+    """The page size that was applied."""
+
     next_page: int | None = None
+    """Page number to request for more results, or absent when this is the last page."""
+
     prev_page: int | None = None
+    """Page number of the previous page, or absent when this is the first page."""
 
 
-class EmbeddingInfo(BaseModel):
+class EmbeddingInfo(ApiModel):
     """Metadata about an embedding, omitted from responses when `exclude_info` is set."""
 
     collection_id: int
+    """Identifier of the collection holding this embedding."""
+
     authz: str
+    """Authorization resource path this embedding is stored under."""
+
     metadata: dict | None = None
+    """The arbitrary JSON metadata stored with this embedding."""
+
     self: str
+    """URL of this embedding."""
 
 
-class SingleEmbeddingResult(BaseModel):
+class SingleEmbeddingResult(ApiModel):
     """One embedding returned as a JSON array of floats."""
 
-    vector: list[float]  # TODO: try to switch to Vector / HalfVector
+    vector: list[float]
+    """The embedding, as a JSON array of floats. Values are read back at the collection's storage precision, so they may differ slightly from what was written."""
+
     input_index: int | None = None
+    """Zero-based position of the item in the request that produced this result, for lining results up with the order you sent. Absent on reads that had no input list."""
+
     embedding_id: UUID
+    """Identifier for this embedding."""
+
     info: EmbeddingInfo | None = None
-
-    # this is to support Vector / HalfVector
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """Where this embedding lives and what is stored with it. Absent when `exclude_info` is set."""
 
 
-class SingleEmbeddingResultBinary(BaseModel):
+class SingleEmbeddingResultBinary(ApiModel):
     """
     One embedding returned as base64-encoded raw bytes.
 
     Cheaper than the JSON float array for large vectors. Decode according to `precision`.
     """
 
-    vector_base64: bytes
-    precision: VectorPrecision
-    input_index: int | None = None
-    embedding_id: UUID
-    info: EmbeddingInfo | None = None
-
     model_config = ConfigDict(ser_json_bytes="base64")
 
+    vector_base64: bytes
+    """The embedding as base64-encoded raw float bytes. Decode the base64, then read it as a little-endian array of floats of the width given by `precision`. The number of dimensions is the decoded byte length divided by that width."""
 
-class EmbeddingResponseWithCollections(BaseModel):
+    precision: VectorPrecision
+    """Width of each little-endian float in `vector_base64`: `float32` is 4 bytes, `float16` is 2. This is the collection's storage precision, not a conversion."""
+
+    input_index: int | None = None
+    """Zero-based position of the requested UUID that produced this result. Absent when the request carried no input list."""
+
+    embedding_id: UUID
+    """Identifier for this embedding."""
+
+    info: EmbeddingInfo | None = None
+    """Where this embedding lives and what is stored with it. Absent when `exclude_info` is set."""
+
+
+class EmbeddingResponseWithCollections(ApiModel):
     """Embeddings plus the collections they came from, for cross-collection reads."""
 
     embeddings: list[SingleEmbeddingResult]
+    """The embeddings that were found."""
+
     collections: list[CollectionModel] | None = None
+    """Metadata for every collection represented in `embeddings`, so each result can be traced back."""
 
 
-class EmbeddingResponseBinaryWithCollections(BaseModel):
+class EmbeddingResponseBinaryWithCollections(ApiModel):
     """Binary embeddings plus the collections they came from, for cross-collection reads."""
 
     embeddings: list[SingleEmbeddingResultBinary]
+    """The embeddings that were found."""
+
     collections: list[CollectionModel] | None = None
+    """Metadata for every collection represented in `embeddings`, so each result can be traced back."""
 
 
-class EmbeddingResponse(BaseModel):
+class EmbeddingResponse(ApiModel):
     """Embeddings from a single, already-known collection."""
 
     embeddings: list[SingleEmbeddingResult]
+    """The embeddings, in the same order as the request that produced them."""
 
 
-class EmbeddingResponseBinary(BaseModel):
+class EmbeddingResponseBinary(ApiModel):
     """Binary embeddings from a single, already-known collection."""
 
     embeddings: list[SingleEmbeddingResultBinary]
+    """The embeddings that were found."""
+
     count: int
+    """How many embeddings are in `embeddings`. May be fewer than the number of UUIDs you asked for, since ones that do not resolve are omitted."""
 
 
-class PaginatedEmbeddingResponse(BaseModel):
+class PaginatedEmbeddingResponse(ApiModel):
     """A page of embeddings from one collection."""
 
     embeddings: list[SingleEmbeddingResult]
+    """The embeddings on this page."""
+
     page: int
+    """The page number that was returned, counting from 1."""
+
     page_size: int
+    """The page size that was applied."""
+
     next_page: int | None = None
+    """Page number to request for more results, or absent when this is the last page."""
+
     prev_page: int | None = None
+    """Page number of the previous page, or absent when this is the first page."""
 
 
-class SearchRequestBody(BaseModel):
+class SearchRequestBody(ApiModel):
     """
     Request body for vector search operations.
     """
 
-    input: str | list[float]
-    top_k: int = 10
-    min_value: float | None = None
-    max_value: float | None = None
+    input: Annotated[str, Field(max_length=MAX_TEXT_INPUT_LENGTH)] | Vector
+    """The query vector, as an array of floats with the same number of dimensions as the collections being searched. A string is accepted by the schema so that text queries can be added later, but supplying one returns a 400 today."""
+
+    top_k: TopK = 10
+    """Maximum number of hits to return."""
+
+    min_value: MetricBound | None = None
+    """Keep only hits whose `value` is greater than or equal to this. With a distance metric that means dropping hits that are too close; with `cosine_similarity` it means dropping hits that are not similar enough."""
+
+    max_value: MetricBound | None = None
+    """Keep only hits whose `value` is less than or equal to this. With a distance metric that is the usual way to require a minimum closeness."""
+
     distance_metric: DistanceMetric = DistanceMetric.cosine_similarity
-    filters: dict[str, str] | None = None
+    """How to score and order hits. All of these are distances, where smaller is closer, except `cosine_similarity`, where larger is closer."""
+
+    filters: Annotated[SearchFilters | None, Field(examples=[{"source": "some_file.md"}])] = None
+    """Restrict the search to embeddings whose metadata matches every one of these key/value pairs exactly. Values are compared as strings."""
 
 
-class SingleSearchResult(BaseModel):
+class SingleSearchResult(ApiModel):
     """
     Search result for a single hit.
     """
 
     id: UUID
+    """Identifier of the matching embedding."""
+
     distance_metric: DistanceMetric
-    # distance or similarity depending on metric
+    """The metric `value` was computed with."""
+
     value: float
+    """This hit's score under `distance_metric`. Smaller is closer for every metric except `cosine_similarity`, where larger is closer."""
+
     embedding: dict
+    """The matching embedding itself, in the same shape as a read result."""
 
 
-class SearchResponse(BaseModel):
+class SearchResponse(ApiModel):
     """Ranked search hits, with the collections they were found in."""
 
     embeddings: list[SingleSearchResult]
+    """The hits, nearest first."""
+
     collections: list[CollectionModel] | None = None
+    """Metadata for the collections these hits came from."""
 
 
-class CreateCollectionBody(BaseModel):
+class CreateCollectionBody(ApiModel):
     """
     Request body for creating a new Collection.
     """
 
-    collection_name: str
-    description: str | None = None
-    dimensions: int
+    collection_name: Annotated[CollectionNameField, Field(examples=["my-documents"])]
+    """Name for the new collection. Lower-cased before it is stored, and limited to lowercase letters, digits, hyphen, and underscore."""
+
+    description: DescriptionField | None = None
+    """Optional free-text description."""
+
+    dimensions: Annotated[Dimensions, Field(examples=[1536])]
+    """Number of components every vector in this collection will have. Enforced on every write and cannot be changed later, so it must match the model you embed with."""
+
     vector_type: VectorType = VectorType.vector
+    """Storage precision for this collection. `vector` stores float32; `halfvec` stores float16, which halves the storage at the cost of precision. Cannot be changed later."""
 
 
-class UpdateCollectionBody(BaseModel):
+class UpdateCollectionBody(ApiModel):
     """
     Request body for updating mutable properties of a Collection.
     """
 
-    description: str | None = None
+    description: DescriptionField | None = None
+    """Replacement free-text description for the collection."""
 
 
-class UpdateEmbeddingBody(BaseModel):
+class UpdateEmbeddingBody(ApiModel):
     """
     Request body for updating an embedding.
+
+    Every field is optional and only supplied ones are written. Setting `authz` moves the
+    embedding to a different resource path, which you must hold `update` on.
     """
 
-    embedding: list[float] | None = None
-    metadata: dict | None = None
-    authz: str | None = None
+    embedding: Vector | None = None
+    """Replacement vector, which must match the collection's `dimensions`. Omit to leave the vector as it is."""
+
+    metadata: Annotated[Metadata | None, Field(examples=[{"source": "some_file.md", "chunk_size": "1000"}])] = None
+    """Replacement metadata. Omit to leave the existing metadata as it is."""
+
+    authz: Annotated[AuthzField | None, Field(examples=["/programs/my_program/projects/my_project"])] = None
+    """Move the embedding to a different authorization resource path. You must hold `update` on the path you name. Omit to leave it where it is."""
 
 
-class EmbeddingToCreate(BaseModel):
+class EmbeddingToCreate(ApiModel):
     """
     Data for creating a single embedding in a collection.
 
@@ -225,12 +413,8 @@ class EmbeddingToCreate(BaseModel):
     service for text → embedding.
     """
 
-    embedding: list[float] | list[str]
-    metadata: dict | None = None
-    embedding_id: UUID | None = None
-
-    model_config = {
-        "json_schema_extra": {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "embedding": [0.1, 0.2, 0.3],
                 "metadata": {
@@ -240,14 +424,39 @@ class EmbeddingToCreate(BaseModel):
                 "embedding_id": "00000000-0000-0000-0000-000000000000",
             }
         }
-    }
+    )
+
+    embedding: Vector | TextChunks
+    """The vector to store, as an array of floats matching the collection's `dimensions`. An array of strings is accepted by the schema so that text input can be added later, but supplying one returns a 400 today."""
+
+    metadata: Metadata | None = None
+    """Arbitrary JSON stored alongside the vector and returned with it. Searchable via `filters`."""
+
+    embedding_id: UUID | None = None
+    """On `PUT`, the id of an existing embedding to replace; an id that does not exist is rejected rather than created. Ignored on `POST`, where ids are always assigned by the service."""
 
 
-class CreateEmbeddingsBody(BaseModel):
+class CreateEmbeddingsBody(ApiModel):
     """
     Data for creating embeddings in a collection.
-    authz example: "authz": "/vectorstore/collections/my_collection"
+
+    `authz` is applied to every embedding in the request, and may be any resource path you
+    hold the action on -- e.g. "/programs/my_program/projects/my_project" or
+    "/vectorstore/collections/my_collection". It defaults to the collection's own path when
+    omitted, and a later PUT can change it.
     """
 
-    authz: str | None = None
-    embeddings: list[EmbeddingToCreate]
+    authz: Annotated[AuthzField | None, Field(examples=["/programs/my_program/projects/my_project"])] = None
+    """Authorization resource path to store every embedding in this request under. You must hold the request's action on it. Defaults to the collection's own path, `/vectorstore/collections/{collection_name}`."""
+
+    embeddings: Annotated[
+        list[EmbeddingToCreate],
+        Field(
+            min_length=1,
+            max_length=MAX_EMBEDDINGS_PER_REQUEST,
+            description=(
+                "The embeddings to write. Results come back in this same order, each tagged with "
+                f"its `input_index`. At most {MAX_EMBEDDINGS_PER_REQUEST} per request."
+            ),
+        ),
+    ]

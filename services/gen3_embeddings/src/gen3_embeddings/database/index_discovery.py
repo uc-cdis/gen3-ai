@@ -1,0 +1,262 @@
+"""
+Ask Postgres which vector indexes exist, so search can emit SQL that one of them can serve.
+
+The `embedding` columns carry no dimension (`VECTOR`, not `VECTOR(n)`), because one table
+holds every collection and collections differ in dimensionality. pgvector cannot index a
+dimensionless column, so the only indexable form is a partial expression index per
+collection, and the query has to reproduce that expression *exactly* or the plan silently
+falls back to a sequential scan. Which expression to emit therefore depends on which index
+is actually there.
+
+Nothing else in the service knows that. Index creation is deliberately an operator action --
+a script or a migration, never defined from a request -- so the app cannot learn it as a side
+effect of having built one. Reading `pg_index` is the one source that cannot drift: a column
+on `collections` recording "this one is binary quantized" stays behind when someone drops the
+index, and the app then emits binary-quantized SQL against no such index, which is a full
+scan of the whole collection rather than a millisecond lookup.
+
+Requires no privileges beyond connecting: Postgres grants SELECT on these catalogs to PUBLIC,
+and `pg_get_expr` performs no table-level check. A role holding nothing but LOGIN and USAGE on
+the schema is sufficient.
+"""
+
+import re
+from dataclasses import dataclass
+from enum import StrEnum
+
+import asyncpg
+
+from gen3_embeddings.config import logging
+from gen3_embeddings.database.helpers import get_embeddings_table_and_cast
+from gen3_embeddings.models.schemas import DistanceMetric, VectorType
+
+# Only the simple predicate the index scripts and documented migrations produce. A predicate
+# this does not match (`collection_id IN (...)`, an extra AND term) is left undiscovered, so
+# search falls back to the unindexed query -- slow but correct, which is the right way to fail.
+_PREDICATE = re.compile(r"^\(collection_id = (\d+)\)$")
+
+# Exactly the expressions search emits, as `pg_get_expr` renders them.
+_DIRECT_EXPRESSION = re.compile(r"^\(embedding\)::(?P<type>vector|halfvec)\((?P<dimensions>\d+)\)$")
+_BINARY_EXPRESSION = re.compile(r"^\(binary_quantize\(embedding\)\)::bit\((?P<dimensions>\d+)\)$")
+
+# opclass -> the metric it can order by. A direct index serves ONLY its own metric; pgvector
+# will not answer an l2 ordering from a cosine index.
+_OPCLASS_METRIC: dict[str, DistanceMetric] = {
+    "vector_cosine_ops": DistanceMetric.cosine_distance,
+    "vector_l2_ops": DistanceMetric.l2_distance,
+    "vector_ip_ops": DistanceMetric.inner_product,
+    "vector_l1_ops": DistanceMetric.l1_distance,
+    "halfvec_cosine_ops": DistanceMetric.cosine_distance,
+    "halfvec_l2_ops": DistanceMetric.l2_distance,
+    "halfvec_ip_ops": DistanceMetric.inner_product,
+    "halfvec_l1_ops": DistanceMetric.l1_distance,
+}
+
+# Hamming distance over binary_quantize(). Unlike the direct opclasses this one is not tied to
+# a metric: it only selects candidates, and the rescore step then ranks them by whatever
+# metric the caller asked for. So one of these serves every metric.
+_BINARY_OPCLASS = "bit_hamming_ops"
+
+DISCOVERY_SQL = """
+    SELECT i.relname                           AS index_name,
+           t.relname                           AS table_name,
+           opc.opcname                         AS opclass,
+           pg_get_expr(x.indexprs, x.indrelid) AS expression,
+           pg_get_expr(x.indpred, x.indrelid)  AS predicate
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_class t ON t.oid = x.indrelid
+    JOIN pg_am am ON am.oid = i.relam
+    JOIN pg_opclass opc ON opc.oid = x.indclass[0]
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = ANY($1::text[])
+      AND am.amname = 'hnsw'
+      -- a failed CREATE INDEX CONCURRENTLY leaves an INVALID index behind, which Postgres
+      -- will not use; treating one as usable would mean emitting SQL nothing can serve
+      AND x.indisvalid
+      AND x.indpred IS NOT NULL
+      AND x.indexprs IS NOT NULL
+"""
+
+# Every vector index scoped to one collection, by the same predicate `_PREDICATE` matches.
+# Unlike DISCOVERY_SQL this keeps INVALID indexes and any indexed expression: it answers
+# "what is left to drop", not "what can search use".
+COLLECTION_INDEX_NAMES_SQL = """
+    SELECT i.relname AS index_name
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_class t ON t.oid = x.indrelid
+    JOIN pg_am am ON am.oid = i.relam
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = ANY($1::text[])
+      AND am.amname = 'hnsw'
+      AND pg_get_expr(x.indpred, x.indrelid) = format('(collection_id = %s)', $2::bigint)
+    ORDER BY i.relname
+"""
+
+
+class IndexStrategy(StrEnum):
+    """Which SQL shape a collection's index can answer."""
+
+    # ORDER BY embedding::TYPE(n) <op> $q
+    direct = "direct"
+    # ORDER BY binary_quantize(embedding)::bit(n) <~> binary_quantize($q), then rescore exactly
+    binary = "binary"
+
+
+@dataclass(frozen=True)
+class VectorIndex:
+    """One usable per-collection vector index, as found in the catalog."""
+
+    index_name: str
+    table: str
+    collection_id: int
+    strategy: IndexStrategy
+    dimensions: int
+    # None for a binary index, which is not tied to a metric
+    metric: DistanceMetric | None
+    # None for a binary index, whose indexed expression is a bit string
+    vector_type: VectorType | None
+
+
+def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
+    """
+    Turn one catalog row into a `VectorIndex`, or None if it is not a shape search can use.
+
+    Args:
+        table (str): Table the index belongs to.
+        row (asyncpg.Record): A row of `DISCOVERY_SQL`.
+
+    Returns:
+        VectorIndex | None: The parsed index, or None to leave it undiscovered.
+    """
+    opclass = row["opclass"]
+    if opclass == _BINARY_OPCLASS:
+        strategy, metric = IndexStrategy.binary, None
+        expression_shape = _BINARY_EXPRESSION
+    elif opclass in _OPCLASS_METRIC:
+        strategy, metric = IndexStrategy.direct, _OPCLASS_METRIC[opclass]
+        expression_shape = _DIRECT_EXPRESSION
+    else:
+        logging.warning(f"Ignoring vector index {row['index_name']}: unsupported opclass {opclass}")
+        return None
+
+    predicate = _PREDICATE.match((row["predicate"] or "").strip())
+    expression = expression_shape.match((row["expression"] or "").strip())
+    vector_type = VectorType(expression["type"]) if expression and strategy is IndexStrategy.direct else None
+    # search casts to the type its table stores, so a `halfvec` index on `embeddings_vector`
+    # is one it never emits
+    if vector_type is not None and get_embeddings_table_and_cast(vector_type)[0] != table:
+        expression = None
+    if not predicate or not expression:
+        logging.warning(
+            f"Ignoring vector index {row['index_name']} on {table}: predicate {row['predicate']!r} / "
+            f"expression {row['expression']!r} is not a shape search emits"
+        )
+        return None
+
+    return VectorIndex(
+        index_name=row["index_name"],
+        table=table,
+        collection_id=int(predicate.group(1)),
+        strategy=strategy,
+        dimensions=int(expression["dimensions"]),
+        metric=metric,
+        vector_type=vector_type,
+    )
+
+
+TABLES = tuple(get_embeddings_table_and_cast(vector_type)[0] for vector_type in VectorType)
+
+
+async def discover_vector_indexes(conn: asyncpg.Connection) -> dict[int, list[VectorIndex]]:
+    """
+    Read every usable per-collection vector index, keyed by collection id.
+
+    Args:
+        conn (asyncpg.Connection): Any open connection; no special privileges are needed.
+
+    Returns:
+        dict[int, list[VectorIndex]]: Indexes per collection. A collection absent from the map
+        has none, and search must fall back to the unindexed query.
+    """
+    rows = await conn.fetch(DISCOVERY_SQL, list(TABLES))
+
+    by_collection: dict[int, list[VectorIndex]] = {}
+    for row in rows:
+        found = _parse(row["table_name"], row)
+        if found is None:
+            continue
+        by_collection.setdefault(found.collection_id, []).append(found)
+
+    logging.info(
+        f"Discovered {sum(len(v) for v in by_collection.values())} usable vector index(es) "
+        f"across {len(by_collection)} collection(s)"
+    )
+    return by_collection
+
+
+async def find_collection_index_names(conn: asyncpg.Connection, collection_id: int) -> list[str]:
+    """
+    List every vector index scoped to one collection, including ones search cannot use.
+
+    This reads the catalog live rather than the map `discover_vector_indexes` built at startup.
+    That map leaves out INVALID indexes and shapes search does not emit, and misses anything
+    built since. All of those take up space, and any that Postgres still maintains (an INVALID
+    index is, if its build got far enough) is read by vacuum like any other, so a list of what
+    is left to drop has to include them.
+
+    Args:
+        conn (asyncpg.Connection): Any open connection; no special privileges are needed.
+        collection_id (int): The collection whose indexes to list.
+
+    Returns:
+        list[str]: Index names, sorted. Empty if the collection has no vector index.
+    """
+    rows = await conn.fetch(COLLECTION_INDEX_NAMES_SQL, list(TABLES), collection_id)
+    return [row["index_name"] for row in rows]
+
+
+def choose_index(
+    indexes: list[VectorIndex] | None,
+    table: str,
+    metric: DistanceMetric,
+    dimensions: int,
+) -> VectorIndex | None:
+    """
+    Pick the index search should target for this metric, or None to emit the unindexed query.
+
+    A direct index is preferred when one matches: it needs no rescore step and loses no
+    precision. A binary index is the fallback, and it can serve any metric because it only
+    selects candidates -- the rescore ranks them by the requested metric exactly.
+
+    `cosine_similarity` is served by a cosine *distance* index: search orders by the bare
+    distance ascending and reports `1 - distance`, so the two share an ordering.
+
+    Only an index on the table search reads is considered. The catalog keys an index by the
+    `collection_id` in its predicate, not by where that collection's rows live, so one built on
+    the other table matches nothing search emits.
+
+    Args:
+        indexes (list[VectorIndex] | None): Candidates for this collection.
+        table (str): Table the collection's rows live in, which search reads.
+        metric (DistanceMetric): Metric the caller asked for.
+        dimensions (int): Dimensionality the collection declares.
+
+    Returns:
+        VectorIndex | None: The index to target, or None if none can serve this query.
+    """
+    if not indexes:
+        return None
+
+    wanted = DistanceMetric.cosine_distance if metric == DistanceMetric.cosine_similarity else metric
+
+    usable = [index for index in indexes if index.table == table and index.dimensions == dimensions]
+    direct = [index for index in usable if index.strategy is IndexStrategy.direct and index.metric == wanted]
+    if direct:
+        return direct[0]
+
+    binary = [index for index in usable if index.strategy is IndexStrategy.binary]
+    return binary[0] if binary else None

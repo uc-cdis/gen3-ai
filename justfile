@@ -15,6 +15,11 @@ PARALLEL := "true"
 # TODO / FIXME: add it back here once it passes.
 TYPECHECK_SERVICES := "gen3_embeddings gen3_ai_model_repo"
 
+# Services with a database, which `just db_setup`, `db_load`, `db_migrate` and `db_rollback`
+# cover when no SERVICE is given. gen3_inference has none, and gen3_ai_model_repo has none yet
+# (it has no db/ folder), so running them for it would only create an empty database.
+DB_SERVICES := "gen3_embeddings"
+
 # Pinned to match avto-dev/markdown-lint@v1.5.0, which CI uses.
 MARKDOWNLINT_VERSION := "0.26.0"
 
@@ -229,7 +234,7 @@ snyk SERVICE="all": _check_dependencies
 
 # Run unit tests for service(s)
 [group('basic')]
-test SERVICE="all": _check_dependencies
+test SERVICE="all" *ARGS: _check_dependencies
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{SERVICE}}" = "all" ]; then
@@ -252,7 +257,7 @@ test SERVICE="all": _check_dependencies
         if [ ! -d "$TARGET" ] && [ -d "services/{{SERVICE}}" ]; then TARGET="services/{{SERVICE}}"; fi
 
         print_header "just test:" "testing" "$TARGET" "..."
-        cd "$TARGET" && uv run pytest --color=yes -n auto . -vv
+        cd "$TARGET" && uv run pytest --color=yes -n auto -vv {{ARGS}}
     fi
 
 # Load empty database with latest version of schema
@@ -264,12 +269,12 @@ db_load SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} load || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" load || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" load || failed="$failed $service"; done
             report_failed_targets "just db_load:" "$failed"
         fi
     else
@@ -285,12 +290,12 @@ db_migrate SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} migrate || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" migrate || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" migrate || failed="$failed $service"; done
             report_failed_targets "just db_migrate:" "$failed"
         fi
     else
@@ -316,17 +321,40 @@ db_rollback SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just _run_dbmate {} down || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just _run_dbmate "$service" down || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just _run_dbmate "$service" down || failed="$failed $service"; done
             report_failed_targets "just db_rollback:" "$failed"
         fi
     else
         just _run_dbmate "{{SERVICE}}" down
     fi
+
+# Create a new operator-owned index migration (see services/gen3_embeddings/db/index_migrations/README.md)
+[group('database')]
+db_index_new MIGRATION_NAME SERVICE="gen3_embeddings": _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    RAW_NAME="{{MIGRATION_NAME}}"
+    just _run_dbmate "{{SERVICE}}" new "${RAW_NAME// /_}" index
+
+# Apply pending operator-owned index migrations, then restart the service so it discovers them
+[group('database')]
+db_index_migrate SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" migrate "" index
+
+# Roll back the most recent operator-owned index migration
+[group('database')]
+db_index_rollback SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" down "" index
+
+# List applied and pending operator-owned index migrations
+[group('database')]
+db_index_status SERVICE="gen3_embeddings": _check_dependencies
+    just _run_dbmate "{{SERVICE}}" status "" index
 
 # Create databases based on configuration - does NOT migrate
 [group('database')]
@@ -337,12 +365,12 @@ db_setup SERVICE="all": _check_dependencies
         source scripts/.justfile_helpers.bash
         if [[ "{{PARALLEL}}" = "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
             STATUS=0
-            echo "{{SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {} || STATUS=1
+            echo "{{DB_SERVICES}}" | tr ' ' '\n' | xargs -P 0 -I {} just db_setup {} || STATUS=1
             just _warn
             exit "$STATUS"
         else
             failed=""
-            for service in {{SERVICES}}; do just db_setup "$service" || failed="$failed $service"; done
+            for service in {{DB_SERVICES}}; do just db_setup "$service" || failed="$failed $service"; done
             report_failed_targets "just db_setup:" "$failed"
         fi
     else
@@ -381,6 +409,85 @@ db_setup SERVICE="all": _check_dependencies
             exit 1
         fi
     fi
+
+# Create the restricted PGUSER role the service runs as and grant it access (db_load and db_migrate run this)
+[group('database')]
+db_app_user SERVICE="gen3_embeddings": _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+    DIR="services/{{SERVICE}}"
+    SQL_FILE="$DIR/db/app_user.sql"
+    if [ ! -f "$SQL_FILE" ]; then
+        echo -e "${RED}** ERROR: '$SQL_FILE' not found. {{SERVICE}} does not define an app user. **${RESET}"
+        exit 1
+    fi
+
+    print_header "just db_app_user:" "creating app user for" "{{SERVICE}}" "service..."
+    if [ -f "$DIR/.env" ]; then
+        set -a
+        source "$DIR/.env"
+        set +a
+    fi
+
+    service_name="{{SERVICE}}"
+    set_postgres_defaults
+    if [[ -z ${DB_MIGRATION_USER:-} || ${DB_MIGRATION_USER} == "${PGUSER}" || -n ${PGUSER_DEFAULTED:-} ]]; then
+        # PGUSER is the admin login, or nobody chose one, so create a separate role for the service
+        DB_MIGRATION_USER="${DB_MIGRATION_USER:-${PGUSER}}"
+        DB_MIGRATION_PASSWORD="${DB_MIGRATION_PASSWORD:-${PGPASSWORD:-}}"
+        APP_USER="{{SERVICE}}_app"
+        # The role name doubles as its password, so a rerun, which leaves an existing role
+        # as it is, prints a password that still works
+        APP_PASSWORD="${APP_USER}"
+        NEEDS_ENV_UPDATE=1
+    else
+        set_postgres_admin_defaults
+        if [[ -z ${PGPASSWORD:-} ]]; then
+            echo -e "${RED}** ERROR: PGPASSWORD is not set. It is the password '${PGUSER}' is created with. **${RESET}"
+            exit 1
+        fi
+        APP_USER="${PGUSER}"
+        APP_PASSWORD="${PGPASSWORD}"
+        NEEDS_ENV_UPDATE=
+    fi
+
+    # psql authenticates as the migration role and creates APP_USER with APP_PASSWORD
+    PGPASSWORD="${DB_MIGRATION_PASSWORD}" psql -X -q -v ON_ERROR_STOP=1 \
+        -h "${PGHOST}" -p "${PGPORT}" -U "${DB_MIGRATION_USER}" -d "${PGDATABASE}" \
+        -v app_user="${APP_USER}" -v app_password="${APP_PASSWORD}" \
+        -f "$SQL_FILE"
+    echo -e "${GREEN}Role '${APP_USER}' is ready for '${PGDATABASE}'.${RESET}"
+
+    # Exits nonzero so `just db_load` stops here: the service and `just db_seed` both connect
+    # as PGUSER, which still names the admin login until .env changes
+    if [[ -n ${NEEDS_ENV_UPDATE} ]]; then
+        echo -e "${YELLOW}The service cannot run as '${DB_MIGRATION_USER}'. Set these in $DIR/.env:${RESET}"
+        printf 'PGDATABASE=%s\nPGUSER=%s\nPGPASSWORD=%s\nDB_MIGRATION_USER=%s\nDB_MIGRATION_PASSWORD=%s\n' \
+            "${PGDATABASE}" "${APP_USER}" "${APP_PASSWORD}" "${DB_MIGRATION_USER}" "${DB_MIGRATION_PASSWORD}"
+        echo -e "${YELLOW}then run: just db_seed {{SERVICE}}${RESET}"
+        exit 1
+    fi
+
+# Load test collections and embeddings through the service's own data access layer, as PGUSER
+[group('database')]
+db_seed SERVICE="gen3_embeddings" *ARGS: _check_dependencies
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/.justfile_helpers.bash
+    DIR="services/{{SERVICE}}"
+    if [ ! -f "$DIR/db/seed.py" ]; then
+        echo -e "${RED}** ERROR: '$DIR/db/seed.py' not found. {{SERVICE}} has no seed data. **${RESET}"
+        exit 1
+    fi
+
+    print_header "just db_seed:" "seeding" "{{SERVICE}}" "service..."
+    if [ -f "$DIR/.env" ]; then
+        set -a
+        source "$DIR/.env"
+        set +a
+    fi
+    uv run --directory "$DIR" python db/seed.py {{ARGS}}
 
 # Generate OpenAPI specification and build API docs (`just openapi true` opens the result)
 [group('extra helpers')]
@@ -718,7 +825,7 @@ _generate_openapi SERVICE:
     print_header "just openapi:" "generating spec for" "{{SERVICE}}" "service..."
     uv run --directory "$DIR" python generate_openapi.py
 
-_run_dbmate SERVICE ACTION ARGS="":
+_run_dbmate SERVICE ACTION ARGS="" KIND="schema":
     #!/usr/bin/env bash
     set -euo pipefail
     source scripts/.justfile_helpers.bash
@@ -743,15 +850,37 @@ _run_dbmate SERVICE ACTION ARGS="":
     set_postgres_defaults
     set_postgres_admin_defaults
 
-    MIGRATIONS_DIR="${DIR}/db/migrations"
+    # Postgres session settings, appended to the connection URL. An index migration has to be a
+    # single statement (CREATE INDEX CONCURRENTLY refuses a transaction block), so it cannot
+    # SET these itself. statement_timeout=0 because a large HNSW build can run for days.
+    URL_PARAMS=""
+    if [ "{{KIND}}" = "index" ]; then
+        MIGRATIONS_DIR="${INDEX_MIGRATIONS_DIR:-${DIR}/db/index_migrations}"
+        DBMATE_FLAGS=(-d "${MIGRATIONS_DIR}" --migrations-table index_migrations --no-dump-schema)
+        URL_PARAMS="&${INDEX_PG_PARAMS:-statement_timeout=0}"
+    else
+        MIGRATIONS_DIR="${DIR}/db/migrations"
+        DBMATE_FLAGS=(-d "${MIGRATIONS_DIR}" -s "${DIR}/db/schema.sql")
+    fi
+
     if [ -d "$MIGRATIONS_DIR" ]; then
         # dbmate creates its schema_migrations table and runs DDL, so it connects as the
         # migration role rather than the role the service uses at runtime.
         CONN_STR="${PGDRIVER:=postgresql}://${DB_MIGRATION_USER}:${DB_MIGRATION_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=disable"
 
-        dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait {{ACTION}} {{ARGS}}
-        dbmate -u "$CONN_STR" -s "${DIR}/db/schema.sql" -d "${MIGRATIONS_DIR}" --wait status
-        echo -e "${GREEN}Migrations applied successfully.${RESET}"
+        dbmate -u "$CONN_STR" "${DBMATE_FLAGS[@]}" --wait {{ACTION}} {{ARGS}}
+        if [ "{{ACTION}}" != "new" ]; then
+            dbmate -u "$CONN_STR" "${DBMATE_FLAGS[@]}" --wait status
+        fi
+        echo -e "${GREEN}dbmate {{ACTION}} finished.${RESET}"
+
+        # the grants name the tables, so this has to wait until the schema exists
+        if [[ "{{KIND}}" = "schema" && ( "{{ACTION}}" = "load" || "{{ACTION}}" = "migrate" ) && -f "${DIR}/db/app_user.sql" ]]; then
+            just db_app_user "{{SERVICE}}"
+        fi
+    elif [ "{{KIND}}" = "index" ]; then
+        echo -e "${RED}** ERROR: index migrations directory '$MIGRATIONS_DIR' does not exist **${RESET}"
+        exit 1
     fi
 
 _check_uv_modified_files:

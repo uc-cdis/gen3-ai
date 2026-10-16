@@ -150,6 +150,8 @@ set_postgres_defaults() {
   if [[ -z ${PGUSER:-} ]]; then
     echo "PGUSER not set, using postgres..."
     export PGUSER="postgres"
+    # exported with it, so a recipe this one calls can still tell nobody chose this PGUSER
+    export PGUSER_DEFAULTED=1
   fi
 }
 

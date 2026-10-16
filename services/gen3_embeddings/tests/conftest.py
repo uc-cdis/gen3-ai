@@ -1,7 +1,38 @@
-"""Shared test setup for the Gen3 Embeddings service."""
+"""
+Shared fixtures for the gen3_embeddings test suite.
 
+Provides a throwaway Postgres database and non-superuser app role, migrated with dbmate, an app
+and TestClient wired to that database, and fakes for authz resolution so tests can grant
+access to specific collections, paths, or actions.
+"""
+
+import asyncio
 import os
+import secrets
+import string
+import subprocess
 import tempfile
+from pathlib import Path
+
+import asyncpg
+import pytest
+import pytest_asyncio
+from dotenv import load_dotenv
+from fastapi.testclient import TestClient
+
+load_dotenv(Path(__file__).parent / ".env")
+
+# Every test fakes authz resolution rather than talking to a policy engine (see `allow_authz`),
+# and that only produces the intended result if the boundary check in `common.auth` is bypassed.
+# That check reads `common.config.DEBUG_SKIP_AUTH`, which starlette resolves from the
+# environment when the module is first imported -- so patching the service-level config object
+# later cannot reach it. The `app` fixture turns that one off, so startup checks run as in a
+# deployment.
+#
+# It is set here, above any import that pulls in `common.config`, so the suite does not depend
+# on a git-ignored `.env` that CI does not have. DEBUG_SKIP_AUTH=False there would fail every test
+# that fakes authz with a 401.
+os.environ["DEBUG_SKIP_AUTH"] = "True"
 
 # prometheus_client selects its multiprocess value class when it is first imported, so this has
 # to happen before any test module imports the app. Without it the client falls back to
@@ -10,6 +41,312 @@ import tempfile
 # reading and writing whichever directory their shell points at.
 os.environ["PROMETHEUS_MULTIPROC_DIR"] = tempfile.mkdtemp(prefix="gen3-embeddings-metrics-")
 
+# The metrics tests need metrics on, whatever a local .env says. Assigned, because an
+# environment variable takes precedence over the .env file.
+os.environ["ENABLE_METRICS"] = "true"
+
 # Building the app installs a span exporter by default. Left on, every test pays for repeated retries
 # against a collector that is not there.
 os.environ["ENABLE_OPENTELEMETRY_TRACES"] = "false"
+
+
+def _quote_ident(value: str) -> str:
+    """Double-quote a Postgres identifier, escaping any embedded quotes."""
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _random_string(n: int = 10) -> str:
+    """Generate a random lowercase alphanumeric string of length n."""
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(n))
+
+
+def _unique_db_name() -> str:
+    """Generate a unique name for this test session's scratch database."""
+    return f"gen3_embeddings_test_db_{_random_string()}"
+
+
+def _unique_user_name() -> str:
+    """Generate a unique name for this test session's Postgres app user."""
+    return f"gen3_embeddings_app_user_{_random_string(8)}"
+
+
+def _unique_password() -> str:
+    """Generate a random password for this test session's Postgres app user."""
+    return secrets.token_urlsafe(32)
+
+
+def _pg_host() -> str:
+    """
+    Resolve the Postgres host for tests.
+
+    Prefers TEST_PGHOST, falls back to the standard PGHOST, then to localhost, so tests
+    run with no configuration at all. See tests/.env.example.
+    """
+    return os.environ.get("TEST_PGHOST") or os.environ.get("PGHOST") or "localhost"
+
+
+def _pg_port() -> str:
+    """Resolve the Postgres port for tests, preferring TEST_PGPORT, then PGPORT, then 5432."""
+    return os.environ.get("TEST_PGPORT") or os.environ.get("PGPORT") or "5432"
+
+
+def _admin_user() -> str:
+    """Resolve the Postgres admin user for tests, preferring TEST_PGADMIN_USER, then PGUSER, then postgres."""
+    return os.environ.get("TEST_PGADMIN_USER") or os.environ.get("PGUSER") or "postgres"
+
+
+def _admin_password() -> str:
+    """Resolve the admin user's password, preferring TEST_PGADMIN_PASSWORD, then PGPASSWORD, then postgres."""
+    return os.environ.get("TEST_PGADMIN_PASSWORD") or os.environ.get("PGPASSWORD") or "postgres"
+
+
+def _admin_dsn(db_name: str = "postgres") -> str:
+    """
+    Build a DSN for connecting to `db_name` as the Postgres admin user.
+
+    The admin user must be a superuser: the test setup creates databases and roles, and
+    the migrations create the `vector` extension.
+    """
+    return f"postgresql://{_admin_user()}:{_admin_password()}@{_pg_host()}:{_pg_port()}/{db_name}"
+
+
+def _app_dsn(user: str, password: str, db_name: str) -> str:
+    """Build a DSN for connecting to `db_name` as the given app user."""
+    return f"postgresql://{user}:{password}@{_pg_host()}:{_pg_port()}/{db_name}"
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Provide a session-scoped asyncio event loop shared by all async fixtures and tests."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def test_database():
+    """
+    Create an isolated Postgres database and app user for the test session, migrated to the
+    latest schema, and drop them afterward (unless KEEP_TEST_DB is set).
+
+    Yields:
+        dict: Connection info for the test database (db_name, app_user, app_password,
+            admin_dsn, app_dsn).
+    """
+    keep_db = os.environ.get("KEEP_TEST_DB", "").lower() in {"1", "true", "yes"}
+
+    db_name = _unique_db_name()
+    app_user = _unique_user_name()
+    app_password = _unique_password()
+
+    admin_conn = await asyncpg.connect(_admin_dsn("postgres"))
+    try:
+        await admin_conn.execute(f"CREATE DATABASE {_quote_ident(db_name)}")
+    finally:
+        await admin_conn.close()
+
+    root_dir = Path(__file__).resolve().parents[1]
+    migrations_dir = root_dir / "db/migrations"
+
+    # run migrations as admin because migration creates extension(s)
+    dbmate_env = os.environ.copy()
+    dbmate_env["DATABASE_URL"] = _admin_dsn(db_name) + "?sslmode=disable"
+
+    subprocess.run(
+        ["dbmate", "--migrations-dir", str(migrations_dir), "migrate"],
+        check=True,
+        cwd=root_dir,
+        env=dbmate_env,
+    )
+
+    # The same role and grants `just db_app_user` gives a real deployment, so the suite runs
+    # with no more privilege than the service does.
+    psql_env = os.environ.copy()
+    psql_env["PGPASSWORD"] = _admin_password()
+    subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-q",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-h",
+            _pg_host(),
+            "-p",
+            _pg_port(),
+            "-U",
+            _admin_user(),
+            "-d",
+            db_name,
+            "-v",
+            f"app_user={app_user}",
+            "-v",
+            f"app_password={app_password}",
+            "-f",
+            str(root_dir / "db/app_user.sql"),
+        ],
+        check=True,
+        env=psql_env,
+    )
+
+    yield {
+        "db_name": db_name,
+        "app_user": app_user,
+        "app_password": app_password,
+        "admin_dsn": _admin_dsn(db_name),
+        "app_dsn": _app_dsn(app_user, app_password, db_name),
+    }
+
+    if keep_db:
+        print(f"KEEP_TEST_DB=1 set; leaving database={db_name}, user={app_user}")
+        return
+
+    admin_conn = await asyncpg.connect(_admin_dsn("postgres"))
+    try:
+        await admin_conn.execute(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = $1
+              AND pid <> pg_backend_pid()
+            """,
+            db_name,
+        )
+        await admin_conn.execute(f"DROP DATABASE IF EXISTS {_quote_ident(db_name)}")
+        await admin_conn.execute(f"DROP ROLE IF EXISTS {_quote_ident(app_user)}")
+    finally:
+        await admin_conn.close()
+
+
+@pytest_asyncio.fixture
+async def reset_db(test_database):
+    """
+    Truncate all tables between tests so each test starts from an empty database.
+
+    As the admin, because the app role has no TRUNCATE.
+    """
+    conn = await asyncpg.connect(test_database["admin_dsn"])
+    try:
+        await conn.execute("TRUNCATE TABLE embeddings_vector, embeddings_halfvec, collections CASCADE")
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
+def app(test_database, monkeypatch):
+    """
+    Build a fresh FastAPI app wired to the test database, starting up the way a deployment does.
+
+    Only the request boundary is bypassed, through `common.config.DEBUG_SKIP_AUTH` (see the
+    top of this module), and tests supply grants with `allow_authz`. The service's own flag
+    stays off, so startup runs the production role and RLS checks against the real app role:
+    with the flag on, that role is refused, because a running service would have no grants
+    to give it. The policy engine health check is the one startup step stubbed out, since no
+    Arborist is running.
+
+    The app owns its own pool, created and closed by its lifespan, so there is nothing to
+    tear down here. Tests that need a live pool must enter the app's lifespan -- which the
+    `client` fixture does via `with TestClient(app)`.
+
+    Yields:
+        FastAPI: The app instance.
+    """
+    from gen3_embeddings import config
+    from gen3_embeddings import main as main_module
+    from gen3_embeddings.main import get_app
+
+    async def _arborist_is_healthy(app):
+        return None
+
+    monkeypatch.setattr(config, "DB_CONNECTION_STRING", test_database["app_dsn"])
+    monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", False)
+    monkeypatch.setattr(main_module, "check_arborist_is_healthy", _arborist_is_healthy)
+
+    return get_app()
+
+
+@pytest.fixture
+def client(app, reset_db):
+    """Provide a TestClient for the app, with the database reset before each test."""
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def allow_authz(monkeypatch):
+    """
+    Patch authz resolution to simulate the caller having access to specific collections.
+
+    Grants every action on the named collections, which is what most tests want. Tests that
+    care about the distinction between actions should use `allow_authz_per_action` instead.
+
+    Example:
+        allow_authz("alpha", "beta")
+    """
+    from gen3_embeddings import dependencies as dependencies_module
+
+    def _apply(*collection_names: str):
+        allowed = [f"/vectorstore/collections/{name}" for name in collection_names]
+
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
+            return allowed
+
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        return allowed
+
+    return _apply
+
+
+@pytest.fixture
+def allow_authz_paths(monkeypatch):
+    """
+    Patch authz resolution with literal resource paths, of any shape.
+
+    Unlike `allow_authz`, this does not prepend the collection base path. An embedding's
+    `authz` is an arbitrary stored string, so testing that requires granting paths that are
+    not collection-shaped.
+
+    Example:
+        allow_authz_paths("/vectorstore/collections/docs", "/programs/foo/projects/bar")
+    """
+    from gen3_embeddings import dependencies as dependencies_module
+
+    def _apply(*paths: str):
+        allowed = list(paths)
+
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
+            return allowed
+
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        return allowed
+
+    return _apply
+
+
+@pytest.fixture
+def allow_authz_per_action(monkeypatch):
+    """
+    Patch authz resolution with a different grant per action.
+
+    This is what makes it testable that a route authorizes the action it actually performs
+    rather than the one its HTTP verb implies: a caller granted only `read` must still be
+    able to POST to a search or bulk-read endpoint.
+
+    Example:
+        allow_authz_per_action(read=("alpha",), create=())
+    """
+    from gen3_embeddings import dependencies as dependencies_module
+
+    def _apply(**by_action: tuple[str, ...]):
+        paths_by_action = {
+            action: [f"/vectorstore/collections/{name}" for name in names] for action, names in by_action.items()
+        }
+
+        async def fake_get_allowed_authz_for_request(request, method, authz_config):
+            return paths_by_action.get(method, [])
+
+        monkeypatch.setattr(dependencies_module, "get_allowed_authz_for_request", fake_get_allowed_authz_for_request)
+        return paths_by_action
+
+    return _apply

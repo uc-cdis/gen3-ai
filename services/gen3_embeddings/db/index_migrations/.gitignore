@@ -1,0 +1,4 @@
+# Index migrations are deployment-specific (they name collection ids), and everything under db/
+# is copied into the service image. Keep them in your deployment's repository and point
+# INDEX_MIGRATIONS_DIR at them. See README.md.
+*.sql
