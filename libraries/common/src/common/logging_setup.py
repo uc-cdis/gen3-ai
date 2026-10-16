@@ -17,6 +17,8 @@ INTERNAL_LOGGERS = frozenset(
         "uvicorn.error",
         "httpcore",
         "httpx",
+        "httpcore2",
+        "httpx2",
         "asyncio",
     }
 )

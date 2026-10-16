@@ -9,7 +9,7 @@ requires-python = "~=3.13.0"
 #     "gen3pyutils @ git+https://github.com/uc-cdis/gen3pyutils.git@feat/metrics-improvements",
 dependencies = [
   "asyncpg>=0.31.0",
-  "authutils>=8.0.0",
+  "authutils>=9.0.0",
   # The `observability` extra carries the tracing, profiling and request-metrics helpers that
   # common/telemetry.py, common/profiling.py and the services' metrics middleware are built on,
   # along with the OpenTelemetry and Pyroscope packages they need.
@@ -19,7 +19,8 @@ dependencies = [
   "gen3authz>=3.0.1",
   "gen3logging>=2.0.0",
   "opentelemetry-api>=1.39.1",
-  "opentelemetry-instrumentation-httpx>=0.65b0",
+  # 0.66b1 is the first release with HTTPX2ClientInstrumentor (authutils>=9 uses httpx2)
+  "opentelemetry-instrumentation-httpx>=0.66b1",
   "opentelemetry-instrumentation-asyncpg>=0.65b0",
   "opentelemetry-instrumentation-requests>=0.65b0",
   "opentelemetry-sdk>=1.39.1",
@@ -45,9 +46,9 @@ dependencies = [
   "ruff",
   "pytest-xdist",
   # `starlette.testclient` imports httpx2 and only falls back to httpx with a deprecation
-  # warning, so TestClient needs this. Test-only: the runtime httpx that authutils and
-  # gen3authz require is a separate distribution and stays where it is, which is also what
-  # HTTPXClientInstrumentor instruments.
+  # warning, so TestClient needs this. authutils>=9 also requires httpx2 at runtime for its
+  # JWKS fetches. gen3authz still requires httpx, a separate distribution, so common/telemetry.py
+  # instruments both.
   "httpx2>=2.12.0",
   "pylint>=4.0.5",
   "dotenv>=0.9.9",

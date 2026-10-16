@@ -24,7 +24,7 @@ from gen3pyutils.observability.tracing import no_trace as no_trace
 from gen3pyutils.observability.tracing import reset_tracing_state as reset_tracing_state
 from gen3pyutils.observability.tracing import traced as traced
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
 from common import config
@@ -53,8 +53,10 @@ def configure_tracing(app: FastAPI, service_name: str) -> None:
         otlp_protocol=config.OTEL_EXPORTER_OTLP_PROTOCOL,
         excluded_urls=config.ENDPOINTS_WITHOUT_METRICS,
         instrumentors=[
-            # Outbound async HTTP calls
+            # Outbound HTTP calls. httpx and httpx2 are separate distributions and each needs its
+            # own instrumentor: gen3authz uses httpx, authutils' JWKS fetches use httpx2.
             HTTPXClientInstrumentor(),
+            HTTPX2ClientInstrumentor(),
             # Outbound sync HTTP calls (captures requests made by libs that are not async)
             RequestsInstrumentor(),
             # Database queries. Not in the library's default set, because the right database
