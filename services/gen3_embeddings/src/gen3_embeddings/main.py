@@ -202,7 +202,7 @@ async def check_rls_is_enabled(conn):
     not_forced = sorted(table for table, row in by_table.items() if not row["relforcerowsecurity"])
 
     if not missing and not disabled and not not_forced:
-        logging.debug("Startup row-level security check PASSED for: %s", ", ".join(RLS_PROTECTED_TABLES))
+        logging.debug(f"Startup row-level security check PASSED for: {', '.join(RLS_PROTECTED_TABLES)}")
         return
 
     problems = []
@@ -215,10 +215,7 @@ async def check_rls_is_enabled(conn):
     detail = "; ".join(problems)
 
     if config.DEBUG_SKIP_AUTH:
-        logging.warning(
-            "DEBUG_SKIP_AUTH is True, so continuing despite a row-level security problem: %s",
-            detail,
-        )
+        logging.warning(f"DEBUG_SKIP_AUTH is True, so continuing despite a row-level security problem: {detail}")
         return
 
     logging.error(f"Row-level security check failed: {detail}")
@@ -231,17 +228,18 @@ async def check_db_connection(pool):
     ensure we are NOT using a superuser or bypassrls role, and ensure
     row-level security is enabled and forced on the tables that depend on it.
 
-    When DEBUG_SKIP_AUTH is True, we skip enforcing those checks, but
-    emit a warning if the DB user cannot bypass RLS (i.e., is neither
-    SUPERUSER nor has BYPASSRLS).
+    When DEBUG_SKIP_AUTH is True the role check inverts: the DB user MUST be able to bypass
+    RLS (SUPERUSER or BYPASSRLS). Skipping auth resolves every request to no grants, so under
+    any other role every read comes back empty and every write is rejected.
 
     Args:
         pool: The pool created for this app, whose lifetime the caller owns.
 
     Raises:
         RuntimeError: If the DB user is SUPERUSER or has BYPASSRLS, or row-level security is
-            not in effect. The role and RLS checks are skipped when DEBUG_SKIP_AUTH is True. A
-            database that cannot be reached raises the driver's own error instead.
+            not in effect. Under DEBUG_SKIP_AUTH, if the DB user is neither SUPERUSER nor has
+            BYPASSRLS, and row-level security not being in effect only warns. A database that
+            cannot be reached raises the driver's own error instead.
     """
     try:
         logging.debug("Startup database connection test initiating. Attempting a simple query...")
@@ -261,27 +259,24 @@ async def check_db_connection(pool):
             usebypassrls = row["usebypassrls"]
             usename = row["usename"]
 
-            # If DEBUG_SKIP_AUTH is enabled, we do NOT enforce the "no superuser/bypassrls"
-            # requirement, but we still log what we see.
+            # DEBUG_SKIP_AUTH resolves every request to no grants, so RLS would hide every row and
+            # reject every write. A role that bypasses RLS is the only one that state works with.
             if config.DEBUG_SKIP_AUTH:
                 if not usesuper and not usebypassrls:
-                    logging.warning(
-                        "DEBUG_SKIP_AUTH is True, but DB user '%s' is neither SUPERUSER "
-                        "nor has BYPASSRLS. This user cannot bypass RLS; "
-                        "RLS will still be enforced at the DB level.",
-                        usename,
+                    logging.error(
+                        f"DEBUG_SKIP_AUTH is True, but DB user '{usename}' is neither SUPERUSER nor has BYPASSRLS."
                     )
-                else:
-                    logging.debug(
-                        "DEBUG_SKIP_AUTH is True and DB user '%s' has privileges "
-                        "(usesuper=%s, usebypassrls=%s) that can bypass RLS.",
-                        usename,
-                        usesuper,
-                        usebypassrls,
+                    raise RuntimeError(
+                        "DEBUG_SKIP_AUTH is True, but the configured DB user cannot bypass row-level security, "
+                        "so every request would run with no grants: reads return nothing and writes are "
+                        "rejected. Connect as a SUPERUSER or BYPASSRLS role, or set DEBUG_SKIP_AUTH=False. "
+                        "Aborting..."
                     )
 
-                # Skip the hard failure in DEBUG_SKIP_AUTH mode.
-                logging.debug("Skipping DB superuser/bypassrls enforcement because DEBUG_SKIP_AUTH is True.")
+                logging.debug(
+                    f"DEBUG_SKIP_AUTH is True and DB user '{usename}' has privileges "
+                    f"(usesuper={usesuper}, usebypassrls={usebypassrls}) that can bypass RLS."
+                )
             else:
                 # Normal enforcement when DEBUG_SKIP_AUTH is False.
                 if usesuper:

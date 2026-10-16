@@ -134,11 +134,8 @@ class RequestSizeLimitMiddleware:
             size (int): Size that tripped the limit, in bytes.
         """
         logging.warning(
-            "Rejecting %s %s: request body of %d bytes exceeds the %d byte limit.",
-            scope.get("method", "?"),
-            scope.get("path", "?"),
-            size,
-            self.max_body_bytes,
+            f"Rejecting {scope.get('method', '?')} {scope.get('path', '?')}: request body of {size} bytes "
+            f"exceeds the {self.max_body_bytes} byte limit."
         )
         await self._respond(
             send,

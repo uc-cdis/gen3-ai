@@ -191,13 +191,10 @@ class WriteMixin(DataAccessLayerBase):
         collection_id, index_names = deleted
         if index_names:
             logging.warning(
-                "Deleted collection %r (id %d), but its vector index(es) remain: %s. They are never "
-                "used again, but they take up space and slow down vacuums of the embeddings table. "
-                'Drop them with an index migration; see "Deleted collections" in '
-                "db/index_migrations/README.md.",
-                collection_name,
-                collection_id,
-                ", ".join(index_names),
+                f"Deleted collection {collection_name!r} (id {collection_id}), but its vector index(es) "
+                f"remain: {', '.join(index_names)}. They are never used again, but they take up space and "
+                'slow down vacuums of the embeddings table. Drop them with an index migration; see "Deleted '
+                'collections" in db/index_migrations/README.md.'
             )
         return True
 

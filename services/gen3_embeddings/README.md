@@ -72,7 +72,7 @@ The service needs PostgreSQL with pgvector 0.8 or later, and two roles:
 | Role | Used by | Needs |
 | --- | --- | --- |
 | Migration role (`DB_MIGRATION_USER`) | `just db_*` recipes, dbmate | Owns the database and its tables. Superuser, unless the `vector` extension already exists. |
-| Service role (`PGUSER`) | the running service | `SELECT, INSERT, UPDATE, DELETE` on `collections`, `embeddings_vector` and `embeddings_halfvec`. Must not be `SUPERUSER` or `BYPASSRLS`. |
+| Service role (`PGUSER`) | the running service | `SELECT, INSERT, UPDATE, DELETE` on `collections`, `embeddings_vector` and `embeddings_halfvec`. Must not be `SUPERUSER` or `BYPASSRLS`, except under `DEBUG_SKIP_AUTH` (see [Running locally](#running-locally)). |
 
 At startup the service refuses to run if its role can bypass RLS, or if RLS is not enabled
 and forced on those three tables.
@@ -178,8 +178,10 @@ kubectl port-forward svc/arborist-service 4280:80
 ```
 
 `DEBUG_SKIP_AUTH=True` lets the service start without Arborist and accept requests with no
-token, but such a request holds no grants, so RLS returns nothing. It also turns the startup
-role and RLS checks into warnings, so never set it in a deployment.
+token. Such a request holds no grants, so under RLS every read would come back empty and every
+write would be rejected. With it set, the service therefore refuses to start unless its role
+bypasses RLS (`SUPERUSER` or `BYPASSRLS`, such as the migration role) -- the reverse of what a
+deployment requires -- and the startup RLS check only warns. Never set it in a deployment.
 
 Some requests to try:
 

@@ -1,5 +1,5 @@
 """
-Tests for the startup guard that row-level security is actually in effect.
+Tests for the startup guards that row-level security is actually in effect.
 
 `check_db_connection`'s superuser/bypassrls checks only cover the ROLE side of RLS, so they
 pass against a database where RLS has been switched off entirely. `check_rls_is_enabled` is
@@ -121,7 +121,7 @@ async def test_check_db_connection_runs_the_rls_check(test_database, monkeypatch
 
 @pytest.mark.asyncio
 async def test_downgrades_to_a_warning_under_debug_skip_auth(test_database, monkeypatch, caplog):
-    """DEBUG_SKIP_AUTH keeps local development usable, matching the superuser check's behavior."""
+    """Under DEBUG_SKIP_AUTH the role must bypass RLS anyway, so RLS being off only warns."""
     monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", True)
 
     table = RLS_PROTECTED_TABLES[0]
@@ -134,3 +134,35 @@ async def test_downgrades_to_a_warning_under_debug_skip_auth(test_database, monk
     finally:
         await conn.close()
         await _set_rls(test_database["admin_dsn"], table, enabled=True, forced=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("debug_skip_auth", "dsn", "error"),
+    [
+        (False, "app_dsn", None),
+        (False, "admin_dsn", "SUPERUSER"),
+        (True, "app_dsn", "cannot bypass row-level security"),
+        (True, "admin_dsn", None),
+    ],
+)
+async def test_the_role_check_inverts_under_debug_skip_auth(test_database, monkeypatch, debug_skip_auth, dsn, error):
+    """
+    A deployment's role must not bypass RLS, and under DEBUG_SKIP_AUTH it must.
+
+    Skipping auth resolves every request to no grants. Under a role RLS applies to, that
+    service starts, then returns nothing for every read and rejects every write, with only a
+    startup log line to say why -- so it refuses to start instead.
+    """
+    monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", debug_skip_auth)
+    monkeypatch.setattr(config, "DB_CONNECTION_STRING", test_database[dsn])
+
+    pool = await db_module.create_pool()
+    try:
+        if error is None:
+            await main_module.check_db_connection(pool)
+        else:
+            with pytest.raises(RuntimeError, match=error):
+                await main_module.check_db_connection(pool)
+    finally:
+        await pool.close()

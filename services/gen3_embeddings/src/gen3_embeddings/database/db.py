@@ -89,7 +89,7 @@ async def create_pool() -> asyncpg.Pool:
         asyncpg.Pool: A new pool, which the caller is responsible for closing.
     """
     logging.info(
-        "Initializing connection pool... pool min=%d, pool max=%d", config.PGPOOL_MIN_SIZE, config.PGPOOL_MAX_SIZE
+        f"Initializing connection pool... pool min={config.PGPOOL_MIN_SIZE}, pool max={config.PGPOOL_MAX_SIZE}"
     )
     return await asyncpg.create_pool(
         str(config.DB_CONNECTION_STRING),

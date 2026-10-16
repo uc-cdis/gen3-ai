@@ -140,7 +140,7 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
         strategy, metric = IndexStrategy.direct, _OPCLASS_METRIC[opclass]
         expression_shape = _DIRECT_EXPRESSION
     else:
-        logging.warning("Ignoring vector index %s: unsupported opclass %s", row["index_name"], opclass)
+        logging.warning(f"Ignoring vector index {row['index_name']}: unsupported opclass {opclass}")
         return None
 
     predicate = _PREDICATE.match((row["predicate"] or "").strip())
@@ -152,11 +152,8 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
         expression = None
     if not predicate or not expression:
         logging.warning(
-            "Ignoring vector index %s on %s: predicate %r / expression %r is not a shape search emits",
-            row["index_name"],
-            table,
-            row["predicate"],
-            row["expression"],
+            f"Ignoring vector index {row['index_name']} on {table}: predicate {row['predicate']!r} / "
+            f"expression {row['expression']!r} is not a shape search emits"
         )
         return None
 
@@ -195,9 +192,8 @@ async def discover_vector_indexes(conn: asyncpg.Connection) -> dict[int, list[Ve
         by_collection.setdefault(found.collection_id, []).append(found)
 
     logging.info(
-        "Discovered %d usable vector index(es) across %d collection(s)",
-        sum(len(v) for v in by_collection.values()),
-        len(by_collection),
+        f"Discovered {sum(len(v) for v in by_collection.values())} usable vector index(es) "
+        f"across {len(by_collection)} collection(s)"
     )
     return by_collection
 

@@ -25,8 +25,9 @@ load_dotenv(Path(__file__).parent / ".env")
 # Every test fakes authz resolution rather than talking to a policy engine (see `allow_authz`),
 # and that only produces the intended result if the boundary check in `common.auth` is bypassed.
 # That check reads `common.config.DEBUG_SKIP_AUTH`, which starlette resolves from the
-# environment when the module is first imported -- so patching a service-level config object
-# later, as the `app` fixture does, cannot reach it.
+# environment when the module is first imported -- so patching the service-level config object
+# later cannot reach it. The `app` fixture turns that one off, so startup checks run as in a
+# deployment.
 #
 # It is set here, above any import that pulls in `common.config`, so the suite does not depend
 # on a git-ignored `.env` that CI does not have. `setdefault` leaves a deliberate override in
@@ -235,7 +236,14 @@ async def reset_db(test_database):
 @pytest.fixture
 def app(test_database, monkeypatch):
     """
-    Build a fresh FastAPI app wired to the test database, with DEBUG_SKIP_AUTH enabled.
+    Build a fresh FastAPI app wired to the test database, starting up the way a deployment does.
+
+    Only the request boundary is bypassed, through `common.config.DEBUG_SKIP_AUTH` (see the
+    top of this module), and tests supply grants with `allow_authz`. The service's own flag
+    stays off, so startup runs the production role and RLS checks against the real app role:
+    with the flag on, that role is refused, because a running service would have no grants
+    to give it. The policy engine health check is the one startup step stubbed out, since no
+    Arborist is running.
 
     The app owns its own pool, created and closed by its lifespan, so there is nothing to
     tear down here. Tests that need a live pool must enter the app's lifespan -- which the
@@ -245,10 +253,15 @@ def app(test_database, monkeypatch):
         FastAPI: The app instance.
     """
     from gen3_embeddings import config
+    from gen3_embeddings import main as main_module
     from gen3_embeddings.main import get_app
 
+    async def _arborist_is_healthy(app):
+        return None
+
     monkeypatch.setattr(config, "DB_CONNECTION_STRING", test_database["app_dsn"])
-    monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", True)
+    monkeypatch.setattr(config, "DEBUG_SKIP_AUTH", False)
+    monkeypatch.setattr(main_module, "check_arborist_is_healthy", _arborist_is_healthy)
 
     return get_app()
 
