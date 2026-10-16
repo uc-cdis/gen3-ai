@@ -23,6 +23,7 @@ class SearchMixin(DataAccessLayerBase):
     def _binary_rescore_limit(
         self,
         collection_id: int,
+        table: str,
         metric: DistanceMetric,
         dimensions: int,
         top_k: int,
@@ -37,6 +38,7 @@ class SearchMixin(DataAccessLayerBase):
 
         Args:
             collection_id (int): Collection being searched.
+            table (str): Table the collection's rows live in.
             metric (DistanceMetric): Metric the caller asked for.
             dimensions (int): Dimensionality the collection declares.
             top_k (int): Rows the caller wants back.
@@ -44,7 +46,7 @@ class SearchMixin(DataAccessLayerBase):
         Returns:
             int | None: The candidate pool size, or None to emit the direct form.
         """
-        chosen = choose_index(self.vector_indexes.get(collection_id), metric, dimensions)
+        chosen = choose_index(self.vector_indexes.get(collection_id), table, metric, dimensions)
         if chosen is None or chosen.strategy is not IndexStrategy.binary:
             return None
 
@@ -87,7 +89,7 @@ class SearchMixin(DataAccessLayerBase):
         """
         vector_type = VectorType(collection.vector_type)
         table, _ = get_embeddings_table_and_cast(vector_type)
-        rescore_limit = self._binary_rescore_limit(collection.id, distance_metric, collection.dimensions, top_k)
+        rescore_limit = self._binary_rescore_limit(collection.id, table, distance_metric, collection.dimensions, top_k)
 
         # $1: collection_id, $2: vector, $3: top_k
         params: list[Any] = [collection.id, query_vector, top_k]
@@ -179,7 +181,7 @@ class SearchMixin(DataAccessLayerBase):
         targets = [
             CollectionSearchTarget(
                 collection_id=col.id,
-                binary_rescore_limit=self._binary_rescore_limit(col.id, distance_metric, query_dims, top_k),
+                binary_rescore_limit=self._binary_rescore_limit(col.id, table, distance_metric, query_dims, top_k),
             )
             for col in filtered_collections
         ]

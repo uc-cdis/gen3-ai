@@ -109,11 +109,32 @@ class TestParse:
         """A jaccard index exists in pgvector but search has no shape that targets it."""
         assert _parse("embeddings_vector", row(opclass="bit_jaccard_ops")) is None
 
+    @pytest.mark.parametrize(
+        ("table", "opclass", "expression"),
+        [
+            # cast before quantizing: reads naturally, but search quantizes the bare column
+            ("embeddings_vector", "bit_hamming_ops", "(binary_quantize((embedding)::vector(3)))::bit(3)"),
+            # search casts a `vector` table's column to `vector(n)`, never `halfvec(n)`
+            ("embeddings_vector", "halfvec_cosine_ops", "(embedding)::halfvec(3)"),
+            ("embeddings_halfvec", "vector_cosine_ops", "(embedding)::vector(3)"),
+            ("embeddings_vector", "vector_cosine_ops", "(l2_normalize(embedding))::vector(3)"),
+        ],
+    )
+    def test_an_expression_search_does_not_emit_is_skipped(self, table, opclass, expression):
+        """
+        Only the exact expression search writes counts, not anything ending in a width.
 
+        Each of these is valid DDL, and reading only its trailing `(n)` would have search pick
+        the index and then emit an expression it does not match: a sequential scan.
+        """
+        assert _parse(table, row(table_name=table, opclass=opclass, expression=expression)) is None
+
+
+TABLE = "embeddings_vector"
 DIRECT_COSINE = VectorIndex(
-    "i_direct", "embeddings_vector", 1, IndexStrategy.direct, 256, DistanceMetric.cosine_distance, VectorType.vector
+    "i_direct", TABLE, 1, IndexStrategy.direct, 256, DistanceMetric.cosine_distance, VectorType.vector
 )
-BINARY = VectorIndex("i_binary", "embeddings_vector", 1, IndexStrategy.binary, 256, None, None)
+BINARY = VectorIndex("i_binary", TABLE, 1, IndexStrategy.binary, 256, None, None)
 
 
 class TestChooseIndex:
@@ -121,29 +142,29 @@ class TestChooseIndex:
 
     def test_no_index_means_no_index(self):
         """An unindexed collection must produce the plain query rather than a guess."""
-        assert choose_index(None, DistanceMetric.cosine_similarity, 256) is None
-        assert choose_index([], DistanceMetric.cosine_similarity, 256) is None
+        assert choose_index(None, TABLE, DistanceMetric.cosine_similarity, 256) is None
+        assert choose_index([], TABLE, DistanceMetric.cosine_similarity, 256) is None
 
     def test_cosine_similarity_is_served_by_a_cosine_distance_index(self):
         """The two share an ordering: search orders by the distance and reports `1 - distance`."""
-        assert choose_index([DIRECT_COSINE], DistanceMetric.cosine_similarity, 256) is DIRECT_COSINE
+        assert choose_index([DIRECT_COSINE], TABLE, DistanceMetric.cosine_similarity, 256) is DIRECT_COSINE
 
     def test_a_direct_index_does_not_serve_a_different_metric(self):
         """pgvector will not answer an l2 ordering from a cosine index, so this must fall back."""
-        assert choose_index([DIRECT_COSINE], DistanceMetric.l2_distance, 256) is None
+        assert choose_index([DIRECT_COSINE], TABLE, DistanceMetric.l2_distance, 256) is None
 
     def test_a_binary_index_serves_any_metric(self):
         """It only picks candidates, so the metric is decided entirely by the rescore."""
         for metric in DistanceMetric:
-            assert choose_index([BINARY], metric, 256) is BINARY
+            assert choose_index([BINARY], TABLE, metric, 256) is BINARY
 
     def test_a_direct_index_wins_over_a_binary_one(self):
         """No rescore step and no precision lost, so prefer it whenever it can serve the metric."""
-        assert choose_index([BINARY, DIRECT_COSINE], DistanceMetric.cosine_distance, 256) is DIRECT_COSINE
+        assert choose_index([BINARY, DIRECT_COSINE], TABLE, DistanceMetric.cosine_distance, 256) is DIRECT_COSINE
 
     def test_binary_is_used_when_direct_cannot_serve_the_metric(self):
         """Having both, an l2 query still has somewhere to go."""
-        assert choose_index([BINARY, DIRECT_COSINE], DistanceMetric.l2_distance, 256) is BINARY
+        assert choose_index([BINARY, DIRECT_COSINE], TABLE, DistanceMetric.l2_distance, 256) is BINARY
 
     def test_an_index_of_the_wrong_dimension_is_never_chosen(self):
         """
@@ -152,7 +173,15 @@ class TestChooseIndex:
         This is the case where a collection was recreated at a different dimensionality and the
         old index is still sitting there.
         """
-        assert choose_index([DIRECT_COSINE, BINARY], DistanceMetric.cosine_distance, 1536) is None
+        assert choose_index([DIRECT_COSINE, BINARY], TABLE, DistanceMetric.cosine_distance, 1536) is None
+
+    def test_an_index_on_the_other_table_is_never_chosen(self):
+        """
+        An index is keyed by the collection id in its predicate, which says nothing of its table.
+
+        One built on `embeddings_halfvec` for a `vector` collection indexes rows search never reads.
+        """
+        assert choose_index([DIRECT_COSINE, BINARY], "embeddings_halfvec", DistanceMetric.cosine_distance, 256) is None
 
 
 class TestDiscoverVectorIndexes:
@@ -197,7 +226,47 @@ class TestDiscoverVectorIndexes:
         assert found[collection_id][0].table == "embeddings_vector"
         assert found[collection_id][0].strategy is IndexStrategy.direct
         # the l2 index is invalid, so an l2 search must not be pointed at it
-        assert choose_index(found[collection_id], DistanceMetric.l2_distance, 3) is None
+        assert choose_index(found[collection_id], TABLE, DistanceMetric.l2_distance, 3) is None
+
+    def test_indexes_search_cannot_use_are_never_chosen(self, test_database):
+        """
+        Near misses of the README shapes, built for real, leave search on the unindexed query.
+
+        Postgres accepts every one of these, and none matches the SQL search emits for a
+        `vector` collection, so choosing any of them would plan a sequential scan.
+        """
+
+        async def _run():
+            conn = await asyncpg.connect(test_database["admin_dsn"])
+            try:
+                collection_id = await conn.fetchval(
+                    "INSERT INTO collections (collection_name, dimensions, vector_type) "
+                    "VALUES ('idx_near_miss', 3, 'vector') RETURNING id"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_miss_cast_first ON embeddings_vector "
+                    f"USING hnsw ((binary_quantize(embedding::vector(3))::bit(3)) bit_hamming_ops) "
+                    f"WHERE collection_id = {collection_id}"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_miss_halfvec_cast ON embeddings_vector "
+                    f"USING hnsw ((embedding::halfvec(3)) halfvec_cosine_ops) WHERE collection_id = {collection_id}"
+                )
+                await conn.execute(
+                    f"CREATE INDEX idx_miss_other_table ON embeddings_halfvec "
+                    f"USING hnsw ((embedding::halfvec(3)) halfvec_cosine_ops) WHERE collection_id = {collection_id}"
+                )
+
+                return collection_id, await discover_vector_indexes(conn)
+            finally:
+                await conn.close()
+
+        collection_id, found = asyncio.run(_run())
+
+        # the other-table index is a shape search does emit, just not for this collection
+        assert [index.index_name for index in found.get(collection_id, [])] == ["idx_miss_other_table"]
+        for metric in DistanceMetric:
+            assert choose_index(found.get(collection_id), TABLE, metric, 3) is None
 
     def test_a_collections_index_names_include_unusable_ones_and_no_other_collections(self, test_database):
         """
@@ -327,7 +396,7 @@ async def explain_search(test_database, strategy: IndexStrategy, shape: str) -> 
         # `search_embeddings_across_collections` pass
         targets = [
             CollectionSearchTarget(
-                collection_id, dal._binary_rescore_limit(collection_id, PLAN_METRIC, PLAN_DIMENSIONS, PLAN_TOP_K)
+                collection_id, dal._binary_rescore_limit(collection_id, TABLE, PLAN_METRIC, PLAN_DIMENSIONS, PLAN_TOP_K)
             )
             for collection_id in built
         ]

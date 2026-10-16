@@ -126,7 +126,7 @@ def test_data_access_layer_calls_are_traced(traced_app: TestClient, spans: InMem
     # config, and never touches the pool. It is defined on a mixin, which is where the span
     # name comes from.
     layer = DataAccessLayer(pool=cast(Pool, None))
-    layer._binary_rescore_limit(1, DistanceMetric.cosine_distance, 3, 5)
+    layer._binary_rescore_limit(1, "embeddings_vector", DistanceMetric.cosine_distance, 3, 5)
 
     assert "gen3_embeddings.database.dal.search.SearchMixin._binary_rescore_limit" in names(spans)
 

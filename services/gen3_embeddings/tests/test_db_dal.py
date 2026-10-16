@@ -1578,12 +1578,14 @@ class TestSearch:
         dal, _conn, _ = make_dal(vector_indexes=_binary_index())
         limit = dal._binary_rescore_limit
 
-        assert limit(1, DistanceMetric.cosine_distance, 3, top_k=1) == config.BINARY_RESCORE_MIN
-        assert limit(1, DistanceMetric.cosine_distance, 3, top_k=config.MAX_TOP_K) == config.BINARY_RESCORE_MAX
+        table = "embeddings_vector"
+
+        assert limit(1, table, DistanceMetric.cosine_distance, 3, top_k=1) == config.BINARY_RESCORE_MIN
+        assert limit(1, table, DistanceMetric.cosine_distance, 3, top_k=config.MAX_TOP_K) == config.BINARY_RESCORE_MAX
         # between the two, the multiplier decides
-        assert limit(1, DistanceMetric.cosine_distance, 3, top_k=25) == 25 * config.BINARY_RESCORE_MULTIPLIER
+        assert limit(1, table, DistanceMetric.cosine_distance, 3, top_k=25) == 25 * config.BINARY_RESCORE_MULTIPLIER
         # and the pool is never narrower than what the caller asked for
-        assert limit(1, DistanceMetric.cosine_distance, 3, top_k=5_000) >= 5_000
+        assert limit(1, table, DistanceMetric.cosine_distance, 3, top_k=5_000) >= 5_000
 
     @pytest.mark.asyncio
     async def test_a_binary_index_for_another_collection_is_not_applied(self):

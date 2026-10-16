@@ -123,7 +123,7 @@ async def test_binary_search_at_max_top_k(test_database, reset_db, monkeypatch, 
 
         query = np.random.default_rng(1).uniform(-1, 1, DIMENSIONS).tolist()
         top_k = config.MAX_TOP_K
-        rescore_limit = dal._binary_rescore_limit(collection_id, METRIC, DIMENSIONS, top_k)
+        rescore_limit = dal._binary_rescore_limit(collection_id, "embeddings_vector", METRIC, DIMENSIONS, top_k)
         assert rescore_limit == config.BINARY_RESCORE_MAX
 
         rows = await dal.search_embeddings_in_collection(

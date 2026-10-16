@@ -27,6 +27,7 @@ from enum import StrEnum
 import asyncpg
 
 from gen3_embeddings.config import logging
+from gen3_embeddings.database.helpers import get_embeddings_table_and_cast
 from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 
 # Only the simple predicate the index scripts and documented migrations produce. A predicate
@@ -34,8 +35,9 @@ from gen3_embeddings.models.schemas import DistanceMetric, VectorType
 # search falls back to the unindexed query -- slow but correct, which is the right way to fail.
 _PREDICATE = re.compile(r"^\(collection_id = (\d+)\)$")
 
-# `(embedding)::vector(256)` / `(binary_quantize(embedding))::bit(1536)`
-_DIMENSIONS = re.compile(r"\((\d+)\)$")
+# Exactly the expressions search emits, as `pg_get_expr` renders them.
+_DIRECT_EXPRESSION = re.compile(r"^\(embedding\)::(?P<type>vector|halfvec)\((?P<dimensions>\d+)\)$")
+_BINARY_EXPRESSION = re.compile(r"^\(binary_quantize\(embedding\)\)::bit\((?P<dimensions>\d+)\)$")
 
 # opclass -> the metric it can order by. A direct index serves ONLY its own metric; pgvector
 # will not answer an l2 ordering from a cosine index.
@@ -48,11 +50,6 @@ _OPCLASS_METRIC: dict[str, DistanceMetric] = {
     "halfvec_l2_ops": DistanceMetric.l2_distance,
     "halfvec_ip_ops": DistanceMetric.inner_product,
     "halfvec_l1_ops": DistanceMetric.l1_distance,
-}
-
-_OPCLASS_VECTOR_TYPE: dict[str, VectorType] = {
-    "vector": VectorType.vector,
-    "halfvec": VectorType.halfvec,
 }
 
 # Hamming distance over binary_quantize(). Unlike the direct opclasses this one is not tied to
@@ -135,26 +132,32 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
     Returns:
         VectorIndex | None: The parsed index, or None to leave it undiscovered.
     """
+    opclass = row["opclass"]
+    if opclass == _BINARY_OPCLASS:
+        strategy, metric = IndexStrategy.binary, None
+        expression_shape = _BINARY_EXPRESSION
+    elif opclass in _OPCLASS_METRIC:
+        strategy, metric = IndexStrategy.direct, _OPCLASS_METRIC[opclass]
+        expression_shape = _DIRECT_EXPRESSION
+    else:
+        logging.warning("Ignoring vector index %s: unsupported opclass %s", row["index_name"], opclass)
+        return None
+
     predicate = _PREDICATE.match((row["predicate"] or "").strip())
-    dimensions = _DIMENSIONS.search((row["expression"] or "").strip())
-    if not predicate or not dimensions:
+    expression = expression_shape.match((row["expression"] or "").strip())
+    vector_type = VectorType(expression["type"]) if expression and strategy is IndexStrategy.direct else None
+    # search casts to the type its table stores, so a `halfvec` index on `embeddings_vector`
+    # is one it never emits
+    if vector_type is not None and get_embeddings_table_and_cast(vector_type)[0] != table:
+        expression = None
+    if not predicate or not expression:
         logging.warning(
-            "Ignoring vector index %s: predicate %r / expression %r is not a shape search emits",
+            "Ignoring vector index %s on %s: predicate %r / expression %r is not a shape search emits",
             row["index_name"],
+            table,
             row["predicate"],
             row["expression"],
         )
-        return None
-
-    opclass = row["opclass"]
-    if opclass == _BINARY_OPCLASS:
-        strategy, metric, vector_type = IndexStrategy.binary, None, None
-    elif opclass in _OPCLASS_METRIC:
-        strategy = IndexStrategy.direct
-        metric = _OPCLASS_METRIC[opclass]
-        vector_type = _OPCLASS_VECTOR_TYPE[opclass.split("_", 1)[0]]
-    else:
-        logging.warning("Ignoring vector index %s: unsupported opclass %s", row["index_name"], opclass)
         return None
 
     return VectorIndex(
@@ -162,13 +165,13 @@ def _parse(table: str, row: asyncpg.Record) -> VectorIndex | None:
         table=table,
         collection_id=int(predicate.group(1)),
         strategy=strategy,
-        dimensions=int(dimensions.group(1)),
+        dimensions=int(expression["dimensions"]),
         metric=metric,
         vector_type=vector_type,
     )
 
 
-TABLES = ("embeddings_vector", "embeddings_halfvec")
+TABLES = tuple(get_embeddings_table_and_cast(vector_type)[0] for vector_type in VectorType)
 
 
 async def discover_vector_indexes(conn: asyncpg.Connection) -> dict[int, list[VectorIndex]]:
@@ -222,6 +225,7 @@ async def find_collection_index_names(conn: asyncpg.Connection, collection_id: i
 
 def choose_index(
     indexes: list[VectorIndex] | None,
+    table: str,
     metric: DistanceMetric,
     dimensions: int,
 ) -> VectorIndex | None:
@@ -235,8 +239,13 @@ def choose_index(
     `cosine_similarity` is served by a cosine *distance* index: search orders by the bare
     distance ascending and reports `1 - distance`, so the two share an ordering.
 
+    Only an index on the table search reads is considered. The catalog keys an index by the
+    `collection_id` in its predicate, not by where that collection's rows live, so one built on
+    the other table matches nothing search emits.
+
     Args:
         indexes (list[VectorIndex] | None): Candidates for this collection.
+        table (str): Table the collection's rows live in, which search reads.
         metric (DistanceMetric): Metric the caller asked for.
         dimensions (int): Dimensionality the collection declares.
 
@@ -248,7 +257,7 @@ def choose_index(
 
     wanted = DistanceMetric.cosine_distance if metric == DistanceMetric.cosine_similarity else metric
 
-    usable = [index for index in indexes if index.dimensions == dimensions]
+    usable = [index for index in indexes if index.table == table and index.dimensions == dimensions]
     direct = [index for index in usable if index.strategy is IndexStrategy.direct and index.metric == wanted]
     if direct:
         return direct[0]
