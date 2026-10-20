@@ -51,6 +51,9 @@ class RepositoryInfoModel(BaseModel):
     etag: str
     size: int
     files: list[TreeEntryModel]
+    # Hugging Face calls repository file entries "siblings". Keep ``files``
+    # for the service API while exposing the native name for Hub clients.
+    siblings: list[dict[str, object]] = Field(default_factory=list)
     metadata: RepositoryMetadataModel
     security_status: dict
 
@@ -61,6 +64,19 @@ class RevisionModel(BaseModel):
     id: str
     revision: str
     sha: str
+
+
+class RevisionInfoModel(BaseModel):
+    """Hugging Face-compatible metadata for one repository revision."""
+
+    id: str
+    sha: str
+    etag: str
+    size: int
+    files: list[TreeEntryModel]
+    siblings: list[dict[str, object]] = Field(default_factory=list)
+    metadata: RepositoryMetadataModel
+    security_status: dict
 
 
 class RevisionListResponseModel(BaseModel):

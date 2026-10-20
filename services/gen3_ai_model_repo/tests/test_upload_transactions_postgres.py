@@ -8,6 +8,7 @@ database after applying the model-repository migrations.
 import asyncio
 import base64
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -470,6 +471,138 @@ async def test_two_reservations_compete_for_last_capacity(pg_connection, monkeyp
         )
         assert active == 1
         await connection.execute("DELETE FROM model_upload_intents WHERE namespace=$1 AND repo=$2", namespace, repo)
+
+
+@pytest.mark.asyncio
+async def test_lfs_batch_reuses_active_checksum_reservation(pg_connection, monkeypatch):
+    """The LFS batch route reuses one active reservation on the migrated schema."""
+    from starlette.requests import Request
+
+    import gen3_ai_model_repo.database.upload_intents as upload_intents
+    import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
+
+    namespace = f"tx-{uuid4().hex}"
+    repo = "lfs-batch"
+    oid = hashlib.sha256(b"lfs-content").hexdigest()
+
+    async with pg_connection.acquire() as connection:
+        await connection.execute("INSERT INTO models(namespace, model_name) VALUES($1, $2)", namespace, repo)
+
+    payload = json.dumps(
+        {
+            "operation": "upload",
+            "hash_algo": "sha256",
+            "ref": {"name": "main"},
+            "objects": [{"oid": oid, "size": len(b"lfs-content")}],
+        }
+    ).encode()
+
+    def make_request() -> Request:
+        consumed = False
+
+        async def receive():
+            nonlocal consumed
+            if consumed:
+                return {"type": "http.disconnect"}
+            consumed = True
+            return {"type": "http.request", "body": payload, "more_body": False}
+
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": f"/{namespace}/{repo}.git/info/lfs/objects/batch",
+                "raw_path": f"/{namespace}/{repo}.git/info/lfs/objects/batch".encode(),
+                "query_string": b"",
+                "headers": [],
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "client": ("testclient", 123),
+                "root_path": "",
+            },
+            receive,
+        )
+
+    class Provider:
+        async def generate_upload_url(self, object_key, **kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setattr(upload_routes, "get_storage_provider", lambda: Provider())
+    monkeypatch.setattr(upload_intents, "get_db_pool", lambda: pg_connection)
+    monkeypatch.setattr(upload_routes, "get_db_pool", lambda: pg_connection)
+    try:
+        first = await upload_routes.lfs_batch(namespace, repo, make_request())
+        second = await upload_routes.lfs_batch(namespace, repo, make_request())
+        expected_checksum = base64.b64encode(bytes.fromhex(oid)).decode()
+        assert first["objects"][0]["actions"]["upload"]["header"] == {
+            "x-amz-sdk-checksum-algorithm": "SHA256",
+            "x-amz-checksum-sha256": expected_checksum,
+        }
+        assert first["objects"][0]["actions"]["upload"]["href"] == second["objects"][0]["actions"]["upload"]["href"]
+        async with pg_connection.acquire() as connection:
+            count = await connection.fetchval(
+                """SELECT COUNT(*) FROM model_upload_intents
+                   WHERE namespace=$1 AND repo=$2 AND revision_name='main'
+                     AND checksum_sha256=$3 AND completed_at IS NULL""",
+                namespace,
+                repo,
+                oid,
+            )
+        assert count == 1
+    finally:
+        async with pg_connection.acquire() as connection:
+            await connection.execute("DELETE FROM models WHERE namespace=$1 AND model_name=$2", namespace, repo)
+
+
+@pytest.mark.asyncio
+async def test_lfs_proxy_rejects_expired_capability(pg_connection, monkeypatch):
+    """An expired LFS capability cannot reach storage through the proxy."""
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    import gen3_ai_model_repo.routes.ai_models_uploads as upload_routes
+
+    namespace = f"tx-{uuid4().hex}"
+    repo = "expired-lfs"
+    intent_id = uuid4()
+    async with pg_connection.acquire() as connection:
+        await connection.execute(
+            """INSERT INTO model_upload_intents
+               (id,namespace,repo,revision_name,file_name,object_key,checksum_sha256,reserved_bytes,expires_at)
+               VALUES($1,$2,$3,'main','model.bin',$4,$5,4,NOW()-INTERVAL '1 minute')""",
+            intent_id,
+            namespace,
+            repo,
+            f"{namespace}/{intent_id}/model.bin",
+            hashlib.sha256(b"dead").hexdigest(),
+        )
+
+    async def receive():
+        return {"type": "http.request", "body": b"dead", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "path": f"/api/models/{namespace}/{repo}/lfs/upload/{intent_id}",
+            "raw_path": b"",
+            "query_string": b"",
+            "headers": [],
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+            "root_path": "",
+        },
+        receive,
+    )
+    monkeypatch.setattr(upload_routes, "get_db_pool", lambda: pg_connection)
+    try:
+        with pytest.raises(HTTPException, match="not found") as error:
+            await upload_routes.lfs_upload_object(namespace, repo, intent_id, request)
+        assert error.value.status_code == 404
+    finally:
+        async with pg_connection.acquire() as connection:
+            await connection.execute("DELETE FROM model_upload_intents WHERE id=$1", intent_id)
 
 
 @pytest.mark.asyncio

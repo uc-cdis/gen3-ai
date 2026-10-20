@@ -29,6 +29,7 @@ DIRECT_UPLOAD_QUOTA_BYTES = int(starlette_config("DIRECT_UPLOAD_QUOTA_BYTES", ca
 DIRECT_UPLOAD_MAX_FILE_BYTES = int(starlette_config("DIRECT_UPLOAD_MAX_FILE_BYTES", cast=int, default="5368709120"))
 DIRECT_UPLOAD_MAX_INTENTS = int(starlette_config("DIRECT_UPLOAD_MAX_INTENTS", cast=int, default="100"))
 DIRECT_UPLOAD_EXPIRY_SECONDS = int(starlette_config("DIRECT_UPLOAD_EXPIRY_SECONDS", cast=int, default="3600"))
+HF_LFS_THRESHOLD_BYTES = int(starlette_config("HF_LFS_THRESHOLD_BYTES", cast=int, default="10485760"))
 
 DB_CONNECTION_STRING = starlette_config(
     "DB_CONNECTION_STRING",

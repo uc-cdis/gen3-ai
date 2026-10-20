@@ -14,6 +14,7 @@ from gen3_ai_model_repo.database.file_tracking import (
 )
 from gen3_ai_model_repo.database.repo_metadata import (
     create_model_metadata,
+    create_model_with_initial_revision,
     delete_model_metadata,
     get_model_metadata,
     list_models,
@@ -33,16 +34,102 @@ from gen3_ai_model_repo.models.schemas import (
     TreeEntryModel,
 )
 from gen3_ai_model_repo.routes.ai_models_shared import (
+    HuggingFaceCreateRepositoryRequest,
+    HuggingFaceDeleteRepositoryRequest,
     RepositoryCreateRequest,
     RepositoryUpdateRequest,
+    serialize_huggingface_siblings,
     validate_repository_path,
 )
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
+from gen3_ai_model_repo.storage.keys import validate_key_component
 
 ai_models_repositories_router = AuthorizedRouter(
     dependencies=[Depends(verify_authorization), Depends(validate_repository_path)]
 )
 REPOSITORY_NOT_FOUND_DETAIL = "Repository not found"
+
+
+@ai_models_repositories_router.post(
+    "/api/repos/create",
+    summary="Create a repository using the Hugging Face Hub protocol",
+    description="Create repository metadata for Hugging Face clients.",
+    tags=["Models"],
+)
+async def create_huggingface_repository(
+    http_request: Request, request: HuggingFaceCreateRepositoryRequest
+) -> dict[str, str]:
+    """
+    Create repository metadata from a Hugging Face Hub request.
+
+    Returns:
+        dict[str, str]: The repository identifier and URL expected by the Hub client.
+
+    Raises:
+        HTTPException: If the repository type or identifier is unsupported.
+    """
+    if request.repo_type not in (None, "model"):
+        raise HTTPException(status_code=422, detail="Only model repositories are supported")
+    repo_id = f"{request.organization}/{request.name}" if request.organization else request.name
+    parts = repo_id.split("/")
+    if len(parts) != 2:
+        raise HTTPException(status_code=422, detail="name must be a namespace/repository identifier")
+    namespace, repo = parts
+    try:
+        validate_key_component(namespace, "namespace")
+        validate_key_component(repo, "repo")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not await db_model_exists(namespace, repo):
+        await create_model_with_initial_revision(namespace, repo)
+    return {"url": f"{str(http_request.base_url).rstrip('/')}/{repo_id}", "repo_id": repo_id}
+
+
+@ai_models_repositories_router.delete(
+    "/api/repos/delete",
+    summary="Delete a repository using the Hugging Face Hub protocol",
+    description=(
+        "Delete a model repository named by the Hugging Face JSON body. "
+        "The name must be a namespace/repository identifier; tracked files, "
+        "revisions, and storage objects are removed. Model repositories are "
+        "supported; other repository types and unauthorized requests are rejected."
+    ),
+    response_description="Confirmation containing the deleted repository identifier.",
+    tags=["Models"],
+)
+async def delete_huggingface_repository(
+    request: Request, payload: HuggingFaceDeleteRepositoryRequest
+) -> DeleteModelResponse:
+    """
+    Delete the repository named in the Hub JSON body with DELETE authorization.
+
+    Returns:
+        DeleteModelResponse: Deletion status and repository identifier.
+
+    Raises:
+        HTTPException: If the repository payload is invalid or unauthorized.
+    """
+    if payload.repo_type not in (None, "model"):
+        raise HTTPException(status_code=422, detail="Only model repositories are supported")
+    repo_id = f"{payload.organization}/{payload.name}" if payload.organization else payload.name
+    parts = repo_id.split("/")
+    if len(parts) != 2:
+        raise HTTPException(status_code=422, detail="name must be a namespace/repository identifier")
+    namespace, repo = parts
+    try:
+        validate_key_component(namespace, "namespace")
+        validate_key_component(repo, "repo")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from common.auth import authorize_request
+
+    await authorize_request(
+        authz_resources=[f"/ai_model_repo/{namespace}/{repo}"],
+        authz_service_name=config.AUTHZ_SERVICE_NAME,
+        authz_access_method="delete",
+        request=request,
+    )
+    return await delete_model(namespace, repo)
 
 
 @ai_models_repositories_router.get(
@@ -126,12 +213,14 @@ async def get_repository(namespace: str, repo: str) -> RepositoryInfoModel:
         if revision_info
         else []
     )
+    siblings = serialize_huggingface_siblings(files_from_db)
     return RepositoryInfoModel(
         id=f"{namespace}/{repo}",
         sha=(revision_info["sha"] or "") if revision_info else "",
         etag=(revision_info["etag"] or revision_info["sha"] or "") if revision_info else "",
         size=sum(f["size"] for f in files_from_db),
         files=[TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files_from_db],
+        siblings=siblings,
         metadata=metadata,
         security_status=DEFAULT_SECURITY_FILE_STATUS,
     )

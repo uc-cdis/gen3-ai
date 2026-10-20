@@ -6,6 +6,36 @@ from pydantic import BaseModel, Field
 from gen3_ai_model_repo.storage.keys import validate_key_component
 
 
+def serialize_huggingface_siblings(files: list[dict]) -> list[dict[str, object]]:
+    """
+    Serialize tracked files without mislabeling regular objects as LFS.
+
+    Returns:
+        list[dict[str, object]]: HF-compatible sibling objects.
+
+    Raises:
+        ValueError: If an explicitly marked LFS file lacks pointer metadata.
+    """
+    siblings: list[dict[str, object]] = []
+    for file_record in files:
+        sibling: dict[str, object] = {
+            "rfilename": file_record["path"],
+            "size": file_record["size"],
+            "blob_id": file_record["oid"],
+        }
+        if file_record.get("storage_protocol") == "lfs":
+            pointer_size = file_record.get("pointer_size")
+            if not isinstance(pointer_size, int) or pointer_size < 1:
+                raise ValueError("LFS file metadata is missing pointer_size")
+            sibling["lfs"] = {
+                "sha256": file_record["oid"],
+                "size": file_record["size"],
+                "pointerSize": pointer_size,
+            }
+        siblings.append(sibling)
+    return siblings
+
+
 async def validate_repository_path(request: Request) -> None:
     """
     Reject repository path components that cannot be represented safely.
@@ -41,6 +71,23 @@ class RepositoryUpdateRequest(BaseModel):
 
     description: str | None = None
     tags: list[str] | None = None
+
+
+class HuggingFaceCreateRepositoryRequest(BaseModel):
+    """Subset of the Hugging Face repository-creation request we support."""
+
+    name: str
+    organization: str | None = None
+    private: bool = False
+    repo_type: str | None = None
+
+
+class HuggingFaceDeleteRepositoryRequest(BaseModel):
+    """Request payload used by ``HfApi.delete_repo``."""
+
+    name: str
+    organization: str | None = None
+    repo_type: str | None = Field(default=None, alias="type")
 
 
 class MultipartUploadResponse(BaseModel):

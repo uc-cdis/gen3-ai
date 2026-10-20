@@ -208,7 +208,8 @@ async def get_file_record(
     async with pool.acquire() as conn:
         stmt = await conn.prepare(
             """
-            SELECT mf.file_path, mf.file_size, mf.content_sha, mf.content_etag, mf.s3_key
+            SELECT mf.file_path, mf.file_size, mf.content_sha, mf.content_etag,
+                   mr.revision_identifier AS revision_sha, mr.etag AS revision_etag, mf.s3_key
             FROM model_files mf
             JOIN model_revisions mr ON mr.id = mf.revision_id
             JOIN models repo ON repo.id = mr.model_id
@@ -226,8 +227,12 @@ async def get_file_record(
     return {
         "path": row["file_path"],
         "size": row["file_size"],
-        "sha": row["content_sha"],
-        "etag": row["content_etag"],
+        "sha": row["revision_sha"],
+        # HF uses X-Linked-Etag as the blob-cache identity. Provider ETags
+        # are not guaranteed to be content identities (notably for multipart
+        # S3 uploads), so use the persisted SHA-256 unconditionally.
+        "etag": row["content_sha"],
+        "content_sha": row["content_sha"],
         "object_key": row["s3_key"],
         "s3_key": row["s3_key"],
     }

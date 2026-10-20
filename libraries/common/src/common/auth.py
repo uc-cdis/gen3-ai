@@ -79,10 +79,14 @@ async def authorize_request(
     authz_resources = authz_resources
 
     if config.ALLOW_ANONYMOUS_ACCESS:
-        logging.debug("ALLOW_ANONYMOUS_ACCESS mode is on, BYPASSING authorization check")
+        logging.warning(
+            "ALLOW_ANONYMOUS_ACCESS is enabled: authorization is unconditionally bypassed. "
+            "FOR NON-PRODUCTION USE ONLY!!"
+        )
         return
 
-    if config.DEBUG_SKIP_AUTH and not token:
+    supplied_authorization = request is not None and bool(request.headers.get("authorization"))
+    if config.DEBUG_SKIP_AUTH and not token and not supplied_authorization:
         logging.warning("DEBUG_SKIP_AUTH mode is on and no token was provided, BYPASSING authorization check")
         return
 
@@ -96,8 +100,8 @@ async def authorize_request(
     try:
         user_id = await get_user_id(token, request)
     except HTTPException as exc:
-        logging.debug(f"Unable to determine user_id. Defaulting to `Unknown`. Exc: {exc}")
-        user_id = "Unknown"
+        logging.warning("Supplied bearer token failed validation; rejecting authorization request")
+        raise exc
 
     is_authorized = False
     try:

@@ -1,6 +1,6 @@
 """File routes for the Gen3 AI model repo service."""
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette import status
 
@@ -14,6 +14,7 @@ from gen3_ai_model_repo.database.file_tracking import (
     list_files_in_revision,
     storage_key_is_referenced,
 )
+from gen3_ai_model_repo.database.repo_metadata import get_model_metadata
 from gen3_ai_model_repo.database.repo_metadata import model_exists as db_model_exists
 from gen3_ai_model_repo.database.revisions import delete_revision
 from gen3_ai_model_repo.database.revisions import get_revision as db_get_revision
@@ -21,11 +22,11 @@ from gen3_ai_model_repo.models.schemas import (
     FileListResponseModel,
     FileMetadataModel,
     RevisionDeleteResponse,
-    RevisionModel,
+    RevisionInfoModel,
     TreeEntryModel,
 )
-from gen3_ai_model_repo.response import build_head_response
-from gen3_ai_model_repo.routes.ai_models_shared import validate_repository_path
+from gen3_ai_model_repo.response import build_file_metadata_headers, build_head_response
+from gen3_ai_model_repo.routes.ai_models_shared import serialize_huggingface_siblings, validate_repository_path
 from gen3_ai_model_repo.storage.helpers import get_storage_provider
 
 ai_models_files_router = AuthorizedRouter(
@@ -47,11 +48,7 @@ def _local_file_response(local_path, file_record):
     return FileResponse(
         local_path,
         media_type="application/octet-stream",
-        headers={
-            "X-Repo-Commit": file_record["sha"],
-            "X-Linked-Etag": file_record["etag"] or "",
-            "X-Linked-Size": str(file_record["size"]),
-        },
+        headers=build_file_metadata_headers(file_record["sha"], file_record["etag"] or "", file_record["size"]),
     )
 
 
@@ -103,6 +100,8 @@ async def list_repo_tree(
     repo: str,
     rev: str,
     path: str = "",
+    recursive: bool = Query(False),
+    expand: bool = Query(False),
 ) -> list[TreeEntryModel]:
     """
     List repository directory contents at a specific revision.
@@ -117,22 +116,44 @@ async def list_repo_tree(
     if not repo_exists:
         raise HTTPException(status_code=404, detail="Repository not found")
 
+    revision = await db_get_revision(namespace, repo, rev)
+    if not revision:
+        raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
+
     files = await list_files_in_revision(
         namespace=namespace,
         model_name=repo,
-        revision_name=rev,
+        revision_name=revision["revision"],
     )
 
     if path:
         prefix = path.rstrip("/") + "/"
         files = [f for f in files if f["path"] == path or f["path"].startswith(prefix)]
 
-    return [TreeEntryModel(type=f["type"], oid=f["oid"], size=f["size"], path=f["path"]) for f in files]
+    if not recursive:
+        prefix = path.rstrip("/") + "/" if path else ""
+        immediate: dict[str, dict] = {}
+        for file_record in files:
+            relative = (
+                file_record["path"][len(prefix) :]
+                if prefix and file_record["path"].startswith(prefix)
+                else file_record["path"]
+            )
+            if prefix and not file_record["path"].startswith(prefix):
+                continue
+            first = relative.split("/", 1)[0]
+            if "/" in relative:
+                immediate.setdefault(first, {"type": "directory", "oid": None, "size": 0, "path": prefix + first})
+            else:
+                immediate[first] = file_record
+        files = list(immediate.values())
+
+    return [TreeEntryModel(type=f["type"], oid=f.get("oid"), size=f["size"], path=f["path"]) for f in files]
 
 
 @ai_models_files_router.get(
     "/api/models/{namespace}/{repo}/revisions/{revision}",
-    response_model=RevisionModel,
+    response_model=RevisionInfoModel,
     summary="Get revision metadata",
     description="Retrieve detailed metadata for a specific revision of a model repository including commit hash and ETag.",
     tags=["Models"],
@@ -141,12 +162,12 @@ async def list_repo_tree(
     "/api/models/{namespace}/{repo}/revision/{revision}",
     description="Retrieve metadata for a repository revision.",
 )
-async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionModel:
+async def get_model_revision(namespace: str, repo: str, revision: str) -> RevisionInfoModel:
     """
     Retrieve revision metadata by revision name.
 
     Returns:
-        RevisionModel: The revision metadata model.
+        RevisionInfoModel: Hugging Face-compatible revision metadata.
 
     Raises:
         HTTPException: If the revision is not found.
@@ -155,7 +176,23 @@ async def get_model_revision(namespace: str, repo: str, revision: str) -> Revisi
     data = await db_get_revision(namespace, repo, revision)
     if not data:
         raise HTTPException(status_code=404, detail=REVISION_NOT_FOUND_DETAIL)
-    return RevisionModel(id=str(data["id"]), revision=data["revision"], sha=data["sha"] or "")
+    files = await list_files_in_revision(namespace, repo, revision)
+    siblings = serialize_huggingface_siblings(files)
+    metadata = await get_model_metadata(namespace, repo)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return RevisionInfoModel(
+        id=f"{namespace}/{repo}",
+        sha=data["sha"] or "",
+        etag=data.get("etag") or data["sha"] or "",
+        size=sum(item["size"] for item in files),
+        files=[
+            TreeEntryModel(type=item["type"], oid=item["oid"], size=item["size"], path=item["path"]) for item in files
+        ],
+        siblings=siblings,
+        metadata=metadata,
+        security_status={},
+    )
 
 
 @ai_models_files_router.head(
@@ -253,7 +290,11 @@ async def get_file(namespace: str, repo: str, rev: str, path: str):
         return _local_file_response(local_path, file_record)
     signed_url = await provider.generate_signed_url(file_record["object_key"])
     logging.info(f"Redirecting to signed URL for {file_record['object_key']}")
-    return RedirectResponse(url=signed_url, status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        url=signed_url,
+        status_code=status.HTTP_302_FOUND,
+        headers=build_file_metadata_headers(file_record["sha"], file_record["etag"] or "", file_record["size"]),
+    )
 
 
 @ai_models_files_router.get(

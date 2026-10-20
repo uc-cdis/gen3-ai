@@ -59,7 +59,8 @@ async def get_revision(
             SELECT mr.id, mr.revision_name, mr.revision_identifier, mr.etag, mr.created_at
             FROM model_revisions mr
             JOIN models repo ON repo.id = mr.model_id
-            WHERE repo.namespace = $1 AND repo.model_name = $2 AND mr.revision_name = $3;
+            WHERE repo.namespace = $1 AND repo.model_name = $2
+              AND (mr.revision_name = $3 OR mr.revision_identifier = $3);
             """
         )
         row = await stmt.fetchrow(namespace, model_name, revision_name)

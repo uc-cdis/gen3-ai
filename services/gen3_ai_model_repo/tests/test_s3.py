@@ -4,6 +4,7 @@ import asyncio
 import time
 from io import BytesIO
 from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -71,6 +72,49 @@ async def test_s3_generates_signed_urls(provider):
     assert await provider.generate_signed_url("models/demo/config.json", expiry_seconds=60) == "download-url"
     assert await provider.generate_upload_url("models/demo/config.json", expiry_seconds=60) == "upload-url"
     assert provider.client.generate_presigned_url.call_count == 2
+
+
+def test_s3_client_uses_sigv4_and_path_style(monkeypatch):
+    """S3-compatible presigning uses SigV4 and preserves path-style URLs."""
+    import boto3
+
+    captured = {}
+
+    class Session:
+        def client(self, service, **kwargs):
+            captured.update(kwargs)
+            return MagicMock()
+
+    monkeypatch.setattr(boto3.session, "Session", Session)
+    S3StorageProvider(
+        bucket_name="models",
+        endpoint_url="http://127.0.0.1:8333",
+        access_key_id="test-access-key",
+        secret_access_key="not-a-real-secret",  # pragma: allowlist secret
+    )
+    assert captured["config"].signature_version == "s3v4"
+    assert captured["config"].s3["addressing_style"] == "path"
+
+
+@pytest.mark.asyncio
+async def test_s3_presigned_put_contains_checksum_contract():
+    """Presigned PUTs retain checksum signing parameters without bearer auth."""
+    storage = S3StorageProvider(
+        bucket_name="models",
+        endpoint_url="http://127.0.0.1:8333",
+        access_key_id="test-access-key",
+        secret_access_key="not-a-real-secret",  # pragma: allowlist secret
+    )
+    checksum = "a" * 43 + "="
+    url = await storage.generate_upload_url("repo/object.bin", checksum_sha256=checksum)
+    parsed = urlsplit(url)
+    query = parse_qs(parsed.query)
+    assert parsed.scheme == "http"
+    assert parsed.netloc == "127.0.0.1:8333"
+    assert parsed.path == "/models/repo/object.bin"
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    assert query["X-Amz-SignedHeaders"] == ["host;x-amz-checksum-sha256;x-amz-sdk-checksum-algorithm"]
+    assert "Authorization" not in query
 
 
 @pytest.mark.asyncio

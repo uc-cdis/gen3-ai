@@ -104,6 +104,26 @@
               "type": "string",
               "title": "Path"
             }
+          },
+          {
+            "name": "recursive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Recursive"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Expand"
+            }
           }
         ],
         "responses": {
@@ -188,6 +208,26 @@
               "default": "",
               "title": "Path"
             }
+          },
+          {
+            "name": "recursive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Recursive"
+            }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Expand"
+            }
           }
         ],
         "responses": {
@@ -267,7 +307,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RevisionModel"
+                  "$ref": "#/components/schemas/RevisionInfoModel"
                 }
               }
             }
@@ -334,7 +374,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RevisionModel"
+                  "$ref": "#/components/schemas/RevisionInfoModel"
                 }
               }
             }
@@ -921,6 +961,106 @@
         }
       }
     },
+    "/api/repos/create": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Create a repository using the Hugging Face Hub protocol",
+        "description": "Create repository metadata for Hugging Face clients.",
+        "operationId": "create_huggingface_repository_api_repos_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HuggingFaceCreateRepositoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Create Huggingface Repository Api Repos Create Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/repos/delete": {
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Delete a repository using the Hugging Face Hub protocol",
+        "description": "Delete a model repository named by the Hugging Face JSON body. The name must be a namespace/repository identifier; tracked files, revisions, and storage objects are removed. Model repositories are supported; other repository types and unauthorized requests are rejected.",
+        "operationId": "delete_huggingface_repository_api_repos_delete_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HuggingFaceDeleteRepositoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation containing the deleted repository identifier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteModelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models": {
       "get": {
         "tags": [
@@ -1473,6 +1613,66 @@
         }
       }
     },
+    "/{namespace}/{repo}.git/info/lfs/objects/batch": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Negotiate a Hugging Face LFS upload",
+        "description": "Accept a SHA-256 LFS upload batch request and return basic-transfer upload and verification actions. Each object is bounded by the service size and quota limits, backed by a durable upload intent, and must pass checksum and size validation before it can be committed. Only model repositories and the legacy basic LFS transfer are supported; Xet and other LFS transfers are not provided.",
+        "operationId": "lfs_batch__namespace___repo__git_info_lfs_objects_batch_post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "LFS transfer selection and per-object upload/verify actions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Lfs Batch  Namespace   Repo  Git Info Lfs Objects Batch Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/{namespace}/{repo}/upload": {
       "post": {
         "tags": [
@@ -1676,6 +1876,153 @@
           }
         }
       }
+    },
+    "/api/models/{namespace}/{repo}/preupload/{revision}": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Prepare a Hugging Face commit upload",
+        "description": "Inspect a bounded list of files from a Hugging Face commit request and select regular or legacy LFS upload mode by file size. The response contains one upload decision per path; storage limits and total request limits are enforced. This endpoint does not make files visible; use the corresponding upload and commit operations. Xet is not supported.",
+        "operationId": "preupload_huggingface_files_api_models__namespace___repo__preupload__revision__post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-file upload modes and ignore decisions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Preupload Huggingface Files Api Models  Namespace   Repo  Preupload  Revision  Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{namespace}/{repo}/commit/{revision}": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Apply a Hugging Face commit",
+        "description": "Apply newline-delimited JSON file, LFS-file, and deletion operations atomically to a model revision. Regular uploads use bounded service storage and LFS files must reference validated durable upload intents; existing repository contents remain unchanged if validation or commit fails. Repository authorization, quotas, checksums, and size limits apply. Xet commit operations are not supported.",
+        "operationId": "commit_huggingface_files_api_models__namespace___repo__commit__revision__post",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The committed revision identifier and commit URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Commit Huggingface Files Api Models  Namespace   Repo  Commit  Revision  Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User unauthenticated"
+          },
+          "403": {
+            "description": "User does not have access"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1855,6 +2202,83 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HuggingFaceCreateRepositoryRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private",
+            "default": false
+          },
+          "repo_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "HuggingFaceCreateRepositoryRequest",
+        "description": "Subset of the Hugging Face repository-creation request we support."
+      },
+      "HuggingFaceDeleteRepositoryRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "HuggingFaceDeleteRepositoryRequest",
+        "description": "Request payload used by ``HfApi.delete_repo``."
+      },
       "MultipartUploadResponse": {
         "properties": {
           "status": {
@@ -1987,6 +2411,14 @@
             },
             "type": "array",
             "title": "Files"
+          },
+          "siblings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Siblings"
           },
           "metadata": {
             "$ref": "#/components/schemas/RepositoryMetadataModel"
@@ -2187,6 +2619,61 @@
         "title": "RevisionDeleteResponse",
         "description": "Response payload for revision deletion."
       },
+      "RevisionInfoModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/TreeEntryModel"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "siblings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Siblings"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/RepositoryMetadataModel"
+          },
+          "security_status": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Security Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sha",
+          "etag",
+          "size",
+          "files",
+          "metadata",
+          "security_status"
+        ],
+        "title": "RevisionInfoModel",
+        "description": "Hugging Face-compatible metadata for one repository revision."
+      },
       "RevisionListResponseModel": {
         "properties": {
           "repo": {
@@ -2278,11 +2765,22 @@
           "file_name": {
             "type": "string",
             "title": "File Name"
+          },
+          "checksum_sha256": {
+            "type": "string",
+            "title": "Checksum Sha256"
+          },
+          "file_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "File Size"
           }
         },
         "type": "object",
         "required": [
-          "file_name"
+          "file_name",
+          "checksum_sha256",
+          "file_size"
         ],
         "title": "UploadUrlRequest",
         "description": "Request payload for generating an upload URL."

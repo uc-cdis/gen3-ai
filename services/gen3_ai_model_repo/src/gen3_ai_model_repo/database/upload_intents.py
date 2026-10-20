@@ -101,3 +101,20 @@ async def complete_upload_intents(intent_ids: list[UUID]) -> None:
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE model_upload_intents SET completed_at=NOW() WHERE id=ANY($1::uuid[])", intent_ids)
+
+
+async def get_active_intent_by_checksum(namespace: str, repo: str, revision: str, checksum_sha256: str):
+    """Return an active LFS reservation for a content SHA-256."""
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            """SELECT id, object_key, checksum_sha256, reserved_bytes
+               FROM model_upload_intents
+               WHERE namespace=$1 AND repo=$2 AND revision_name=$3
+                 AND checksum_sha256=$4 AND completed_at IS NULL AND expires_at > NOW()
+               ORDER BY expires_at DESC, id DESC LIMIT 1""",
+            namespace,
+            repo,
+            revision,
+            checksum_sha256,
+        )

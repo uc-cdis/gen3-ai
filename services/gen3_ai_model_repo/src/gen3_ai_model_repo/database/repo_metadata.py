@@ -5,9 +5,35 @@ Handles CRUD operations for repository metadata including
 namespace, repository name, description, and tags.
 """
 
+import hashlib
+
 from gen3_ai_model_repo.config import MAX_SEARCH_LENGTH
 from gen3_ai_model_repo.database.db import get_db_pool
 from gen3_ai_model_repo.models.schemas import RepositoryMetadataModel
+
+
+async def create_model_with_initial_revision(namespace: str, model_name: str) -> None:
+    """Create a repository and its empty ``main`` revision atomically."""
+    pool = await get_db_pool()
+    revision_sha = hashlib.sha256(f"{namespace}/{model_name}:main".encode()).hexdigest()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            model = await conn.fetchrow(
+                """INSERT INTO models (namespace, model_name, description, tags)
+                   VALUES ($1, $2, $3, $4) RETURNING id""",
+                namespace,
+                model_name,
+                "",
+                [],
+            )
+            await conn.execute(
+                """INSERT INTO model_revisions (model_id, revision_name, revision_identifier, etag)
+                   VALUES ($1, $2, $3, $4)""",
+                model["id"],
+                "main",
+                revision_sha,
+                revision_sha[:32],
+            )
 
 
 async def create_model_metadata(

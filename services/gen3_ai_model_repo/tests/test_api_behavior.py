@@ -83,14 +83,58 @@ def test_tree_empty_repository_returns_200_empty_list(monkeypatch):
         del namespace, model_name, revision_name
         return []
 
+    async def fake_get_revision(namespace, model_name, revision_name):
+        del namespace, model_name
+        return {"revision": revision_name, "sha": "commit-sha"}
+
     monkeypatch.setattr(file_routes, "db_model_exists", fake_exists)
     monkeypatch.setattr(file_routes, "list_files_in_revision", fake_list_files_in_revision)
+    monkeypatch.setattr(file_routes, "db_get_revision", fake_get_revision)
 
     client = _build_test_client()
     response = client.get("/api/models/ns/repo/tree/main")
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_remote_resolve_redirect_preserves_file_metadata_headers(monkeypatch):
+    """GET and HEAD remote redirects carry revision and file identity metadata."""
+    import gen3_ai_model_repo.routes.ai_models_files as file_routes
+
+    content = b"remote-content"
+    record = {
+        "object_key": "ns/repo/main/config.json",
+        "size": len(content),
+        "sha": "revision-sha",
+        "etag": "content-sha",
+    }
+
+    class Provider:
+        async def get_file_path(self, object_key):
+            assert object_key == record["object_key"]
+            return None
+
+        async def generate_signed_url(self, object_key):
+            assert object_key == record["object_key"]
+            return "http://storage.invalid/models/config.json?signature=redacted"
+
+    async def get_file_record(*args, **kwargs):
+        del args, kwargs
+        return record
+
+    monkeypatch.setattr(file_routes, "get_file_record", get_file_record)
+    monkeypatch.setattr(file_routes, "get_storage_provider", lambda: Provider())
+    client = _build_test_client()
+
+    for method in ("get", "head"):
+        response = client.request(method, "/api/models/ns/repo/resolve/main/config.json", follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["location"].startswith("http://storage.invalid/")
+        assert response.headers["x-repo-commit"] == "revision-sha"
+        assert response.headers["x-linked-etag"] == "content-sha"
+        assert response.headers["x-linked-size"] == str(len(content))
+        assert response.headers.get("content-length") != str(len(content))
 
 
 def test_tree_path_filter_matches_path_segments(monkeypatch):
@@ -109,14 +153,53 @@ def test_tree_path_filter_matches_path_segments(monkeypatch):
             {"path": "config.yaml", "type": "file", "oid": "yaml", "size": 3},
         ]
 
+    async def fake_get_revision(namespace, model_name, revision_name):
+        del namespace, model_name
+        return {"revision": revision_name, "sha": "commit-sha"}
+
     monkeypatch.setattr(file_routes, "db_model_exists", fake_exists)
     monkeypatch.setattr(file_routes, "list_files_in_revision", fake_list_files_in_revision)
+    monkeypatch.setattr(file_routes, "db_get_revision", fake_get_revision)
 
     client = _build_test_client()
     response = client.get("/api/models/ns/repo/tree/main/conf")
 
     assert response.status_code == 200
     assert response.json() == [{"type": "file", "oid": "settings", "size": 2, "path": "conf/settings.json"}]
+
+
+def test_tree_recursive_resolves_branch_and_commit_with_nested_files(monkeypatch):
+    """HF tree enumeration accepts both main and its returned commit SHA."""
+    import gen3_ai_model_repo.routes.ai_models_files as file_routes
+
+    files = [
+        {"path": "config.json", "type": "file", "oid": "config", "size": 1},
+        {"path": "1_Pooling/config.json", "type": "file", "oid": "pool", "size": 2},
+    ]
+
+    async def fake_exists(namespace, repo):
+        del namespace, repo
+        return True
+
+    async def fake_revision(namespace, repo, revision):
+        del namespace, repo
+        if revision in {"main", "commit-sha"}:
+            return {"revision": "main", "sha": "commit-sha"}
+        return None
+
+    async def fake_files(namespace, model_name, revision_name="main"):
+        del namespace, model_name, revision_name
+        return files
+
+    monkeypatch.setattr(file_routes, "db_model_exists", fake_exists)
+    monkeypatch.setattr(file_routes, "db_get_revision", fake_revision)
+    monkeypatch.setattr(file_routes, "list_files_in_revision", fake_files)
+    client = _build_test_client()
+
+    for revision in ("main", "commit-sha"):
+        response = client.get(f"/api/models/ns/repo/tree/{revision}?recursive=true")
+        assert response.status_code == 200
+        assert {entry["path"] for entry in response.json()} == {"config.json", "1_Pooling/config.json"}
 
 
 def test_tree_missing_repository_returns_404(monkeypatch):

@@ -10,11 +10,14 @@ client library.
 ## How it works
 
 Each model is identified by `namespace/repo` and has named revisions (normally
-`main`). Files use this storage layout:
+`main`). Committed files use attempt-specific storage keys:
 
 ```text
-<namespace>/<repo>/<revision>/<file name>
+<namespace>/<repo>/<revision>/<attempt id>/<file name>
 ```
+
+Staged direct/LFS objects are not visible in repository metadata until atomic
+completion succeeds.
 
 PostgreSQL tracks hashes, sizes, ETags, and storage keys; it does not store
 model bytes. Use local storage for a single-process development setup and
@@ -34,6 +37,15 @@ The main endpoints are:
 - `GET /api/models/{namespace}/{repo}/files` — list tracked files.
 - `GET /api/models/{namespace}/{repo}/resolve/{revision}/{path}` — download a
   file through an authorized local response or signed S3 URL.
+- `POST /api/repos/create` — create a repository for Hugging Face clients.
+- `POST /api/models/{namespace}/{repo}/preupload/{revision}` — select regular
+  or legacy LFS transfer mode for a commit.
+- `POST /{namespace}/{repo}.git/info/lfs/objects/batch` — negotiate bounded
+  legacy LFS uploads; the service returns an expiring upload proxy capability.
+- `POST /api/models/{namespace}/{repo}/commit/{revision}` — atomically commit
+  regular, LFS, and deletion operations.
+- `GET /api/models/{namespace}/{repo}/tree/{revision}` — enumerate repository
+  files, including recursive nested paths.
 - `POST /api/models/{namespace}/{repo}/upload` — multipart upload that creates a
   revision.
 - `POST /api/models/{namespace}/{repo}/upload-url`, then
@@ -48,8 +60,9 @@ repository root with `just openapi`.
 
 ### Prerequisites and configuration
 
-Install `uv`, `just`, `dbmate`, and PostgreSQL. The repository helper checks
-these tools:
+Install `uv`, `just`, `dbmate`, Docker, PostgreSQL, and (for the live S3/HF
+workflow) the AWS CLI. The repository helper checks the core tools. Run this
+from the repository root:
 
 ```bash
 just setup
@@ -87,6 +100,7 @@ The relative local storage path is resolved from
 Start PostgreSQL for this example with:
 
 ```bash
+# Working directory: repository root
 docker run --name my-postgres-db \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=<choose-a-local-password> \
@@ -100,6 +114,7 @@ with `db_setup` and `db_load`. For an existing database, use versioned
 migrations with `db_migrate` instead of the fresh-database load workflow.
 
 ```bash
+# Working directory: repository root
 just db_setup gen3_ai_model_repo   # repository root
 just db_load gen3_ai_model_repo    # repository root; fresh database only
 just install gen3_ai_model_repo    # repository root
@@ -109,12 +124,15 @@ just run gen3_ai_model_repo        # repository root; serves on port 8000
 For an existing database:
 
 ```bash
+# Working directory: repository root
 just db_migrate gen3_ai_model_repo # repository root; existing database
 ```
 
 Verify that the migrated database is the same one configured for the service:
 
 ```bash
+# Working directory: repository root
+
 set -a
 source services/gen3_ai_model_repo/.env
 set +a
@@ -131,12 +149,13 @@ against an existing database; use `db_migrate` instead.
 The service listens on `http://localhost:8000`:
 
 ```bash
+# Working directory: repository root
 curl http://localhost:8000/_status
 open http://localhost:8000/docs  # macOS; open /docs manually elsewhere
 ```
 
-Use another port by passing it as the second positional argument from the
-repository root, for example `just run gen3_ai_model_repo 4141`.
+Use another port only when needed by passing it as the second positional
+argument from the repository root; all workflows below use port 8000.
 
 ### Authorization
 
@@ -162,6 +181,13 @@ token when no token is supplied. `ALLOW_ANONYMOUS_ACCESS=true` bypasses
 authorization unconditionally. Both are unsafe in production and should be
 unset or `false` outside local development. If a token is supplied while
 `DEBUG_SKIP_AUTH=true`, it is still validated and authorized.
+
+For no-token Hugging Face development examples, unset `HF_TOKEN` and avoid a
+cached token. Python clients should pass `token=False`; the CLI should run in a
+clean token environment. `DEBUG_SKIP_AUTH` bypasses only missing-token checks;
+it does not accept an invalid supplied token. `ALLOW_ANONYMOUS_ACCESS` is a
+separate, unconditional bypass and must not be used for production or shared
+development deployments.
 
 ### Upload locally
 
@@ -214,12 +240,69 @@ configuration section below, then restart the service before uploading.
 
 ### Use Hugging Face libraries
 
+Use the Hugging Face clients as the primary repository workflow. With the
+service running on port 8000, create, upload, and download a model folder.
+This requires `huggingface-hub==2.2.0`; Xet is unsupported, so disable it
+before importing or running the client:
+
+```bash
+# Working directory: repository root
+unset HF_TOKEN
+unset HUGGING_FACE_HUB_TOKEN
+export HF_ENDPOINT=http://127.0.0.1:8000
+export HF_HUB_DISABLE_XET=true
+export HF_HUB_DISABLE_IMPLICIT_TOKEN=true
+export HF_HOME="$(mktemp -d)"
+uv run --with huggingface-hub==2.2.0 hf repo create test/repo --type model
+uv run --with huggingface-hub==2.2.0 hf upload test/repo ./model-files --repo-type model
+uv run --with huggingface-hub==2.2.0 hf download test/repo --repo-type model --local-dir ./downloaded-model
+```
+
+The equivalent Python flow uses `token=False` to avoid cached credentials:
+
+```python
+# Working directory: repository root; run with huggingface-hub==2.2.0
+import hashlib
+from pathlib import Path
+
+from huggingface_hub import HfApi, snapshot_download
+
+api = HfApi(endpoint="http://127.0.0.1:8000", token=False)
+api.create_repo("test/repo", repo_type="model")
+api.upload_folder(repo_id="test/repo", folder_path="./model-files", token=False)
+snapshot = snapshot_download("test/repo", endpoint="http://127.0.0.1:8000", token=False)
+
+expected = {
+    path.relative_to("model-files"): hashlib.sha256(path.read_bytes()).digest()
+    for path in Path("model-files").rglob("*")
+    if path.is_file()
+}
+actual = {
+    path.relative_to(snapshot): hashlib.sha256(path.read_bytes()).digest()
+    for path in Path(snapshot).rglob("*")
+    if path.is_file()
+}
+assert expected == actual, (expected, actual)
+assert "1_Pooling/config.json" in {str(path) for path in actual}
+```
+
+These clients exercise repository creation, preupload selection, LFS
+batch/proxy for large files, atomic commit, metadata/tree enumeration, and
+resolve downloads. Recursive trees include nested files such as
+`1_Pooling/config.json`; use fresh caches when checking replacement and
+deletion. Xet is unsupported, so keep `HF_HUB_DISABLE_XET=true` for legacy
+LFS uploads. The fixture used by the opt-in tests is intentionally minimal;
+configuration/tokenizer/weight files are needed for a complete runnable
+Transformers model and a successful transfer alone does not prove model
+inference compatibility.
+
 The repository includes a download example for an S3-compatible storage
 provider:
 
 ```bash
+# Working directory: services/gen3_ai_model_repo
 cd services/gen3_ai_model_repo
-uv run --with huggingface-hub python docs/transformers_example.py
+HF_HUB_DISABLE_XET=true uv run --with huggingface-hub==2.2.0 python docs/transformers_example.py
 ```
 
 The `--with` flag installs the demo-only client for this invocation. The
@@ -235,14 +318,37 @@ import os
 from transformers import AutoModel, AutoTokenizer
 
 os.environ["HF_ENDPOINT"] = "http://127.0.0.1:8000"
+os.environ["HF_HUB_DISABLE_XET"] = "true"
 repo_id = "test/repo"
-tokenizer = AutoTokenizer.from_pretrained(repo_id, revision="main")
-model = AutoModel.from_pretrained(repo_id, revision="main")
+tokenizer = AutoTokenizer.from_pretrained(repo_id, revision="main", token=False)
+model = AutoModel.from_pretrained(repo_id, revision="main", token=False)
 ```
 
 For authenticated access, provide a Gen3 bearer token using the supported
-token mechanism for the installed `huggingface_hub` version (commonly
-`HF_TOKEN`) and ensure that it has the Arborist permission above.
+token mechanism for the installed `huggingface_hub` version and ensure that it
+has the Arborist permission above. Do not use dummy tokens.
+
+#### Transfer selection and large files
+
+With `huggingface-hub==2.2.0`, the default upload path uses Xet when the
+client's `hf_xet` package is installed. This service does not implement the
+Xet token, CAS, or upload-commit protocol. For the supported legacy LFS
+batch/upload/verify flow, set this client option before starting Python or the
+`hf` CLI:
+
+```bash
+export HF_HUB_DISABLE_XET=true
+```
+
+In `huggingface-hub==2.2.0`, this makes `is_xet_available()` false and selects
+the legacy LFS path. It is a client-side transfer selector, not an
+authorization bypass or an Xet endpoint. LFS support is therefore configured
+compatibility; default 2.2.0 Xet uploads remain unsupported until the Xet
+protocol is implemented by the service. The LFS batch response uses a
+short-lived, repository-scoped service upload capability backed by a durable
+upload intent. This proxy is needed because the 2.2.0 basic LFS uploader does
+not forward `actions.upload.header`; it still validates size and SHA-256 before
+storing an attempt-specific object, and the capability is not a bearer token.
 
 ## Storage configuration
 
@@ -328,27 +434,46 @@ S3_REGION=us-east-1
 STORAGE_CREATE_BUCKET_IF_MISSING=true
 ```
 
-Start the service on port `8001` for this example (use `8000` if it is free):
+Start the service on port `8000`:
 
 ```bash
-just run gen3_ai_model_repo 8001
+just run gen3_ai_model_repo
 ```
 
-Then use the documented multipart upload command. Verify the object in
-SeaweedFS and download it through the service:
+Use the real HF workflow against the SeaweedFS-backed service first. From the
+repository root, with token environment variables unset:
 
 ```bash
+# Working directory: repository root
+unset HF_TOKEN HUGGING_FACE_HUB_TOKEN
+export HF_HUB_DISABLE_IMPLICIT_TOKEN=true
+export HF_HUB_DISABLE_XET=true
+export HF_ENDPOINT=http://127.0.0.1:8000
+export HF_HOME="$(mktemp -d)"
+uv run --with huggingface-hub==2.2.0 hf repo create s3test/repo --type model
+uv run --with huggingface-hub==2.2.0 hf upload s3test/repo ./model-files --repo-type model
+uv run --with huggingface-hub==2.2.0 hf download s3test/repo --repo-type model --local-dir ./s3test-download
+```
+
+The custom multipart API remains useful for service-specific tests. Verify the
+object in SeaweedFS and download it through the service:
+
+```bash
+# Working directory: repository root
 AWS_ACCESS_KEY_ID="$SEAWEED_ACCESS_KEY" \
 AWS_SECRET_ACCESS_KEY="$SEAWEED_SECRET_KEY" \
 aws --endpoint-url http://127.0.0.1:8333 \
   s3 ls s3://model-repo/s3test/repo/s3-test/
 
 curl -iL \
-  http://localhost:8001/api/models/s3test/repo/resolve/s3-test/config.json
+  http://localhost:8000/api/models/s3test/repo/resolve/s3-test/config.json
 ```
 
 The S3 flow stores bytes in SeaweedFS and returns them through the authorized
-model-repository route. To return to filesystem testing, set
+model-repository route. The HF LFS proxy validates bounded streamed bytes and
+SHA-256 before handing them to S3; direct-upload URLs are a separate S3-only
+API and require the client to send the signed checksum headers unchanged. To
+return to filesystem testing, set
 `STORAGE_PROVIDER=local`, restore `LOCAL_STORAGE_PATH=./data`, and restart.
 
 For AWS-style S3, prefer workload/instance credentials. If explicit
@@ -386,6 +511,99 @@ ingress/proxy, expose `/_status` for probes, and monitor `/metrics`.
 
 ## Tests and maintenance
 
+### Verification commands
+
+Run these from the repository root. The PostgreSQL suite uses only the
+configured disposable database; it does not create or reset the service
+database:
+
+```bash
+# Working directory: repository root; PostgreSQL must already be migrated
+GEN3_AI_MODEL_REPO_TEST_DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5433/<database>' \
+DEBUG_SKIP_AUTH=false \
+uv run --directory services/gen3_ai_model_repo pytest -q tests
+```
+
+For the real HF library and CLI suite, start the service with SeaweedFS and a
+disposable PostgreSQL database, then run from the repository root with isolated
+credentials and caches:
+
+```bash
+# Working directory: repository root; service must be running on 127.0.0.1:8000
+unset HF_TOKEN HUGGING_FACE_HUB_TOKEN GEN3_AI_MODEL_REPO_TEST_TOKEN
+export HF_ENDPOINT=http://127.0.0.1:8000
+export HF_HUB_DISABLE_XET=true
+export HF_HUB_DISABLE_IMPLICIT_TOKEN=true
+export HF_HOME="$(mktemp -d)"
+uv run --directory services/gen3_ai_model_repo \
+  --with huggingface-hub==2.2.0 pytest -q tests/test_huggingface_upload_download.py
+```
+
+The live suite is opt-in and skips when its service, storage, or authorization
+prerequisites are absent. It asserts non-empty snapshots, nested files,
+replacement/deletion, LFS proxy transfers, and exact bytes. The default CI
+`just test gen3_ai_model_repo` target does not provide those external
+prerequisites and does not establish live HF coverage.
+
+Check development authorization separately from the repository root:
+
+```bash
+# Working directory: repository root; service must be running on port 8000
+curl --fail-with-body -i http://127.0.0.1:8000/_status
+curl --fail-with-body -i http://127.0.0.1:8000/api/models
+curl -i -H 'Authorization: Bearer malformed' http://127.0.0.1:8000/api/models
+```
+
+With `DEBUG_SKIP_AUTH=true`, the first two requests are expected to return
+200 and the malformed-token request is expected to return 401 (or the
+deployment's equivalent invalid-token response). With bypass disabled, use a
+real authorized token and expect repository-denied requests to return 403.
+
+Run the disposable verification scripts from the repository root. They use
+unique database names and clean up only resources they create:
+
+```bash
+# Working directory: repository root; disposable PostgreSQL server on 127.0.0.1:5433
+TEST_PGHOST=127.0.0.1 TEST_PGPORT=5433 TEST_PGUSER=postgres \
+TEST_PGPASSWORD=postgres bash scripts/verify_model_repo_migrations.sh
+
+# Working directory: repository root; PostgreSQL 16 server and client on 127.0.0.1:5433
+TEST_PGHOST=127.0.0.1 TEST_PGPORT=5433 TEST_PGUSER=postgres \
+TEST_PGDATABASE=postgres PGPASSWORD=postgres \
+PG16_BIN=/opt/homebrew/opt/postgresql@16/bin \
+bash scripts/verify_model_repo_schema_load.sh
+
+# Working directory: repository root; script creates PostgreSQL on 55433 and service on 8002
+bash scripts/validate_model_repo_readme_clean.sh
+```
+
+The clean README script preserves the existing service `.env`, uses a unique
+PostgreSQL 16 Docker container on host port 55433, starts the service on 8002,
+and removes only its container, temporary data, and logs. The migration
+scripts create and drop only their uniquely named disposable databases. Stop
+only the named SeaweedFS container after the S3 run:
+
+```bash
+# Working directory: repository root
+docker rm -f gen3-seaweedfs
+```
+
+Static repository checks:
+
+```bash
+# Working directory: repository root
+just markdown_lint
+just lint gen3_ai_model_repo
+just typecheck gen3_ai_model_repo
+just build gen3_ai_model_repo
+git diff --check
+```
+
+Local verification record (2026-10-20): 80 service tests passed; two live HF
+tests passed separately; lint, typecheck, and image build passed. These are
+dated local results, not a claim of KServe deployment or the reviewer's exact
+model validation.
+
 Run these commands from the repository root:
 
 ```bash
@@ -402,7 +620,12 @@ GEN3_AI_MODEL_REPO_TEST_DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5
 DEBUG_SKIP_AUTH=false uv run pytest -q tests
 ```
 
-The former live Hugging Face/Transformers service tests are not part of this
-repository. Their earlier successful run is historical manual verification;
-live-service integration coverage is intended for `gen3-code-vigil` when that
-repository is available.
+The opt-in real-client Hugging Face tests are in
+`tests/test_huggingface_upload_download.py`. They exercise `HfApi` and the
+`hf` CLI against a running service; they are not run by CI's default unit-test
+target and require PostgreSQL/storage endpoints. Run them explicitly with
+`HF_ENDPOINT=http://127.0.0.1:8000`, `HF_HUB_DISABLE_XET=true`, isolated HF
+caches, and `token=False`/an unset `HF_TOKEN`. The suite covers repository
+creation, preupload, LFS batch/proxy, commit, metadata/tree, resolve,
+repository-level `snapshot_download`, nested files, replacement, deletion,
+and exact bytes. Default Xet uploads remain unsupported.

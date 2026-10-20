@@ -44,7 +44,7 @@ class S3StorageProvider(StorageProvider):
             aws_access_key_id=access_key_id or None,
             aws_secret_access_key=secret_access_key or None,
             aws_session_token=session_token or None,
-            config=Config(s3={"addressing_style": "path"}),
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         )
 
     async def ensure_container(self):
