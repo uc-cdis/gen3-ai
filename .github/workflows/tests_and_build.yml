@@ -100,6 +100,7 @@ jobs:
   unit-test:
     name: Python Unit Test
     needs: [ security, post-commit-check ]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     env:
       # Kept current by `just update_versions`. To hold one back when the latest is broken, add
@@ -176,6 +177,7 @@ jobs:
     name: Build Image and Push - Gen3 Embeddings
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
+    if: ${{ !failure() && !cancelled() }}
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       DOCKERFILE_BUILD_CONTEXT: '.'
@@ -191,6 +193,7 @@ jobs:
     name: Build Image and Push - Gen3 Inference
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
+    if: ${{ !failure() && !cancelled() }}
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       BUILD_PLATFORMS: "linux/amd64"
@@ -207,6 +210,7 @@ jobs:
     name: Build Image and Push - Gen3 AI Model Repo
     uses: uc-cdis/.github/.github/workflows/image_build_push.yaml@master
     needs: [post-commit-check, security, unit-test]
+    if: ${{ !failure() && !cancelled() }}
     with:
       DOCKERFILE_LOCATION: "./Dockerfile.k8s"
       BUILD_PLATFORMS: "linux/amd64"
