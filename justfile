@@ -121,9 +121,19 @@ setup:
 
     missing=""
 
+    # Installed tools are compared against the versions pinned in these files (read from the
+    # working tree, so they follow the checked-out branch). Dockerfile.k8s pins dbmate but not uv,
+    # which comes from the base image as the latest release at its last rebuild. PostgreSQL is
+    # compared by major version using the `psql` client, since a server may not be running.
+    WORKFLOW=".github/workflows/tests_and_build.yml"
+    DOCKERFILE="./Dockerfile.k8s"
+
     print_header "just setup:" "verifying" "uv" "installation..."
     if command -v uv >/dev/null 2>&1; then
         echo "uv is installed. version: $(uv --version)"
+        pinned_uv=$(pinned_workflow_env "$WORKFLOW" UV_VERSION)
+        compare_local_version "uv" "$(uv --version | awk '{print $2}')" "$pinned_uv" "$WORKFLOW" \
+            "Update with: uv self update ${pinned_uv}"
     else
         echo -e "${YELLOW}** WARNING: uv not found in \$PATH. Installing... **${RESET}"
         if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
@@ -135,6 +145,9 @@ setup:
     print_header "just setup:" "verifying" "PostgreSQL client (psql)" "installation..."
     if command -v psql >/dev/null 2>&1; then
         echo "psql is installed. version: $(psql --version)"
+        local_pg_version=$(psql --version | awk '{print $3}')
+        compare_local_version "PostgreSQL (psql) major version" "${local_pg_version%%.*}" \
+            "$(pinned_pgvector_major "$WORKFLOW")" "the pgvector image in ${WORKFLOW}"
     else
         echo -e "${YELLOW}** WARNING: psql not found. Please install PostgreSQL. **${RESET}"
         missing="$missing psql"
@@ -143,6 +156,12 @@ setup:
     print_header "just setup:" "verifying" "dbmate" "installation..."
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
+        local_dbmate=$(dbmate --version 2>/dev/null | awk '{print $NF}')
+        dbmate_hint="See: https://github.com/amacneil/dbmate#installation"
+        compare_local_version "dbmate" "$local_dbmate" "$(pinned_workflow_env "$WORKFLOW" DBMATE_VERSION)" \
+            "$WORKFLOW" "$dbmate_hint"
+        compare_local_version "dbmate" "$local_dbmate" "$(pinned_dockerfile_arg "$DOCKERFILE" DBMATE_VERSION)" \
+            "$DOCKERFILE" "$dbmate_hint"
     else
         echo -e "${YELLOW}** WARNING: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
         missing="$missing dbmate"

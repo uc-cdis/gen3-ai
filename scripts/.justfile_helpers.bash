@@ -169,3 +169,50 @@ set_postgres_admin_defaults() {
     export DB_MIGRATION_PASSWORD="${PGPASSWORD:-}"
   fi
 }
+
+# Value of NAME in a workflow file's top-level `env:` block, without a leading `v`. Only reads a
+# two-space-indented `NAME: 'value'` line, the single-quoted form `just update_versions` writes.
+# Arguments: workflow file, env var name.
+pinned_workflow_env() {
+  sed -n '/^env:/,/^[^[:space:]#]/p' "$1" |
+    grep -m1 -E "^  $2:[[:space:]]*'[^']*'" |
+    sed -E "s/^  $2:[[:space:]]*'v?([^']*)'.*/\1/"
+}
+
+# `ARG NAME=value` in a Dockerfile, without a leading `v` or a trailing comment.
+# Arguments: Dockerfile, arg name.
+pinned_dockerfile_arg() {
+  grep -m1 -E "^ARG $2=" "$1" | sed -E "s/^ARG $2=v?([^[:space:]]*).*/\1/"
+}
+
+# Major version in the tag of the first pgvector image in a workflow file.
+# Arguments: workflow file.
+pinned_pgvector_major() {
+  grep -m1 -E "image: .*pgvector:" "$1" | sed -E 's/.*:([0-9]+).*/\1/'
+}
+
+# Warn when a locally installed tool's version differs from a version the repo pins.
+# Arguments: tool name, local version, pinned version, where it is pinned, and an optional hint
+# for how to update.
+compare_local_version() {
+  local tool=$1
+  local local_version=$2
+  local pinned_version=$3
+  local source=$4
+  local hint=${5:+ $5}
+
+  if [[ -z $local_version || -z $pinned_version ]]; then
+    echo -e "${YELLOW}** WARNING: could not compare local ${tool} (local: '${local_version:-?}', ${source}: '${pinned_version:-?}') **${RESET}"
+    return 0
+  fi
+  if [[ $local_version == "$pinned_version" ]]; then
+    echo "local ${tool} ${local_version} matches ${source}."
+    return 0
+  fi
+
+  local relation="newer than"
+  if [[ $(printf '%s\n%s\n' "$local_version" "$pinned_version" | sort -V | head -1) == "$local_version" ]]; then
+    relation="older than"
+  fi
+  echo -e "${YELLOW}** WARNING: local ${tool} ${local_version} is ${relation} ${pinned_version} in ${source}.${hint} **${RESET}"
+}
