@@ -1,6 +1,10 @@
 name: Integration Tests
 
-on: pull_request
+on:
+  pull_request:
+    # opened, synchronize and reopened are the defaults. ready_for_review is added so
+    # automated draft PRs, which have to be marked ready by a person, also trigger this
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   integration_tests:
@@ -8,6 +12,10 @@ jobs:
     uses: uc-cdis/.github/.github/workflows/integration_tests.yaml@master
     with:
       SERVICE_TO_TEST: gen3_embeddings
+      # Quay repos for images built by this repo that CI deploys (comma-separated)
+      # TODO: add gen3_ai_model_repo once it has CI values in gen3-gitops ci/default
+      #       and a chart on HELM_BRANCH
+      QUAY_REPO: gen3_embeddings
       # TODO: remove the below once we merge helm and test updates
       TEST_REPO_BRANCH: chore/test_gen3_embedding
       HELM_BRANCH: feat/gen3-embeddings

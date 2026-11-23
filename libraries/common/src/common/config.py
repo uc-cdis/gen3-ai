@@ -89,7 +89,6 @@ GEN3_AI_MODEL_REPO_URL = starlette_config(
     "GEN3_AI_MODEL_REPO_URL", default="http://gen3-ai-model-repo-service", cast=str
 )
 GEN3_EMBEDDINGS_URL = starlette_config("GEN3_EMBEDDINGS_URL", default="http://gen3-embeddings-service", cast=str)
-GEN3_INFERENCE_URL = starlette_config("GEN3_INFERENCE_URL", default="http://gen3-inference-service", cast=str)
 
 # Endpoints that exist to be polled or fetched by a browser, and are not worth observability
 # (metrics or tracing).

@@ -5,19 +5,16 @@
 
 set dotenv-load
 
-SERVICES := "gen3_embeddings gen3_inference gen3_ai_model_repo"
+SERVICES := "gen3_embeddings gen3_ai_model_repo"
 LIBRARIES := "common"
 PARALLEL := "true"
 
-# Services type-checked by `just typecheck` and `just lint`. gen3_inference is omitted
-# because it does not typecheck clean. Run `just typecheck gen3_inference` to see what is
-# outstanding.
-# TODO / FIXME: add it back here once it passes.
+# Services type-checked by `just typecheck` and `just lint`.
 TYPECHECK_SERVICES := "gen3_embeddings gen3_ai_model_repo"
 
 # Services with a database, which `just db_setup`, `db_load`, `db_migrate` and `db_rollback`
-# cover when no SERVICE is given. gen3_inference has none, and gen3_ai_model_repo has none yet
-# (it has no db/ folder), so running them for it would only create an empty database.
+# cover when no SERVICE is given. gen3_ai_model_repo has none yet (it has no db/ folder),
+# so running them for it would only create an empty database.
 DB_SERVICES := "gen3_embeddings"
 
 # Pinned to match avto-dev/markdown-lint@v1.5.0, which CI uses.
@@ -375,11 +372,6 @@ db_setup SERVICE="all": _check_dependencies
         fi
     else
         source scripts/.justfile_helpers.bash
-        if [ "{{SERVICE}}" = "gen3_inference" ]; then
-            print_header "just db_setup:" "No db needed for" "{{SERVICE}}" "service. Skipping."
-            exit 0
-        fi
-
         DIR="services/{{SERVICE}}"
         if [ ! -d "$DIR" ]; then
             echo -e "${RED}** ERROR: Directory '$DIR' not found **${RESET}"
@@ -651,6 +643,9 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         print_header "just lint:" "ruff check" "$TARGET" "..."
         uv run --directory "$TARGET" ruff check . --fix {{EXTRA_ARG}}
 
+        print_header "just lint:" "docstring Args: check" "$TARGET" "..."
+        uv run --directory "$TARGET" python "{{justfile_directory()}}/scripts/check_docstring_args.py" src
+
         just sql_lint "{{SERVICE}}"
 
         # `lint` recurses per-service, so this branch would type-check every service by
@@ -831,7 +826,6 @@ _run_dbmate SERVICE ACTION ARGS="" KIND="schema":
     source scripts/.justfile_helpers.bash
     DIR="services/{{SERVICE}}"
 
-    if [ "{{SERVICE}}" = "gen3_inference" ]; then exit 0; fi
     if [ ! -d "$DIR" ]; then
         echo -e "${RED}** ERROR: '$DIR' does not exist **${RESET}"
         exit 1

@@ -153,8 +153,10 @@ async def test_database():
     dbmate_env = os.environ.copy()
     dbmate_env["DATABASE_URL"] = _admin_dsn(db_name) + "?sslmode=disable"
 
+    # --no-dump-schema: `migrate` otherwise overwrites the committed db/schema.sql (cwd-relative
+    # default) with a pg_dump of this throwaway database.
     subprocess.run(
-        ["dbmate", "--migrations-dir", str(migrations_dir), "migrate"],
+        ["dbmate", "--migrations-dir", str(migrations_dir), "--no-dump-schema", "migrate"],
         check=True,
         cwd=root_dir,
         env=dbmate_env,
