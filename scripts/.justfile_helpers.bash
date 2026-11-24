@@ -185,10 +185,11 @@ pinned_dockerfile_arg() {
   grep -m1 -E "^ARG $2=" "$1" | sed -E "s/^ARG $2=v?([^[:space:]]*).*/\1/"
 }
 
-# Major version in the tag of the first pgvector image in a workflow file.
+# Major version in the tag of the first pgvector image in a workflow file. Prints nothing when the
+# tag does not start with a number (e.g. `pg16`).
 # Arguments: workflow file.
 pinned_pgvector_major() {
-  grep -m1 -E "image: .*pgvector:" "$1" | sed -E 's/.*:([0-9]+).*/\1/'
+  grep -m1 -E "image: .*pgvector:" "$1" | sed -nE 's/.*:([0-9]+).*/\1/p'
 }
 
 # Warn when a locally installed tool's version differs from a version the repo pins.
