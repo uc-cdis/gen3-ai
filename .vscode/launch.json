@@ -2,28 +2,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "gen3_inference",
-            "type": "debugpy",
-            "request": "launch",
-            "python": "${workspaceFolder}/services/gen3_inference/.venv/bin/python",
-            "module": "uvicorn",
-            "args": [
-                "gen3_inference.main:app_instance",
-                "--reload",
-                "--reload-dir",
-                "./services/gen3_inference/src/gen3_inference",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--env-file",
-                ".env",
-                "--app-dir",
-                "./services/gen3_inference/src/gen3_inference"
-            ],
-            "jinja": true
-        },
-        {
             "name": "gen3_embeddings",
             "type": "debugpy",
             "request": "launch",

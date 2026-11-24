@@ -5,19 +5,16 @@
 
 set dotenv-load
 
-SERVICES := "gen3_embeddings gen3_inference gen3_ai_model_repo"
+SERVICES := "gen3_embeddings gen3_ai_model_repo"
 LIBRARIES := "common"
 PARALLEL := "true"
 
-# Services type-checked by `just typecheck` and `just lint`. gen3_inference is omitted
-# because it does not typecheck clean. Run `just typecheck gen3_inference` to see what is
-# outstanding.
-# TODO / FIXME: add it back here once it passes.
+# Services type-checked by `just typecheck` and `just lint`.
 TYPECHECK_SERVICES := "gen3_embeddings gen3_ai_model_repo"
 
 # Services with a database, which `just db_setup`, `db_load`, `db_migrate` and `db_rollback`
-# cover when no SERVICE is given. gen3_inference has none, and gen3_ai_model_repo has none yet
-# (it has no db/ folder), so running them for it would only create an empty database.
+# cover when no SERVICE is given. gen3_ai_model_repo has none yet (it has no db/ folder),
+# so running them for it would only create an empty database.
 DB_SERVICES := "gen3_embeddings"
 
 # Pinned to match avto-dev/markdown-lint@v1.5.0, which CI uses.
@@ -124,9 +121,19 @@ setup:
 
     missing=""
 
+    # Installed tools are compared against the versions pinned in these files (read from the
+    # working tree, so they follow the checked-out branch). Dockerfile.k8s pins dbmate but not uv,
+    # which comes from the base image as the latest release at its last rebuild. PostgreSQL is
+    # compared by major version using the `psql` client, since a server may not be running.
+    WORKFLOW=".github/workflows/tests_and_build.yml"
+    DOCKERFILE="./Dockerfile.k8s"
+
     print_header "just setup:" "verifying" "uv" "installation..."
     if command -v uv >/dev/null 2>&1; then
         echo "uv is installed. version: $(uv --version)"
+        pinned_uv=$(pinned_workflow_env "$WORKFLOW" UV_VERSION)
+        compare_local_version "uv" "$(uv --version | awk '{print $2}')" "$pinned_uv" "$WORKFLOW" \
+            "Update with: uv self update ${pinned_uv}"
     else
         echo -e "${YELLOW}** WARNING: uv not found in \$PATH. Installing... **${RESET}"
         if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
@@ -138,6 +145,9 @@ setup:
     print_header "just setup:" "verifying" "PostgreSQL client (psql)" "installation..."
     if command -v psql >/dev/null 2>&1; then
         echo "psql is installed. version: $(psql --version)"
+        local_pg_version=$(psql --version | awk '{print $3}')
+        compare_local_version "PostgreSQL (psql) major version" "${local_pg_version%%.*}" \
+            "$(pinned_pgvector_major "$WORKFLOW")" "the pgvector image in ${WORKFLOW}"
     else
         echo -e "${YELLOW}** WARNING: psql not found. Please install PostgreSQL. **${RESET}"
         missing="$missing psql"
@@ -146,6 +156,12 @@ setup:
     print_header "just setup:" "verifying" "dbmate" "installation..."
     if command -v dbmate >/dev/null 2>&1; then
         echo "dbmate is installed. version: $(dbmate --version)"
+        local_dbmate=$(dbmate --version 2>/dev/null | awk '{print $NF}')
+        dbmate_hint="See: https://github.com/amacneil/dbmate#installation"
+        compare_local_version "dbmate" "$local_dbmate" "$(pinned_workflow_env "$WORKFLOW" DBMATE_VERSION)" \
+            "$WORKFLOW" "$dbmate_hint"
+        compare_local_version "dbmate" "$local_dbmate" "$(pinned_dockerfile_arg "$DOCKERFILE" DBMATE_VERSION)" \
+            "$DOCKERFILE" "$dbmate_hint"
     else
         echo -e "${YELLOW}** WARNING: dbmate not found. See: https://github.com/amacneil/dbmate#installation **${RESET}"
         missing="$missing dbmate"
@@ -375,11 +391,6 @@ db_setup SERVICE="all": _check_dependencies
         fi
     else
         source scripts/.justfile_helpers.bash
-        if [ "{{SERVICE}}" = "gen3_inference" ]; then
-            print_header "just db_setup:" "No db needed for" "{{SERVICE}}" "service. Skipping."
-            exit 0
-        fi
-
         DIR="services/{{SERVICE}}"
         if [ ! -d "$DIR" ]; then
             echo -e "${RED}** ERROR: Directory '$DIR' not found **${RESET}"
@@ -651,6 +662,9 @@ lint SERVICE="all" EXTRA_ARG="": _check_dependencies
         print_header "just lint:" "ruff check" "$TARGET" "..."
         uv run --directory "$TARGET" ruff check . --fix {{EXTRA_ARG}}
 
+        print_header "just lint:" "docstring Args: check" "$TARGET" "..."
+        uv run --directory "$TARGET" python "{{justfile_directory()}}/scripts/check_docstring_args.py" src
+
         just sql_lint "{{SERVICE}}"
 
         # `lint` recurses per-service, so this branch would type-check every service by
@@ -831,7 +845,6 @@ _run_dbmate SERVICE ACTION ARGS="" KIND="schema":
     source scripts/.justfile_helpers.bash
     DIR="services/{{SERVICE}}"
 
-    if [ "{{SERVICE}}" = "gen3_inference" ]; then exit 0; fi
     if [ ! -d "$DIR" ]; then
         echo -e "${RED}** ERROR: '$DIR' does not exist **${RESET}"
         exit 1

@@ -22,11 +22,10 @@ See the [API documentation](https://uc-cdis.github.io/gen3-ai/api.html) or the [
   - Similarity search over embeddings
   - Row-level authorization
   - Authorization and access control using Gen3 tokens
-- [Work in progress] **Gen3 Inference**
-  - Adopts [Open Responses](https://openresponses.org) standard interface for AI Model inference (both non-streaming and streaming support)
-  - Supports mesh-like connections to other Gen3 instances to proxy requests
-  - Highly configurable, can also connect to public cloud services
-  - Authorization and access control using Gen3 tokens
+- [Planned] **AI Model Inference** (built from existing tools rather than a Gen3 service in this repo)
+  - [Bifrost](https://github.com/maximhq/bifrost) as the AI gateway that inference requests go through
+  - Gen3 tokens are exchanged for Bifrost tokens through Gen3 Auth services, so access stays under Gen3 authorization
+  - [KServe](https://github.com/kserve/kserve) serves models behind the gateway, using the Gen3 AI Model Repository for model storage
 - [Work in progress] **Gen3 AI Model Repository**
   - AI model management in your own infrastructure (no relying on Hugging Face)
   - API exposed is compatible with tools that interact with Hugging Face
@@ -151,11 +150,11 @@ just lint
 
 # specific directory
 just lint libraries/common
-just lint services/gen3_inference
+just lint services/gen3_embeddings
 
 # verbose output
 just lint all -v
-just lint services/gen3_inference -v
+just lint services/gen3_embeddings -v
 ```
 
 Note that the pre-commit in this repo relies on `just` commands and is relatively aggressive compared to other Gen3 repos. We strictly enforce formatting and other checks.

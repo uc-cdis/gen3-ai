@@ -31,17 +31,13 @@ global:
 # Here it's Prometheus itself.
 scrape_configs:
   # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
-  - job_name: 'gen3_inference'
+  - job_name: 'gen3_ai_model_repo'
 
-    # Override the global default and scrape targets from this job every 5 seconds.
+    # Override the global default and scrape targets from this job every 10 seconds.
     scrape_interval: 10s
 
     static_configs:
       # NOTE: The `host.docker.internal` below is so docker on MacOS can properly find the locally running service
-      - targets: [ 'host.docker.internal:8000' ]
-
-  - job_name: 'gen3_ai_model_repo'
-    static_configs:
       - targets: [ 'host.docker.internal:8001' ]
   - job_name: 'gen3_embeddings'
     static_configs:
@@ -52,7 +48,6 @@ Every service binds `8000` by default, so scraping several at once means giving 
 port when you start it:
 
 ```bash
-just run gen3_inference 8000
 just run gen3_ai_model_repo 8001
 just run gen3_embeddings 8002
 ```
@@ -71,5 +66,5 @@ Then go to [http://127.0.0.1:9090](http://127.0.0.1:9090).
 And some recommended PromQL queries:
 
 ```promql
-sum by (status_code) (gen3_inference_api_requests_total)
+sum by (status_code) (gen3_embeddings_api_requests_total)
 ```

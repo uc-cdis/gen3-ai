@@ -66,6 +66,9 @@ class Embedding:
         This normalizes:
         - metadata:  string -> dict (JSON)
 
+        Args:
+            row (asyncpg.Record): A row from the embeddings table.
+
         Returns:
             Self: The Embedding built from `row`.
         """

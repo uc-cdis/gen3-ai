@@ -12,7 +12,6 @@ Ensure you have the Python interpreter in VS Code set to the service `.venv/bin/
 
 Go to the "Run and Debug" pane and you should see each of the services available to run:
 
-- `gen3_inference`
 - `gen3_embeddings`
 - `gen3_ai_model_repo`
 

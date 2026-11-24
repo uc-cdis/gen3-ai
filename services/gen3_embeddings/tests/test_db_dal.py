@@ -359,7 +359,7 @@ class TestRlsDenialOrReraise:
         """
         exc = InsufficientPrivilegeError(RLS_VIOLATION_MESSAGE)
         # asyncpg's metaclass adds the field attributes at runtime, so ty cannot see them
-        assert exc.message is None  # ty: ignore[unresolved-attribute]
+        assert exc.message is None  # ty: ignore[missing-attribute]
         assert isinstance(_rls_denial_or_reraise(exc), RowLevelSecurityDeniedError)
 
 

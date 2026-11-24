@@ -232,7 +232,7 @@ CLAUDE.md
 # is reflected in the service's own uv.lock, which IS checked in.
 libraries/*/uv.lock
 
-# gen3_inference
+# local data stores, caches, profiling output and other artifacts
 knowledge/
 *.sqlite3
 chroma/

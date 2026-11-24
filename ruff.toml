@@ -81,7 +81,7 @@ extend-select = [
 
     # D417 undocumented-param: every parameter appears in the `Args:` section. A weird quirk:
     # This only validates a section that already exists - it does not require one. so a docstring with
-    # no `Args:` at all still passes.
+    # no `Args:` at all still passes. `scripts/check_docstring_args.py`, run by `just lint`, covers that case.
     "D417",
 
     ## pydoclint: the docstring matches what the body actually does. Every DOC rule is
@@ -160,4 +160,4 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [lint.isort]
-known-first-party = ["common", "gen3_inference", "gen3_embeddings", "gen3_ai_model_repo"]
+known-first-party = ["common", "gen3_embeddings", "gen3_ai_model_repo"]
